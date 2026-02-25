@@ -1,0 +1,249 @@
+from flask import Blueprint, request, jsonify
+from services.firebase_service import FirebaseService
+from routes.auth import token_required
+
+content_bp = Blueprint('content', __name__)
+
+# --- Content Items ---
+
+@content_bp.route('', methods=['GET'])
+@token_required
+def get_content(current_user):
+    """Get all content items"""
+    try:
+        content = FirebaseService.get_all_content()
+        return jsonify({
+            'success': True,
+            'content': content
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@content_bp.route('', methods=['POST'])
+@token_required
+def create_content(current_user):
+    """Create a new content item"""
+    try:
+        data = request.get_json()
+
+        # Validate required fields
+        required_fields = ['title', 'type', 'topic', 'language']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({
+                    'success': False,
+                    'error': f'Missing required field: {field}'
+                }), 400
+
+        # Create content
+        content = FirebaseService.create_content({
+            'title': data['title'],
+            'type': data['type'],
+            'topic': data['topic'],
+            'language': data['language'],
+            'content_text': data.get('content_text', ''),
+            'file_name': data.get('file_name', '')
+        })
+
+        return jsonify({
+            'success': True,
+            'content': content,
+            'message': 'Content created successfully'
+        }), 201
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@content_bp.route('/<content_id>', methods=['PUT'])
+@token_required
+def update_content(current_user, content_id):
+    """Update a content item"""
+    try:
+        data = request.get_json()
+
+        # Check if content exists
+        content = FirebaseService.get_content(content_id)
+        if not content:
+            return jsonify({
+                'success': False,
+                'error': 'Content not found'
+            }), 404
+
+        # Update allowed fields
+        update_data = {}
+        allowed_fields = ['title', 'type', 'topic', 'language', 'content_text', 'file_name']
+        for field in allowed_fields:
+            if field in data:
+                update_data[field] = data[field]
+
+        if not update_data:
+            return jsonify({
+                'success': False,
+                'error': 'No valid fields to update'
+            }), 400
+
+        # Update content
+        updated_content = FirebaseService.update_content(content_id, update_data)
+
+        return jsonify({
+            'success': True,
+            'content': updated_content,
+            'message': 'Content updated successfully'
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@content_bp.route('/<content_id>', methods=['DELETE'])
+@token_required
+def delete_content(current_user, content_id):
+    """Delete a content item"""
+    try:
+        # Check if content exists
+        content = FirebaseService.get_content(content_id)
+        if not content:
+            return jsonify({
+                'success': False,
+                'error': 'Content not found'
+            }), 404
+
+        # Delete content
+        FirebaseService.delete_content(content_id)
+
+        return jsonify({
+            'success': True,
+            'message': 'Content deleted successfully'
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+# --- URL Resources ---
+
+@content_bp.route('/urls', methods=['GET'])
+@token_required
+def get_urls(current_user):
+    """Get all URL resources"""
+    try:
+        urls = FirebaseService.get_all_urls()
+        return jsonify({
+            'success': True,
+            'urls': urls
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@content_bp.route('/urls', methods=['POST'])
+@token_required
+def create_url(current_user):
+    """Create a new URL resource"""
+    try:
+        data = request.get_json()
+
+        # Validate required fields
+        required_fields = ['url', 'title']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({
+                    'success': False,
+                    'error': f'Missing required field: {field}'
+                }), 400
+
+        # Create URL resource
+        url = FirebaseService.create_url({
+            'url': data['url'],
+            'title': data['title'],
+            'description': data.get('description', ''),
+            'instructions': data.get('instructions', '')
+        })
+
+        return jsonify({
+            'success': True,
+            'url': url,
+            'message': 'URL resource created successfully'
+        }), 201
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@content_bp.route('/urls/<url_id>', methods=['PUT'])
+@token_required
+def update_url(current_user, url_id):
+    """Update a URL resource"""
+    try:
+        data = request.get_json()
+
+        # Check if URL exists
+        url = FirebaseService.get_url(url_id)
+        if not url:
+            return jsonify({
+                'success': False,
+                'error': 'URL resource not found'
+            }), 404
+
+        # Update allowed fields
+        update_data = {}
+        allowed_fields = ['url', 'title', 'description', 'instructions']
+        for field in allowed_fields:
+            if field in data:
+                update_data[field] = data[field]
+
+        if not update_data:
+            return jsonify({
+                'success': False,
+                'error': 'No valid fields to update'
+            }), 400
+
+        # Update URL
+        updated_url = FirebaseService.update_url(url_id, update_data)
+
+        return jsonify({
+            'success': True,
+            'url': updated_url,
+            'message': 'URL resource updated successfully'
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@content_bp.route('/urls/<url_id>', methods=['DELETE'])
+@token_required
+def delete_url(current_user, url_id):
+    """Delete a URL resource"""
+    try:
+        # Check if URL exists
+        url = FirebaseService.get_url(url_id)
+        if not url:
+            return jsonify({
+                'success': False,
+                'error': 'URL resource not found'
+            }), 404
+
+        # Delete URL
+        FirebaseService.delete_url(url_id)
+
+        return jsonify({
+            'success': True,
+            'message': 'URL resource deleted successfully'
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500

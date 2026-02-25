@@ -1,0 +1,164 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Teko Design System - NGO Operations Tool
+   Matching existing triggr visual language exactly
+   All colors in HSL format
+*/
+
+@layer base {
+  :root {
+    /* Core backgrounds */
+    --background: 220 20% 97%;
+    --foreground: 224 30% 18%;
+
+    /* Cards and surfaces */
+    --card: 0 0% 100%;
+    --card-foreground: 224 30% 18%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 30% 18%;
+
+    /* Primary - Vibrant Blue (matches screenshot buttons) */
+    --primary: 231 90% 64%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary - Light gray surfaces */
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 224 30% 18%;
+
+    /* Muted text and backgrounds */
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+
+    /* Accent - subtle highlights */
+    --accent: 220 14% 96%;
+    --accent-foreground: 224 30% 18%;
+
+    /* Status colors matching screenshots */
+    --success: 152 69% 45%;
+    --success-foreground: 0 0% 100%;
+    --success-light: 152 69% 95%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --warning-light: 38 92% 95%;
+
+    --destructive: 4 80% 63%;
+    --destructive-foreground: 0 0% 100%;
+    --destructive-light: 4 80% 95%;
+
+    --info: 199 89% 48%;
+    --info-foreground: 0 0% 100%;
+    --info-light: 199 89% 95%;
+
+    /* Borders and inputs */
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 231 90% 64%;
+
+    --radius: 0.75rem;
+
+    /* Sidebar - matching screenshot sidebar */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 220 9% 46%;
+    --sidebar-primary: 231 90% 64%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 231 90% 97%;
+    --sidebar-accent-foreground: 231 90% 64%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 231 90% 64%;
+
+    /* Chart colors for reports */
+    --chart-1: 231 90% 64%;
+    --chart-2: 152 69% 45%;
+    --chart-3: 38 92% 50%;
+    --chart-4: 4 80% 63%;
+    --chart-5: 270 70% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  /* Typography */
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight text-foreground;
+  }
+}
+
+@layer components {
+  /* Status card variants */
+  .status-card {
+    @apply bg-card rounded-xl p-4 border border-border shadow-sm transition-all hover:shadow-md cursor-pointer;
+  }
+
+  .status-card-scheduled {
+    @apply border-l-4 border-l-info;
+  }
+
+  .status-card-success {
+    @apply border-l-4 border-l-success;
+  }
+
+  .status-card-warning {
+    @apply border-l-4 border-l-warning;
+  }
+
+  .status-card-error {
+    @apply border-l-4 border-l-destructive;
+  }
+
+  /* Calendar cell styles */
+  .calendar-cell {
+    @apply min-h-[80px] p-2 border border-border bg-card hover:bg-muted/50 transition-colors;
+  }
+
+  .calendar-cell-today {
+    @apply bg-primary/5 border-primary/30;
+  }
+
+  .calendar-cell-past {
+    @apply bg-muted/30;
+  }
+
+  /* Coach/entity cards */
+  .entity-card {
+    @apply bg-card rounded-xl p-5 border border-border shadow-sm hover:shadow-md transition-all;
+  }
+
+  /* Avatar with initials */
+  .avatar-initials {
+    @apply flex items-center justify-center rounded-full font-semibold text-white;
+  }
+
+  /* Badge variants */
+  .badge-coach {
+    @apply bg-primary/10 text-primary text-xs font-medium px-2.5 py-0.5 rounded-full;
+  }
+
+  .badge-student {
+    @apply bg-success/10 text-success text-xs font-medium px-2.5 py-0.5 rounded-full;
+  }
+
+  /* Page header */
+  .page-header {
+    @apply flex items-center justify-between mb-6;
+  }
+
+  .page-title {
+    @apply text-2xl font-bold text-foreground;
+  }
+
+  .page-subtitle {
+    @apply text-muted-foreground text-sm mt-0.5;
+  }
+}
