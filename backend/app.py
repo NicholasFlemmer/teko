@@ -1,6 +1,8 @@
 import os
+import atexit
 from flask import Flask, jsonify
 from flask_cors import CORS
+from apscheduler.schedulers.background import BackgroundScheduler
 from config import Config
 from routes.auth import auth_bp
 from routes.coaches import coaches_bp
@@ -59,6 +61,29 @@ app.register_blueprint(reports_bp, url_prefix='/api/reports')
 app.register_blueprint(reminders_bp, url_prefix='/api/reminders')
 app.register_blueprint(admin_bp, url_prefix='/api/admin')
 app.register_blueprint(uploads_bp, url_prefix='/api/uploads')
+
+# Background scheduler for automated reminders & missed-session marking.
+# Guard: only start once (avoid duplicate jobs when gunicorn preloads or reloads).
+if not app.config.get('SCHEDULER_STARTED'):
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(
+        func=SchedulerService.check_and_send_reminders,
+        trigger='interval',
+        minutes=1,
+        id='check_reminders',
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        func=SchedulerService.mark_missed_sessions,
+        trigger='interval',
+        minutes=30,
+        id='mark_missed',
+        replace_existing=True,
+    )
+    scheduler.start()
+    atexit.register(lambda: scheduler.shutdown())
+    app.config['SCHEDULER_STARTED'] = True
+    print("Automated reminder scheduler started (every 1 min)")
 
 @app.route('/')
 def index():
@@ -144,13 +169,26 @@ def whatsapp_webhook():
                             # Handle incoming messages
                             if 'messages' in value:
                                 from services.conversation_service import ConversationService
+                                from services.whatsapp_service import WhatsAppService
                                 for message in value['messages']:
                                     from_number = message.get('from')
                                     message_id = message.get('id')
                                     message_type = message.get('type')
-                                    
+
                                     print(f"📨 Received {message_type} message from {from_number}")
-                                    
+
+                                    # Immediately mark as read (blue ticks) and show typing
+                                    # Best-effort: failures must not block message processing
+                                    try:
+                                        WhatsAppService.mark_as_read(message_id)
+                                    except Exception as e:
+                                        print(f"⚠️ mark_as_read exception: {e}")
+
+                                    try:
+                                        WhatsAppService.send_typing_indicator(message_id)
+                                    except Exception as e:
+                                        print(f"⚠️ typing indicator exception: {e}")
+
                                     # Handle text messages with AI
                                     if message_type == 'text':
                                         message_text = message.get('text', {}).get('body', '')
@@ -160,8 +198,15 @@ def whatsapp_webhook():
                                                 message_text=message_text,
                                                 message_id=message_id
                                             )
+                                    elif message_type == 'location':
+                                        location_data = message.get('location', {})
+                                        ConversationService.handle_location_check_in(
+                                            from_number=from_number,
+                                            latitude=location_data.get('latitude'),
+                                            longitude=location_data.get('longitude'),
+                                            message_id=message_id
+                                        )
                                     else:
-                                        # For now, only handle text messages
                                         print(f"⏭️ Skipping {message_type} message (not supported yet)")
             
             return jsonify({'status': 'success'}), 200

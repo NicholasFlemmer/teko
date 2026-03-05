@@ -21,12 +21,19 @@ class Config:
     
     # WhatsApp Business API
     WHATSAPP_API_URL = os.getenv('WHATSAPP_API_URL', 'https://graph.facebook.com/v18.0').strip()
+    WHATSAPP_TYPING_API_URL = os.getenv('WHATSAPP_TYPING_API_URL', 'https://graph.facebook.com/v21.0').strip()
     WHATSAPP_API_KEY = os.getenv('WHATSAPP_API_KEY', '').strip()
     WHATSAPP_PHONE_NUMBER_ID = os.getenv('WHATSAPP_PHONE_NUMBER_ID', '').strip()
     WHATSAPP_VERIFY_TOKEN = os.getenv('WHATSAPP_CLOUD_VERIFY_TOKEN', 'teko-webhook-verify-token-2024').strip()
     
     # Gemini AI
     GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+
+    # Google Maps
+    GOOGLE_MAPS_API_KEY = os.getenv('GOOGLE_MAPS_API_KEY')
+
+    # WhatsApp Business Account ID (for fetching templates)
+    WHATSAPP_WABA_ID = os.getenv('WHATSAPP_WABA_ID')
     
     # Frontend URL (for CORS)
     FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:8080')
@@ -35,6 +42,10 @@ class Config:
     CHECK_IN_TOKEN_EXPIRY_MINUTES = int(os.getenv('CHECK_IN_TOKEN_EXPIRY_MINUTES', '30'))
     GEOLOCATION_RADIUS_METERS = int(os.getenv('GEOLOCATION_RADIUS_METERS', '100'))
     REMINDER_MINUTES_BEFORE = int(os.getenv('REMINDER_MINUTES_BEFORE', '10'))
+
+    # Reminder template (approved WhatsApp template name for session reminders)
+    REMINDER_TEMPLATE_NAME = os.getenv('REMINDER_TEMPLATE_NAME', 'teko_session_reminder')
+    REMINDER_TEMPLATE_LANGUAGE = os.getenv('REMINDER_TEMPLATE_LANGUAGE', 'en_US')
     
     # JWT
     JWT_EXPIRY_HOURS = int(os.getenv('JWT_EXPIRY_HOURS', '24'))
