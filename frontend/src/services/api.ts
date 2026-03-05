@@ -34,7 +34,12 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     throw new Error('Unauthorized');
   }
 
-  const data = await response.json();
+  let data: any;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(`Server error (${response.status})`);
+  }
 
   if (!response.ok) {
     throw new Error(data.error || 'Request failed');
@@ -133,6 +138,7 @@ export const locationsAPI = {
 export const broadcastsAPI = {
   getAll: () => request<{ success: boolean; broadcasts: any[] }>('/api/broadcasts'),
   send: (data: any) => request<{ success: boolean; broadcast: any }>('/api/broadcasts', { method: 'POST', body: JSON.stringify(data) }),
+  getTemplates: () => request<{ success: boolean; templates: any[] }>('/api/broadcasts/templates'),
 };
 
 // Content

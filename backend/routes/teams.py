@@ -51,7 +51,7 @@ def create_team(current_user):
         data = request.get_json()
 
         # Validate required fields
-        required_fields = ['name', 'age_group', 'location_id', 'coach_ids']
+        required_fields = ['name', 'age_group']
         for field in required_fields:
             if field not in data:
                 return jsonify({
@@ -63,8 +63,8 @@ def create_team(current_user):
         team = FirebaseService.create_team({
             'name': data['name'],
             'age_group': data['age_group'],
-            'location_id': data['location_id'],
-            'coach_ids': data['coach_ids']
+            'location_id': data.get('location_id', ''),
+            'coach_ids': data.get('coach_ids', [])
         })
 
         return jsonify({

@@ -11,10 +11,10 @@ admin_bp = Blueprint('admin', __name__)
 def get_admin_users(current_user):
     """Get all admin users"""
     try:
-        users = FirebaseService.get_all_admin_users()
+        users = FirebaseService.get_all_admins()
         return jsonify({
             'success': True,
-            'users': users
+            'admins': users
         }), 200
     except Exception as e:
         return jsonify({
@@ -39,7 +39,7 @@ def create_admin_user(current_user):
                 }), 400
 
         # Create admin user
-        user = FirebaseService.create_admin_user({
+        user = FirebaseService.create_admin({
             'name': data['name'],
             'email': data['email'],
             'password': data['password'],
@@ -48,7 +48,7 @@ def create_admin_user(current_user):
 
         return jsonify({
             'success': True,
-            'user': user,
+            'admin': user,
             'message': 'Admin user created successfully'
         }), 201
     except Exception as e:
@@ -65,7 +65,7 @@ def update_admin_user(current_user, admin_id):
         data = request.get_json()
 
         # Check if admin user exists
-        user = FirebaseService.get_admin_user(admin_id)
+        user = FirebaseService.get_admin(admin_id)
         if not user:
             return jsonify({
                 'success': False,
@@ -86,11 +86,11 @@ def update_admin_user(current_user, admin_id):
             }), 400
 
         # Update admin user
-        updated_user = FirebaseService.update_admin_user(admin_id, update_data)
+        updated_user = FirebaseService.update_admin(admin_id, update_data)
 
         return jsonify({
             'success': True,
-            'user': updated_user,
+            'admin': updated_user,
             'message': 'Admin user updated successfully'
         }), 200
     except Exception as e:
@@ -105,7 +105,7 @@ def delete_admin_user(current_user, admin_id):
     """Delete an admin user"""
     try:
         # Check if admin user exists
-        user = FirebaseService.get_admin_user(admin_id)
+        user = FirebaseService.get_admin(admin_id)
         if not user:
             return jsonify({
                 'success': False,
@@ -113,7 +113,7 @@ def delete_admin_user(current_user, admin_id):
             }), 404
 
         # Delete admin user
-        FirebaseService.delete_admin_user(admin_id)
+        FirebaseService.delete_admin(admin_id)
 
         return jsonify({
             'success': True,
@@ -131,7 +131,7 @@ def toggle_admin_status(current_user, admin_id):
     """Toggle an admin user's active/suspended status"""
     try:
         # Check if admin user exists
-        user = FirebaseService.get_admin_user(admin_id)
+        user = FirebaseService.get_admin(admin_id)
         if not user:
             return jsonify({
                 'success': False,
@@ -142,11 +142,11 @@ def toggle_admin_status(current_user, admin_id):
         current_status = user.get('status', 'active')
         new_status = 'suspended' if current_status == 'active' else 'active'
 
-        updated_user = FirebaseService.update_admin_user(admin_id, {'status': new_status})
+        updated_user = FirebaseService.update_admin(admin_id, {'status': new_status})
 
         return jsonify({
             'success': True,
-            'user': updated_user,
+            'admin': updated_user,
             'message': f'Admin user status changed to {new_status}'
         }), 200
     except Exception as e:
@@ -162,7 +162,7 @@ def toggle_admin_status(current_user, admin_id):
 def get_settings(current_user):
     """Get system settings"""
     try:
-        settings = FirebaseService.get_system_settings()
+        settings = FirebaseService.get_settings()
         return jsonify({
             'success': True,
             'settings': settings
@@ -194,7 +194,7 @@ def update_settings(current_user):
             }), 400
 
         # Save settings
-        settings = FirebaseService.update_system_settings(update_data)
+        settings = FirebaseService.update_settings(update_data)
 
         return jsonify({
             'success': True,

@@ -13,13 +13,20 @@ def send_broadcast(current_user):
         data = request.get_json()
 
         # Validate required fields
-        required_fields = ['channel', 'message', 'recipient_ids']
+        required_fields = ['channel', 'recipient_ids']
         for field in required_fields:
             if field not in data:
                 return jsonify({
                     'success': False,
                     'error': f'Missing required field: {field}'
                 }), 400
+
+        # Either message or template_name is required
+        if not data.get('message') and not data.get('template_name'):
+            return jsonify({
+                'success': False,
+                'error': 'Either message or template_name is required'
+            }), 400
 
         # Validate channel
         channel = data['channel']
@@ -39,19 +46,39 @@ def send_broadcast(current_user):
         # Actually send messages via WhatsApp
         send_results = []
         failed_count = 0
+        template_name = data.get('template_name')
+        template_language = data.get('template_language', 'en_US')
+
         if channel == 'whatsapp':
             for coach_id in data['recipient_ids']:
                 coach = FirebaseService.get_coach(coach_id)
                 if coach:
                     phone = coach.get('phone_number') or coach.get('phone', '')
+                    coach_name = coach.get('name') or f"{coach.get('first_name', '')} {coach.get('last_name', '')}".strip() or 'Coach'
                     if phone:
-                        result = WhatsAppService.send_message(
-                            phone_number=phone,
-                            message_text=data['message']
-                        )
+                        if template_name:
+                            # Build template components with coach name + custom message
+                            components = data.get('template_components')
+                            if components is None:
+                                # Auto-fill: first param = coach name, second = message body
+                                body_params = [{"type": "text", "text": coach_name}]
+                                if data.get('message'):
+                                    body_params.append({"type": "text", "text": data['message']})
+                                components = [{"type": "body", "parameters": body_params}]
+                            result = WhatsAppService.send_template_message(
+                                phone_number=phone,
+                                template_name=template_name,
+                                language_code=template_language,
+                                components=components
+                            )
+                        else:
+                            result = WhatsAppService.send_message(
+                                phone_number=phone,
+                                message_text=data['message']
+                            )
                         send_results.append({
                             'coach_id': coach_id,
-                            'name': coach.get('name', coach.get('first_name', '')),
+                            'name': coach_name,
                             'success': result.get('success', False)
                         })
                         if not result.get('success'):
@@ -68,7 +95,8 @@ def send_broadcast(current_user):
         broadcast = FirebaseService.create_broadcast({
             'channel': channel,
             'subject': data.get('subject', ''),
-            'message': data['message'],
+            'message': data.get('message', ''),
+            'template_name': template_name or '',
             'recipient_ids': data['recipient_ids'],
             'sent_by': current_user,
             'send_results': send_results,
@@ -97,6 +125,28 @@ def get_broadcasts(current_user):
             'success': True,
             'broadcasts': broadcasts
         }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@broadcasts_bp.route('/templates', methods=['GET'])
+@token_required
+def get_templates(current_user):
+    """Fetch approved WhatsApp message templates from Meta"""
+    try:
+        result = WhatsAppService.get_message_templates()
+        if result.get('success'):
+            return jsonify({
+                'success': True,
+                'templates': result['templates']
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': result.get('error', 'Failed to fetch templates')
+            }), 500
     except Exception as e:
         return jsonify({
             'success': False,

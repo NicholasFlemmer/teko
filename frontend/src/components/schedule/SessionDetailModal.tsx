@@ -17,7 +17,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { MapPin, User, Calendar, Clock, FileText, Shield, Trash2, Loader2 } from "lucide-react";
+import { MapPin, User, Calendar, Clock, FileText, Shield, Trash2, Loader2, Bell } from "lucide-react";
+import { sessionsAPI } from "@/services/api";
+import { useToast } from "@/hooks/use-toast";
 
 interface Session {
   id: number;
@@ -40,8 +42,23 @@ interface SessionDetailModalProps {
 }
 
 export function SessionDetailModal({ open, onOpenChange, session, onDelete }: SessionDetailModalProps) {
+  const { toast } = useToast();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [sendingReminder, setSendingReminder] = useState(false);
+
+  const handleSendReminder = async () => {
+    if (!session) return;
+    setSendingReminder(true);
+    try {
+      await sessionsAPI.sendReminder(session.id.toString());
+      toast({ title: "Reminder sent", description: `WhatsApp reminder sent to ${session.coach}.` });
+    } catch (err: any) {
+      toast({ title: "Reminder failed", description: err.message || "Failed to send reminder.", variant: "destructive" });
+    } finally {
+      setSendingReminder(false);
+    }
+  };
 
   if (!session) return null;
 
@@ -146,9 +163,19 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete }: Se
               </div>
             </div>
 
-            {/* Delete button */}
-            {onDelete && (
-              <div className="pt-2 border-t border-border">
+            {/* Actions */}
+            <div className="pt-2 border-t border-border space-y-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full gap-2"
+                onClick={handleSendReminder}
+                disabled={sendingReminder}
+              >
+                {sendingReminder ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bell className="w-4 h-4" />}
+                {sendingReminder ? "Sending..." : "Send Reminder"}
+              </Button>
+              {onDelete && (
                 <Button
                   variant="destructive"
                   size="sm"
@@ -158,8 +185,8 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete }: Se
                   <Trash2 className="w-4 h-4" />
                   Delete Session
                 </Button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </DialogContent>
       </Dialog>

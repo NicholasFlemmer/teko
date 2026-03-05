@@ -106,7 +106,7 @@ class FirebaseService:
         notes, joined_date
         """
         allowed_fields = [
-            'first_name', 'last_name', 'email', 'phone_number', 'dob',
+            'name', 'first_name', 'last_name', 'email', 'phone_number', 'dob',
             'profile_picture', 'emergency_name', 'emergency_relationship',
             'emergency_phone', 'notes', 'joined_date'
         ]
@@ -231,11 +231,12 @@ class FirebaseService:
     def check_in_session(cls, session_id, check_in_data):
         """Update session with check-in data"""
         db = cls.get_db()
+        location_verified = check_in_data.get('location_verified', False)
         update_data = {
-            'status': 'checked_in',
+            'status': 'checked_in' if location_verified else 'missed',
             'check_in_time': firestore.SERVER_TIMESTAMP,
             'check_in_location': check_in_data.get('location', {}),
-            'location_verified': check_in_data.get('location_verified', False)
+            'location_verified': location_verified
         }
         doc_ref = db.collection('sessions').document(session_id)
         doc_ref.update(update_data)

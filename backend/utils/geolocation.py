@@ -1,3 +1,5 @@
+import re
+import requests
 from geopy.distance import geodesic
 from config import Config
 
@@ -62,11 +64,11 @@ def verify_location(actual_location, expected_location, radius_meters=None):
 
 def format_location(latitude, longitude):
     """Format location coordinates
-    
+
     Args:
         latitude: float
         longitude: float
-        
+
     Returns:
         dict: Formatted location
     """
@@ -74,3 +76,50 @@ def format_location(latitude, longitude):
         'latitude': float(latitude),
         'longitude': float(longitude)
     }
+
+
+def extract_coords_from_maps_url(url):
+    """Extract lat/lng from a Google Maps URL.
+
+    Returns:
+        dict with latitude/longitude or None
+    """
+    if not url:
+        return None
+    # @lat,lng
+    m = re.search(r'@(-?\d+\.?\d*),(-?\d+\.?\d*)', url)
+    if m:
+        return {'latitude': float(m.group(1)), 'longitude': float(m.group(2))}
+    # ?q=lat,lng
+    m = re.search(r'[?&]q=(-?\d+\.?\d*),(-?\d+\.?\d*)', url)
+    if m:
+        return {'latitude': float(m.group(1)), 'longitude': float(m.group(2))}
+    # /place/lat,lng
+    m = re.search(r'/place/(-?\d+\.?\d*),(-?\d+\.?\d*)', url)
+    if m:
+        return {'latitude': float(m.group(1)), 'longitude': float(m.group(2))}
+    return None
+
+
+def geocode_address(address):
+    """Geocode an address using Google Maps Geocoding API.
+
+    Returns:
+        dict with latitude/longitude or None
+    """
+    api_key = Config.GOOGLE_MAPS_API_KEY
+    if not api_key or not address or not address.strip():
+        return None
+    try:
+        resp = requests.get(
+            'https://maps.googleapis.com/maps/api/geocode/json',
+            params={'address': address, 'key': api_key},
+            timeout=5
+        )
+        data = resp.json()
+        if data.get('status') == 'OK' and data.get('results'):
+            loc = data['results'][0]['geometry']['location']
+            return {'latitude': loc['lat'], 'longitude': loc['lng']}
+    except Exception as e:
+        print(f"⚠️ Geocoding failed for '{address}': {e}")
+    return None

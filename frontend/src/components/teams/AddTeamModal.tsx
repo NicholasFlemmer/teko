@@ -32,6 +32,7 @@ export function AddTeamModal({ open, onOpenChange, onTeamAdded }: AddTeamModalPr
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [locations, setLocations] = useState<any[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: "",
     ageGroup: "",
@@ -60,6 +61,7 @@ export function AddTeamModal({ open, onOpenChange, onTeamAdded }: AddTeamModalPr
     e.preventDefault();
     try {
       setSubmitting(true);
+      setError(null);
       await teamsAPI.create({
         name: formData.name,
         age_group: formData.ageGroup,
@@ -74,8 +76,9 @@ export function AddTeamModal({ open, onOpenChange, onTeamAdded }: AddTeamModalPr
         notes: "",
       });
       onTeamAdded?.();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to create team:", err);
+      setError(err.message || "Failed to create team");
     } finally {
       setSubmitting(false);
     }
@@ -99,6 +102,9 @@ export function AddTeamModal({ open, onOpenChange, onTeamAdded }: AddTeamModalPr
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 mt-4">
+          {error && (
+            <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg">{error}</div>
+          )}
           <div className="flex flex-col items-center gap-2">
             <Label className="text-sm">Team Profile Image (Optional)</Label>
             <div

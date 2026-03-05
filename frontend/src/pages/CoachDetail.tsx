@@ -26,7 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MainLayout } from "@/components/layout/MainLayout";
-import { coachesAPI, uploadsAPI } from "@/services/api";
+import { coachesAPI, uploadsAPI, sessionsAPI, locationsAPI } from "@/services/api";
 
 export default function CoachDetail() {
   const { id } = useParams();
@@ -41,8 +41,10 @@ export default function CoachDetail() {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState(false);
 
-  // Raw coach data from API
+  // Raw data from API
   const [coachData, setCoachData] = useState<any>(null);
+  const [allSessions, setAllSessions] = useState<any[]>([]);
+  const [allLocations, setAllLocations] = useState<any[]>([]);
 
   const [formData, setFormData] = useState({
     firstName: "",
@@ -57,20 +59,32 @@ export default function CoachDetail() {
   });
   const [profilePicture, setProfilePicture] = useState<string | null>(null);
 
-  // Fetch coach from API
+  // Fetch coach, sessions, and locations from API
   useEffect(() => {
     if (!id) return;
-    const fetchCoach = async () => {
+    const fetchData = async () => {
       try {
         setLoading(true);
         setError(null);
-        const response = await coachesAPI.getOne(id);
-        if (response.success && response.coach) {
-          const c = response.coach;
+        const [coachRes, sessionsRes, locationsRes] = await Promise.all([
+          coachesAPI.getOne(id),
+          sessionsAPI.getAll(),
+          locationsAPI.getAll(),
+        ]);
+        if (coachRes.success && coachRes.coach) {
+          const c = coachRes.coach;
           setCoachData(c);
+          // Fall back to 'name' if first_name/last_name are empty
+          let fn = c.first_name || "";
+          let ln = c.last_name || "";
+          if (!fn && !ln && c.name) {
+            const parts = c.name.split(" ", 2);
+            fn = parts[0] || "";
+            ln = parts[1] || "";
+          }
           setFormData({
-            firstName: c.first_name || "",
-            lastName: c.last_name || "",
+            firstName: fn,
+            lastName: ln,
             dob: c.dob || "",
             email: c.email || "",
             mobile: c.phone_number || "",
@@ -81,26 +95,74 @@ export default function CoachDetail() {
           });
           setProfilePicture(c.profile_picture || null);
         }
+        setAllSessions(sessionsRes.sessions || []);
+        setAllLocations(locationsRes.locations || []);
       } catch (err: any) {
         setError(err.message || "Failed to load coach");
       } finally {
         setLoading(false);
       }
     };
-    fetchCoach();
+    fetchData();
   }, [id]);
 
-  // Derived display values
+  // Derived display values computed from sessions data
   const color = "bg-primary";
   const joinedDate = coachData?.joined_date || "";
-  const totalSessions = coachData?.totalSessions ?? 0;
-  const checkedIn = coachData?.checkedIn ?? 0;
-  const late = coachData?.late ?? 0;
-  const missed = coachData?.missed ?? 0;
-  const locations: string[] = coachData?.locations ?? [];
-  const upcomingSchedule: any[] = coachData?.upcomingSchedule ?? [];
-  const recentCheckIns: any[] = coachData?.recentCheckIns ?? [];
   const documents: any[] = coachData?.documents ?? [];
+
+  // Filter sessions for this coach
+  const coachSessions = allSessions.filter((s) => s.coach_id === id);
+  const totalSessions = coachSessions.length;
+  const checkedIn = coachSessions.filter((s) => {
+    const status = (s.status || "").toLowerCase().replace(/[\s-]/g, "_");
+    return status === "checked_in" || status === "completed";
+  }).length;
+  const missed = coachSessions.filter((s) => {
+    const status = (s.status || "").toLowerCase().replace(/[\s-]/g, "_");
+    return status === "missed" || status === "no_show";
+  }).length;
+  const late = coachData?.late ?? 0; // not tracked yet
+
+  // Unique location names from sessions
+  const locationMap: Record<string, string> = {};
+  allLocations.forEach((l) => { locationMap[l.id] = l.name; });
+  const locations: string[] = [...new Set(
+    coachSessions
+      .map((s) => locationMap[s.location_id])
+      .filter(Boolean)
+  )] as string[];
+
+  // Upcoming sessions (future, sorted by date)
+  const todayStr = new Date().toISOString().split("T")[0];
+  const upcomingSchedule = coachSessions
+    .filter((s) => (s.date || s.session_date) >= todayStr)
+    .sort((a, b) => (a.date || a.session_date || "").localeCompare(b.date || b.session_date || ""))
+    .slice(0, 5)
+    .map((s) => ({
+      id: s.id,
+      date: s.date || s.session_date,
+      time: s.start_time ? s.start_time.slice(0, 5) : "",
+      location: locationMap[s.location_id] || s.address || "No location",
+    }));
+
+  // Recent check-ins (past sessions with a status)
+  const recentCheckIns = coachSessions
+    .filter((s) => (s.date || s.session_date) < todayStr && s.status)
+    .sort((a, b) => (b.date || b.session_date || "").localeCompare(a.date || a.session_date || ""))
+    .slice(0, 5)
+    .map((s) => {
+      const status = (s.status || "").toLowerCase().replace(/[\s-]/g, "_");
+      let displayStatus = "missed";
+      if (status === "checked_in" || status === "completed") displayStatus = "on-time";
+      return {
+        id: s.id,
+        date: s.date || s.session_date,
+        location: locationMap[s.location_id] || s.address || "No location",
+        status: displayStatus,
+        time: s.start_time ? s.start_time.slice(0, 5) : "",
+      };
+    });
 
   const attendanceRate = totalSessions > 0 ? Math.round((checkedIn / totalSessions) * 100) : 0;
 
@@ -143,6 +205,7 @@ export default function CoachDetail() {
       setIsEditing(false);
     } catch (err: any) {
       console.error("Failed to save coach:", err);
+      setError(err.message || "Failed to save coach");
     } finally {
       setSaving(false);
     }

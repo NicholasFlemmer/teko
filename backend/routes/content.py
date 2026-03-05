@@ -30,7 +30,7 @@ def create_content(current_user):
         data = request.get_json()
 
         # Validate required fields
-        required_fields = ['title', 'type', 'topic', 'language']
+        required_fields = ['title', 'type']
         for field in required_fields:
             if field not in data:
                 return jsonify({
@@ -39,14 +39,30 @@ def create_content(current_user):
                 }), 400
 
         # Create content
-        content = FirebaseService.create_content({
+        content_data = {
             'title': data['title'],
             'type': data['type'],
-            'topic': data['topic'],
-            'language': data['language'],
+            'topic': data.get('topic', ''),
+            'language': data.get('language', 'English'),
             'content_text': data.get('content_text', ''),
-            'file_name': data.get('file_name', '')
-        })
+            'file_name': data.get('file_name', ''),
+            'file_url': data.get('file_url', ''),
+            'file_path': data.get('file_path', ''),
+        }
+
+        # If a file was uploaded but no content_text, try to extract text
+        if content_data['file_path'] and not content_data['content_text']:
+            try:
+                from services.content_extraction import ContentExtraction
+                extracted = ContentExtraction.extract_from_storage(
+                    content_data['file_path'], content_data['type']
+                )
+                if extracted:
+                    content_data['content_text'] = extracted
+            except Exception as ex:
+                print(f"⚠️ Text extraction failed: {ex}")
+
+        content = FirebaseService.create_content(content_data)
 
         return jsonify({
             'success': True,
@@ -76,7 +92,7 @@ def update_content(current_user, content_id):
 
         # Update allowed fields
         update_data = {}
-        allowed_fields = ['title', 'type', 'topic', 'language', 'content_text', 'file_name']
+        allowed_fields = ['title', 'type', 'topic', 'language', 'content_text', 'file_name', 'file_url', 'file_path']
         for field in allowed_fields:
             if field in data:
                 update_data[field] = data[field]

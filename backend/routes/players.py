@@ -51,8 +51,7 @@ def create_player(current_user):
         data = request.get_json()
 
         # Validate required fields
-        required_fields = ['first_name', 'last_name', 'date_of_birth', 'guardian_name',
-                           'guardian_email', 'guardian_primary_phone']
+        required_fields = ['first_name', 'last_name']
         for field in required_fields:
             if field not in data:
                 return jsonify({
@@ -64,10 +63,10 @@ def create_player(current_user):
         player = FirebaseService.create_player({
             'first_name': data['first_name'],
             'last_name': data['last_name'],
-            'date_of_birth': data['date_of_birth'],
-            'guardian_name': data['guardian_name'],
-            'guardian_email': data['guardian_email'],
-            'guardian_primary_phone': data['guardian_primary_phone'],
+            'date_of_birth': data.get('date_of_birth', ''),
+            'guardian_name': data.get('guardian_name', ''),
+            'guardian_email': data.get('guardian_email', ''),
+            'guardian_primary_phone': data.get('guardian_primary_phone', ''),
             'guardian_secondary_phone': data.get('guardian_secondary_phone', ''),
             'special_notes': data.get('special_notes', ''),
             'team_ids': data.get('team_ids', [])

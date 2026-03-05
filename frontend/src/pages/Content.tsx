@@ -36,7 +36,7 @@ export default function Content() {
   const [urls, setUrls] = useState<UrlItem[]>([]);
   const [isAddUrlOpen, setIsAddUrlOpen] = useState(false);
   const [editUrl, setEditUrl] = useState<UrlItem | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{ type: "content" | "url"; id: number } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: "content" | "url"; id: string | number } | null>(null);
 
   // Loading state
   const [loading, setLoading] = useState(true);
@@ -61,7 +61,7 @@ export default function Content() {
               topic: c.topic || "",
               language: c.language || "English",
               date: c.created_at
-                ? new Date(c.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                ? new Date(c.created_at._seconds ? c.created_at._seconds * 1000 : c.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
                 : "",
               content: c.content_text || c.content || "",
               fileName: c.file_name || "",

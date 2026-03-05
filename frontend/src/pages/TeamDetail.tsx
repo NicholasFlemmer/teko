@@ -175,11 +175,11 @@ export default function TeamDetail() {
             <h1 className="page-title">{team.name}</h1>
             <p className="page-subtitle">Team Details</p>
           </div>
-          <Button variant="outline" className="gap-2">
+          <Button variant="outline" className="gap-2" onClick={() => navigate(`/players?team=${id}`)}>
             <UserPlus className="w-4 h-4" />
             Add Players
           </Button>
-          <Button className="gap-2">
+          <Button className="gap-2" onClick={() => navigate(`/teams`)}>
             <Edit className="w-4 h-4" />
             Edit Team
           </Button>
@@ -258,7 +258,7 @@ export default function TeamDetail() {
             <div className="bg-card rounded-xl border border-border p-5 shadow-card">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-foreground">Players ({mappedPlayers.length})</h3>
-                <Button variant="ghost" size="sm" className="text-primary">
+                <Button variant="ghost" size="sm" className="text-primary" onClick={() => navigate(`/players?team=${id}`)}>
                   Manage
                 </Button>
               </div>
@@ -287,7 +287,7 @@ export default function TeamDetail() {
                 )}
               </div>
               {mappedPlayers.length > 0 && (
-                <Button variant="outline" className="w-full mt-4">
+                <Button variant="outline" className="w-full mt-4" onClick={() => navigate(`/players?team=${id}`)}>
                   View All Players
                 </Button>
               )}
@@ -386,7 +386,7 @@ export default function TeamDetail() {
                   <p className="text-sm text-muted-foreground text-center py-4">No upcoming sessions</p>
                 )}
               </div>
-              <Button variant="outline" className="w-full mt-4">
+              <Button variant="outline" className="w-full mt-4" onClick={() => navigate(`/schedule`)}>
                 View Team Schedule
               </Button>
             </div>

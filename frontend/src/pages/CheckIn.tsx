@@ -215,14 +215,23 @@ export default function CheckIn() {
                 <MapPin className="h-10 w-10 text-orange-600" />
               </div>
               <div className="text-center space-y-1">
-                <h2 className="text-lg font-semibold">Too Far Away</h2>
+                <h2 className="text-lg font-semibold">Check-in Missed</h2>
                 <p className="text-sm text-muted-foreground">
-                  You're {formatDistance(result.location_verification.distance)} from the venue.
-                  You need to be within {formatDistance(result.location_verification.allowed_radius)}.
+                  {result.location_verification.distance != null ? (
+                    <>
+                      You're {formatDistance(result.location_verification.distance)} from the venue.
+                      You need to be within {formatDistance(result.location_verification.allowed_radius)}.
+                    </>
+                  ) : (
+                    <>
+                      Unable to verify your distance from the venue.
+                      The location may not have GPS coordinates configured.
+                    </>
+                  )}
                 </p>
               </div>
               <p className="text-xs text-muted-foreground">
-                Your check-in was recorded but flagged as out of range.
+                You were too far from the session location. This has been recorded as missed.
               </p>
             </CardContent>
           </Card>

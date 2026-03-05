@@ -36,6 +36,7 @@ export function AddPlayerModal({ open, onOpenChange, onPlayerAdded }: AddPlayerM
   const [teams, setTeams] = useState<any[]>([]);
   const [profilePicture, setProfilePicture] = useState<{ name: string; preview: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -68,6 +69,7 @@ export function AddPlayerModal({ open, onOpenChange, onPlayerAdded }: AddPlayerM
     e.preventDefault();
     try {
       setSubmitting(true);
+      setError(null);
       await playersAPI.create({
         first_name: formData.firstName,
         last_name: formData.lastName,
@@ -94,8 +96,9 @@ export function AddPlayerModal({ open, onOpenChange, onPlayerAdded }: AddPlayerM
       setSelectedTeams([]);
       setProfilePicture(null);
       onPlayerAdded?.();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to create player:", err);
+      setError(err.message || "Failed to create player");
     } finally {
       setSubmitting(false);
     }
@@ -123,6 +126,9 @@ export function AddPlayerModal({ open, onOpenChange, onPlayerAdded }: AddPlayerM
 
         <ScrollArea className="max-h-[calc(90vh-120px)]">
           <form onSubmit={handleSubmit} className="space-y-4 px-6 pb-6 pt-4">
+            {error && (
+              <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg">{error}</div>
+            )}
             {/* Profile Picture */}
             <div className="flex items-center gap-4">
               <button

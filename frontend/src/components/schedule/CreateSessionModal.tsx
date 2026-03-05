@@ -36,17 +36,17 @@ import { sessionsAPI } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 
 interface CoachOption {
-  id: number;
+  id: string;
   name: string;
 }
 
 interface TeamOption {
-  id: number;
+  id: string;
   name: string;
 }
 
 interface LocationOption {
-  id: number;
+  id: string;
   name: string;
   address?: string;
 }
@@ -101,9 +101,9 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
     setSubmitting(true);
     try {
       await sessionsAPI.create({
-        team_id: parseInt(formData.team),
-        coach_id: parseInt(formData.coach),
-        location_id: formData.location ? parseInt(formData.location) : undefined,
+        team_id: formData.team,
+        coach_id: formData.coach,
+        location_id: formData.location || undefined,
         date: formData.date,
         start_time: formData.startTime,
         end_time: formData.endTime || undefined,
@@ -148,7 +148,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[500px] max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">

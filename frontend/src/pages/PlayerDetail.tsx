@@ -50,6 +50,8 @@ export default function PlayerDetail() {
   const [loading, setLoading] = useState(true);
 
   const [isEditing, setIsEditing] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
@@ -126,6 +128,8 @@ export default function PlayerDetail() {
   const handleSave = async () => {
     if (!id || !player) return;
     try {
+      setSaving(true);
+      setSaveError(null);
       await playersAPI.update(id, {
         first_name: formData.firstName,
         last_name: formData.lastName,
@@ -141,8 +145,11 @@ export default function PlayerDetail() {
       const res = await playersAPI.getOne(id);
       setPlayer(res.player);
       setIsEditing(false);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to save player:", err);
+      setSaveError(err.message || "Failed to save player");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -284,14 +291,17 @@ export default function PlayerDetail() {
             <p className="page-subtitle">Player Details</p>
           </div>
           {isEditing ? (
-            <div className="flex gap-2">
-              <Button variant="outline" className="gap-2" onClick={handleCancel}>
+            <div className="flex items-center gap-2">
+              {saveError && (
+                <span className="text-sm text-destructive mr-2">{saveError}</span>
+              )}
+              <Button variant="outline" className="gap-2" onClick={handleCancel} disabled={saving}>
                 <X className="w-4 h-4" />
                 Cancel
               </Button>
-              <Button className="gap-2" onClick={handleSave}>
-                <Save className="w-4 h-4" />
-                Save Changes
+              <Button className="gap-2" onClick={handleSave} disabled={saving}>
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {saving ? "Saving..." : "Save Changes"}
               </Button>
             </div>
           ) : (

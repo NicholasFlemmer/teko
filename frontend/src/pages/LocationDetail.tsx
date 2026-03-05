@@ -20,6 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { locationsAPI, sessionsAPI, coachesAPI, playersAPI } from "@/services/api";
+import { geocodeAddress, extractCoordsFromMapsUrl } from "@/lib/geocode";
 
 const COACH_COLORS = [
   "bg-primary", "bg-success", "bg-info", "bg-warning",
@@ -35,6 +36,8 @@ export default function LocationDetail() {
   const [players, setPlayers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [editData, setEditData] = useState({
     name: "",
     address: "",
@@ -78,11 +81,25 @@ export default function LocationDetail() {
   const handleSave = async () => {
     if (!id || !location) return;
     try {
+      setSaving(true);
+      setSaveError(null);
+
+      // Re-geocode if address changed
+      const addressChanged = editData.address !== location.address;
+      const mapsLinkChanged = editData.googleMapsLink !== (location.google_maps_link || "");
+      let coords: { latitude: number; longitude: number } | null = null;
+      if (addressChanged || mapsLinkChanged) {
+        coords =
+          extractCoordsFromMapsUrl(editData.googleMapsLink) ||
+          (await geocodeAddress(editData.address));
+      }
+
       await locationsAPI.update(id, {
         name: editData.name,
         address: editData.address,
         google_maps_link: editData.googleMapsLink,
         notes: editData.notes,
+        ...(coords && { latitude: coords.latitude, longitude: coords.longitude }),
       });
       const res = await locationsAPI.getOne(id);
       setLocation(res.location);
@@ -93,8 +110,11 @@ export default function LocationDetail() {
         notes: res.location.notes || "",
       });
       setIsEditing(false);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to save location:", err);
+      setSaveError(err.message || "Failed to save location");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -171,13 +191,11 @@ export default function LocationDetail() {
     };
   });
 
-  // Total unique students
+  // Total unique students (from attended_player_ids)
   const studentIds = new Set<string>();
   locationSessions.forEach((s) => {
-    if (s.attendance) {
-      s.attendance.forEach((a: any) => {
-        if (a.player_id) studentIds.add(a.player_id);
-      });
+    if (s.attended_player_ids) {
+      s.attended_player_ids.forEach((pid: string) => studentIds.add(pid));
     }
   });
 
@@ -213,12 +231,13 @@ export default function LocationDetail() {
             </Button>
           )}
           {isEditing ? (
-            <div className="flex gap-2">
-              <Button className="gap-2" onClick={handleSave}>
-                <Save className="w-4 h-4" />
-                Save
+            <div className="flex items-center gap-2">
+              {saveError && <span className="text-sm text-destructive">{saveError}</span>}
+              <Button className="gap-2" onClick={handleSave} disabled={saving}>
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {saving ? "Saving..." : "Save"}
               </Button>
-              <Button variant="outline" className="gap-2" onClick={handleCancelEdit}>
+              <Button variant="outline" className="gap-2" onClick={handleCancelEdit} disabled={saving}>
                 <X className="w-4 h-4" />
                 Cancel
               </Button>
@@ -442,7 +461,7 @@ export default function LocationDetail() {
               <div className="space-y-3">
                 {recentSessions.length > 0 ? recentSessions.map((session) => {
                   const sessionDate = session.date || session.session_date;
-                  const studentCount = session.attendance?.length || 0;
+                  const studentCount = session.attended_player_ids?.length || 0;
                   return (
                     <div
                       key={session.id}

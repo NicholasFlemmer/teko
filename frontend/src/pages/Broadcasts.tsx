@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { Send, MessageSquare, Mail, Users, ChevronDown, X, Loader2 } from "lucide-react";
+import { Send, MessageSquare, Mail, Users, ChevronDown, X, Loader2, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -35,6 +35,11 @@ export default function Broadcasts() {
   const [allSelected, setAllSelected] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
+  // Template state
+  const [messageMode, setMessageMode] = useState<"template" | "custom">("template");
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState<string>("");
+
   // API state
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [broadcasts, setBroadcasts] = useState<any[]>([]);
@@ -46,16 +51,17 @@ export default function Broadcasts() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [coachesRes, broadcastsRes] = await Promise.all([
+        const [coachesRes, broadcastsRes, templatesRes] = await Promise.all([
           coachesAPI.getAll(),
           broadcastsAPI.getAll(),
+          broadcastsAPI.getTemplates().catch(() => ({ success: false, templates: [] })),
         ]);
 
         if (coachesRes.success && coachesRes.coaches) {
           setRecipients(
             coachesRes.coaches.map((c: any) => ({
               id: c.id,
-              name: c.name,
+              name: c.name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || 'Unknown',
               phone: c.phone_number || c.phone || "",
               email: c.email || "",
               lastEngaged: c.last_engaged || c.created_at || new Date().toISOString(),
@@ -65,6 +71,10 @@ export default function Broadcasts() {
 
         if (broadcastsRes.success && broadcastsRes.broadcasts) {
           setBroadcasts(broadcastsRes.broadcasts);
+        }
+
+        if (templatesRes.success && templatesRes.templates) {
+          setTemplates(templatesRes.templates);
         }
       } catch (err: any) {
         toast({
@@ -80,6 +90,20 @@ export default function Broadcasts() {
   }, []);
 
   const activeRecipients = allSelected ? recipients : recipients.filter(r => selectedRecipients.includes(r.id));
+
+  const activeTemplate = templates.find(t => t.name === selectedTemplate);
+
+  // Parse template body to extract variable placeholders and preview text
+  const templatePreview = useMemo(() => {
+    if (!activeTemplate) return null;
+    const bodyComp = activeTemplate.components?.find((c: any) => c.type === "BODY");
+    const headerComp = activeTemplate.components?.find((c: any) => c.type === "HEADER");
+    const buttonComp = activeTemplate.components?.find((c: any) => c.type === "BUTTONS");
+    const bodyText = bodyComp?.text || "";
+    // Count variables like {{1}}, {{2}}, etc.
+    const vars = bodyText.match(/\{\{\d+\}\}/g) || [];
+    return { bodyText, headerText: headerComp?.text, buttons: buttonComp?.buttons, varCount: vars.length };
+  }, [activeTemplate]);
 
   const costBreakdown = useMemo(() => {
     if (channel !== "whatsapp") return { billable: 0, free: activeRecipients.length, total: 0 };
@@ -118,17 +142,30 @@ export default function Broadcasts() {
     }
   };
 
-  const canSend = (subject.trim() || channel === "whatsapp") && message.trim() && activeRecipients.length > 0 && !sending;
+  const canSend = activeRecipients.length > 0 && !sending && (
+    messageMode === "template"
+      ? !!selectedTemplate
+      : (subject.trim() || channel === "whatsapp") && message.trim()
+  );
 
   const handleSend = async () => {
     setSending(true);
     try {
-      await broadcastsAPI.send({
+      const payload: any = {
         channel,
         subject,
-        message,
         recipient_ids: activeRecipients.map(r => r.id),
-      });
+      };
+      if (messageMode === "template" && selectedTemplate) {
+        payload.template_name = selectedTemplate;
+        payload.template_language = activeTemplate?.language || "en_US";
+        if (message.trim()) {
+          payload.message = message; // custom text fills {{2}} parameter
+        }
+      } else {
+        payload.message = message;
+      }
+      await broadcastsAPI.send(payload);
 
       toast({ title: "Broadcast sent", description: `Message sent to ${activeRecipients.length} recipient${activeRecipients.length !== 1 ? "s" : ""}.` });
 
@@ -136,6 +173,7 @@ export default function Broadcasts() {
       setMessage("");
       setSelectedRecipients([]);
       setAllSelected(false);
+      setSelectedTemplate("");
       setConfirmOpen(false);
 
       // Refresh broadcast history
@@ -262,28 +300,118 @@ export default function Broadcasts() {
             )}
           </div>
 
-          {/* Subject */}
-          <div className="space-y-2">
-            <Label htmlFor="subject">Subject {channel === "whatsapp" && <span className="text-muted-foreground text-xs">(optional for WhatsApp)</span>}</Label>
-            <Input
-              id="subject"
-              placeholder="Enter broadcast subject..."
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-            />
-          </div>
+          {/* Message mode toggle (WhatsApp only) */}
+          {channel === "whatsapp" && templates.length > 0 && (
+            <div className="space-y-2">
+              <Label>Message Type</Label>
+              <div className="flex gap-2">
+                <Button
+                  variant={messageMode === "template" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setMessageMode("template")}
+                  className="gap-2"
+                >
+                  <FileText className="w-4 h-4" />
+                  Template
+                </Button>
+                <Button
+                  variant={messageMode === "custom" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setMessageMode("custom")}
+                  className="gap-2"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  Custom Message
+                </Button>
+              </div>
+            </div>
+          )}
 
-          {/* Message */}
-          <div className="space-y-2">
-            <Label htmlFor="message">Message</Label>
-            <Textarea
-              id="message"
-              placeholder="Type your message here..."
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              rows={5}
-            />
-          </div>
+          {/* Template selector */}
+          {channel === "whatsapp" && messageMode === "template" && templates.length > 0 && (
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <Label>Template</Label>
+                <Select value={selectedTemplate} onValueChange={setSelectedTemplate}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select a template..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {templates.map((t) => (
+                      <SelectItem key={t.id} value={t.name}>
+                        <span className="flex items-center gap-2">
+                          {t.name.replace(/_/g, " ")}
+                          <Badge variant="outline" className="text-xs capitalize">{t.category?.toLowerCase()}</Badge>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Template preview */}
+              {templatePreview && (
+                <div className="rounded-lg border border-border bg-muted/50 p-4 space-y-2">
+                  {templatePreview.headerText && (
+                    <p className="font-semibold text-sm text-foreground">{templatePreview.headerText}</p>
+                  )}
+                  <p className="text-sm text-muted-foreground whitespace-pre-wrap">{templatePreview.bodyText}</p>
+                  {templatePreview.buttons && (
+                    <div className="flex gap-2 pt-1">
+                      {templatePreview.buttons.map((btn: any, i: number) => (
+                        <Badge key={i} variant="secondary" className="text-xs">{btn.text}</Badge>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground mt-2">
+                    {"{{1}}"} = coach name (auto-filled){templatePreview.varCount > 1 && <>{" · {{2}}"} = your message below</>}
+                  </p>
+                </div>
+              )}
+
+              {/* Custom text for {{2}} variable if template has more than 1 variable */}
+              {templatePreview && templatePreview.varCount > 1 && (
+                <div className="space-y-2">
+                  <Label htmlFor="message">Message Content <span className="text-muted-foreground text-xs">(fills {"{{2}}"} in template)</span></Label>
+                  <Textarea
+                    id="message"
+                    placeholder="Enter the message content..."
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    rows={3}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Custom message fields */}
+          {(channel === "email" || messageMode === "custom" || (channel === "whatsapp" && templates.length === 0)) && (
+            <>
+              {/* Subject */}
+              <div className="space-y-2">
+                <Label htmlFor="subject">Subject {channel === "whatsapp" && <span className="text-muted-foreground text-xs">(optional for WhatsApp)</span>}</Label>
+                <Input
+                  id="subject"
+                  placeholder="Enter broadcast subject..."
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                />
+              </div>
+
+              {/* Message */}
+              <div className="space-y-2">
+                <Label htmlFor="message">Message</Label>
+                <Textarea
+                  id="message"
+                  placeholder="Type your message here..."
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  rows={5}
+                />
+              </div>
+            </>
+          )}
 
           {/* Cost estimate for WhatsApp */}
           {channel === "whatsapp" && activeRecipients.length > 0 && (
@@ -336,10 +464,17 @@ export default function Broadcasts() {
                       {b.channel === "whatsapp" ? <MessageSquare className="w-5 h-5 text-primary" /> : <Mail className="w-5 h-5 text-accent-foreground" />}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-foreground">{b.subject || "(No subject)"}</p>
-                      <p className="text-sm text-muted-foreground mt-0.5">{b.message}</p>
+                      <p className="font-medium text-foreground">
+                        {b.template_name
+                          ? b.template_name.replace(/_/g, " ")
+                          : b.subject || "(No subject)"}
+                      </p>
+                      <p className="text-sm text-muted-foreground mt-0.5">
+                        {b.template_name && <Badge variant="outline" className="text-xs mr-2">Template</Badge>}
+                        {b.message || (b.template_name ? "Template message" : "")}
+                      </p>
                       <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                        <span>{b.recipient_count ?? b.recipients ?? 0} recipients</span>
+                        <span>{b.recipient_ids?.length ?? b.recipient_count ?? 0} recipients</span>
                         <span>•</span>
                         <span>{b.created_at ? new Date(b.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : b.date}</span>
                         {b.channel === "whatsapp" && (b.cost ?? 0) > 0 && (
@@ -372,6 +507,11 @@ export default function Broadcasts() {
                 You're about to send a {channel === "whatsapp" ? "WhatsApp" : "Email"} broadcast to{" "}
                 <strong>{activeRecipients.length} recipient{activeRecipients.length !== 1 ? "s" : ""}</strong>.
               </span>
+              {messageMode === "template" && selectedTemplate && (
+                <span className="block text-sm">
+                  Template: <strong>{selectedTemplate.replace(/_/g, " ")}</strong>
+                </span>
+              )}
               {channel === "whatsapp" && costBreakdown.total > 0 && (
                 <span className="block font-medium">
                   Estimated WhatsApp cost: R{costBreakdown.total.toFixed(2)} ({costBreakdown.billable} billable message{costBreakdown.billable !== 1 ? "s" : ""})

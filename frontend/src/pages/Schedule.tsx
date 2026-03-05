@@ -87,19 +87,19 @@ export default function Schedule() {
 
   // Build lookup maps for coach/team/location names by ID
   const coachMap = useMemo(() => {
-    const map: Record<number, string> = {};
+    const map: Record<string, string> = {};
     coachOptions.forEach((c) => { map[c.id] = c.name; });
     return map;
   }, [coachOptions]);
 
   const teamMap = useMemo(() => {
-    const map: Record<number, string> = {};
+    const map: Record<string, string> = {};
     teamOptions.forEach((t) => { map[t.id] = t.name; });
     return map;
   }, [teamOptions]);
 
   const locationMap = useMemo(() => {
-    const map: Record<number, string> = {};
+    const map: Record<string, string> = {};
     locationOptions.forEach((l) => { map[l.id] = l.name; });
     return map;
   }, [locationOptions]);
@@ -109,9 +109,9 @@ export default function Schedule() {
     return {
       id: raw.id,
       date: raw.date,
-      coach: coachMap[raw.coach_id] || `Coach #${raw.coach_id}`,
-      team: teamMap[raw.team_id] || `Team #${raw.team_id}`,
-      location: locationMap[raw.location_id] || raw.address || `Location #${raw.location_id}`,
+      coach: coachMap[raw.coach_id] || (raw.coach_id ? "Unknown Coach" : "Unassigned"),
+      team: teamMap[raw.team_id] || (raw.team_id ? "Unknown Team" : "Unassigned"),
+      location: locationMap[raw.location_id] || raw.address || (raw.location_id ? "Unknown Location" : "No Location"),
       time: raw.start_time ? raw.start_time.slice(0, 5) : "",
       endTime: raw.end_time ? raw.end_time.slice(0, 5) : undefined,
       type: raw.type || "practice",
@@ -129,7 +129,7 @@ export default function Schedule() {
           teamsAPI.getAll(),
           locationsAPI.getAll(),
         ]);
-        if (coachRes.coaches) setCoachOptions(coachRes.coaches.map((c: any) => ({ id: c.id, name: c.name || c.username || `Coach ${c.id}` })));
+        if (coachRes.coaches) setCoachOptions(coachRes.coaches.map((c: any) => ({ id: c.id, name: c.name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || 'Unknown Coach' })));
         if (teamRes.teams) setTeamOptions(teamRes.teams.map((t: any) => ({ id: t.id, name: t.name })));
         if (locationRes.locations) setLocationOptions(locationRes.locations.map((l: any) => ({ id: l.id, name: l.name, address: l.address })));
       } catch (err) {

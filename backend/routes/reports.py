@@ -29,9 +29,12 @@ def get_coach_attendance(current_user):
                 continue
             if cid not in coach_data:
                 coach = coach_map.get(cid, {})
+                coach_name = coach.get('name') or (
+                    (coach.get('first_name', '') + ' ' + coach.get('last_name', '')).strip()
+                ) or 'Unknown'
                 coach_data[cid] = {
                     'coach_id': cid,
-                    'coach_name': coach.get('first_name', '') + ' ' + coach.get('last_name', ''),
+                    'coach_name': coach_name,
                     'total_sessions': 0,
                     'checked_in': 0,
                 }
@@ -43,7 +46,7 @@ def get_coach_attendance(current_user):
 
         return jsonify({
             'success': True,
-            'coach_attendance': data
+            'data': data
         }), 200
     except Exception as e:
         return jsonify({
@@ -89,7 +92,7 @@ def get_location_attendance(current_user):
 
         return jsonify({
             'success': True,
-            'location_attendance': data
+            'data': data
         }), 200
     except Exception as e:
         return jsonify({
@@ -152,7 +155,7 @@ def get_student_rollcall(current_user):
 
         return jsonify({
             'success': True,
-            'student_rollcall': rollcall
+            'data': rollcall
         }), 200
     except Exception as e:
         return jsonify({

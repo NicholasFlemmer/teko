@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { contentAPI } from "@/services/api";
 
 export interface UrlItem {
-  id: number;
+  id: string | number;
   url: string;
   title: string;
   description: string;

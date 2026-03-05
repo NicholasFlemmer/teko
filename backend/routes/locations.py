@@ -59,13 +59,20 @@ def create_location(current_user):
                 }), 400
 
         # Create location
-        location = FirebaseService.create_location({
+        location_data = {
             'name': data['name'],
             'address': data['address'],
             'google_maps_link': data.get('google_maps_link', ''),
             'radius': data.get('radius', 100),
             'notes': data.get('notes', '')
-        })
+        }
+        # Store coordinates if provided
+        if data.get('latitude') is not None:
+            location_data['latitude'] = float(data['latitude'])
+        if data.get('longitude') is not None:
+            location_data['longitude'] = float(data['longitude'])
+
+        location = FirebaseService.create_location(location_data)
 
         return jsonify({
             'success': True,
@@ -95,7 +102,7 @@ def update_location(current_user, location_id):
 
         # Update allowed fields
         update_data = {}
-        allowed_fields = ['name', 'address', 'google_maps_link', 'radius', 'notes']
+        allowed_fields = ['name', 'address', 'google_maps_link', 'radius', 'notes', 'latitude', 'longitude']
         for field in allowed_fields:
             if field in data:
                 update_data[field] = data[field]

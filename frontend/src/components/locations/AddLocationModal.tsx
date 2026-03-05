@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { locationsAPI } from "@/services/api";
+import { geocodeAddress, extractCoordsFromMapsUrl } from "@/lib/geocode";
 
 interface AddLocationModalProps {
   open: boolean;
@@ -22,6 +23,7 @@ export function AddLocationModal({ open, onOpenChange, onLocationAdded }: AddLoc
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [photos, setPhotos] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: "",
     address: "",
@@ -48,11 +50,19 @@ export function AddLocationModal({ open, onOpenChange, onLocationAdded }: AddLoc
     e.preventDefault();
     try {
       setSubmitting(true);
+      setError(null);
+
+      // Geocode address to get lat/lng for check-in distance verification
+      const coords =
+        extractCoordsFromMapsUrl(formData.googleMapsLink) ||
+        (await geocodeAddress(formData.address));
+
       await locationsAPI.create({
         name: formData.name,
         address: formData.address,
         google_maps_link: formData.googleMapsLink || undefined,
         notes: formData.notes || undefined,
+        ...(coords && { latitude: coords.latitude, longitude: coords.longitude }),
       });
       onOpenChange(false);
       setPhotos([]);
@@ -63,8 +73,9 @@ export function AddLocationModal({ open, onOpenChange, onLocationAdded }: AddLoc
         notes: "",
       });
       onLocationAdded?.();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to create location:", err);
+      setError(err.message || "Failed to create location");
     } finally {
       setSubmitting(false);
     }
@@ -88,6 +99,9 @@ export function AddLocationModal({ open, onOpenChange, onLocationAdded }: AddLoc
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 mt-4">
+          {error && (
+            <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg">{error}</div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="name">Location Name</Label>
             <Input

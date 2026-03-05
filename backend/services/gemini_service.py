@@ -34,8 +34,8 @@ class GeminiService:
         """
         model = cls.get_model()
         
-        prompt = f"""Generate a friendly, professional WhatsApp message to remind a coach about their upcoming session. 
-        
+        prompt = f"""Generate a friendly, professional WhatsApp message to remind a coach about their upcoming session.
+
 Coach Name: {coach_name}
 Session Time: {session_time}
 Location: {location_address}
@@ -43,7 +43,7 @@ Location: {location_address}
 The message should:
 - Be warm and professional
 - Include an emoji or two for friendliness
-- Mention that they need to check in using a link (don't include the actual link, just mention it)
+- Ask them to share their location in this chat to check in (tap the + or 📎 button → Location → Send current location)
 - Be concise (2-3 sentences maximum)
 - Use a casual but respectful tone
 
@@ -55,7 +55,7 @@ Generate ONLY the message text, without any additional formatting or explanation
             return message
         except Exception as e:
             # Fallback to a default message if Gemini fails
-            return f"Hi {coach_name}! 👋 Your session at {location_address} starts at {session_time} (in 10 minutes). Please check in using the link below to confirm your attendance."
+            return f"Hi {coach_name}! 👋 Your session at {location_address} starts at {session_time}. Please share your location here to check in 📍 (tap + → Location → Send current location)."
     
     @classmethod
     def generate_custom_message(cls, prompt):

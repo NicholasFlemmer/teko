@@ -204,28 +204,37 @@ def send_reminder(session_id):
             }), 404
         
         # Get coach
-        coach = FirebaseService.get_coach(session['coach_id'])
+        coach_id = session.get('coach_id')
+        if not coach_id:
+            return jsonify({
+                'success': False,
+                'error': 'No coach assigned to this session'
+            }), 400
+
+        coach = FirebaseService.get_coach(coach_id)
         if not coach:
             return jsonify({
                 'success': False,
                 'error': 'Coach not found'
             }), 404
-        
+
         # Generate check-in token
         token = str(uuid.uuid4())
         expires_at = datetime.utcnow() + timedelta(minutes=Config.CHECK_IN_TOKEN_EXPIRY_MINUTES)
-        
+
         FirebaseService.create_check_in_token(token, session_id, expires_at)
-        
+
         # Generate check-in URL
         check_in_url = f"{Config.FRONTEND_URL}/check-in/{token}"
-        
+
+        coach_name = coach.get('name') or f"{coach.get('first_name', '')} {coach.get('last_name', '')}".strip() or 'Coach'
+
         # Send WhatsApp reminder
         result = WhatsAppService.send_check_in_reminder(
-            coach_phone=coach['phone_number'],
-            coach_name=coach['name'],
-            session_time=session['start_time'],
-            location_address=session['address'],
+            coach_phone=coach.get('phone_number', ''),
+            coach_name=coach_name,
+            session_time=session.get('start_time', ''),
+            location_address=session.get('address', ''),
             check_in_url=check_in_url
         )
         
@@ -326,20 +335,37 @@ def get_check_in_info(token):
             }), 404
         
         # Get coach details
-        coach = FirebaseService.get_coach(session['coach_id'])
-        
+        coach_id = session.get('coach_id')
+        coach = FirebaseService.get_coach(coach_id) if coach_id else None
+        coach_name = 'Unknown'
+        if coach:
+            coach_name = coach.get('name') or f"{coach.get('first_name', '')} {coach.get('last_name', '')}".strip() or 'Unknown'
+
+        # Resolve location from location_id
+        location_data = {}
+        address = session.get('address', '')
+        location_id = session.get('location_id')
+        if location_id:
+            location_record = FirebaseService.get_location(location_id)
+            if location_record:
+                address = location_record.get('address', address)
+                lat = location_record.get('latitude')
+                lng = location_record.get('longitude')
+                if lat is not None and lng is not None:
+                    location_data = {'latitude': float(lat), 'longitude': float(lng)}
+
         return jsonify({
             'success': True,
             'session': {
                 'id': session_id,
-                'date': session['date'],
-                'start_time': session['start_time'],
-                'end_time': session['end_time'],
-                'address': session['address'],
-                'location': session['location']
+                'date': session.get('date', ''),
+                'start_time': session.get('start_time', ''),
+                'end_time': session.get('end_time', ''),
+                'address': address,
+                'location': location_data
             },
             'coach': {
-                'name': coach['name'] if coach else 'Unknown'
+                'name': coach_name
             }
         }), 200
     except Exception as e:
@@ -404,9 +430,24 @@ def check_in(token):
             data['location']['latitude'],
             data['location']['longitude']
         )
-        expected_location = session['location']
-        
-        location_verification = verify_location(actual_location, expected_location)
+
+        # Resolve expected location coordinates from location_id
+        expected_location = {}
+        allowed_radius = Config.GEOLOCATION_RADIUS_METERS
+        location_id = session.get('location_id')
+        if location_id:
+            location_record = FirebaseService.get_location(location_id)
+            if location_record:
+                lat = location_record.get('latitude')
+                lng = location_record.get('longitude')
+                if lat is not None and lng is not None:
+                    expected_location = {'latitude': float(lat), 'longitude': float(lng)}
+                # Use per-location radius if set
+                loc_radius = location_record.get('radius')
+                if loc_radius is not None:
+                    allowed_radius = int(loc_radius)
+
+        location_verification = verify_location(actual_location, expected_location, allowed_radius)
         
         # Mark token as used
         FirebaseService.mark_token_used(token)

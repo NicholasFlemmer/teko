@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { contentAPI } from "@/services/api";
+import { contentAPI, uploadsAPI } from "@/services/api";
 
 interface AddContentModalProps {
   open: boolean;
@@ -20,7 +20,7 @@ interface AddContentModalProps {
 }
 
 export interface ContentItem {
-  id: number;
+  id: string | number;
   title: string;
   type: string;
   topic: string;
@@ -60,11 +60,17 @@ export function AddContentModal({ open, onOpenChange, onAdd }: AddContentModalPr
         topic: formData.topic,
         language: formData.language,
       };
+
       if (formData.type === "text") {
         apiData.content_text = formData.content;
       }
+
+      // Upload file to Firebase Storage first, then create content record
       if (formData.file) {
-        apiData.file_name = formData.file.name;
+        const uploadRes = await uploadsAPI.upload(formData.file, 'content');
+        apiData.file_name = uploadRes.file.file_name;
+        apiData.file_url = uploadRes.file.public_url;
+        apiData.file_path = uploadRes.file.file_path;
       }
 
       const res = await contentAPI.create(apiData);
