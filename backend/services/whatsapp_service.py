@@ -76,34 +76,25 @@ class WhatsAppService:
     
     @classmethod
     def send_check_in_reminder(cls, coach_phone, coach_name, session_time, location_address, check_in_url):
-        """Send check-in reminder using the approved teko_session_reminder template.
+        """Send check-in reminder using the approved session_reminder template.
 
-        Template body: "Hi Coach {{1}}! Your session at {{2}} starts at {{3}}. ..."
-        Button URL:    ".../check-in/{{1}}"
+        Template body: "Hi {{1}}! Your coaching session starts at {{2}} at {{3}}.
+        Please share your location in this chat to check in ..."
+
+        Params: {{1}}=coach_name, {{2}}=session_time, {{3}}=location_address
 
         Falls back to Gemini plain-text if REMINDER_TEMPLATE_NAME is explicitly
         set to empty string.
         """
         template_name = Config.REMINDER_TEMPLATE_NAME
         if template_name:
-            # Extract token from check_in_url (last path segment)
-            token = check_in_url.rsplit('/', 1)[-1] if check_in_url else ''
-
             components = [
                 {
                     "type": "body",
                     "parameters": [
                         {"type": "text", "text": coach_name},
-                        {"type": "text", "text": location_address or "TBC"},
                         {"type": "text", "text": session_time},
-                    ]
-                },
-                {
-                    "type": "button",
-                    "sub_type": "url",
-                    "index": "0",
-                    "parameters": [
-                        {"type": "text", "text": token}
+                        {"type": "text", "text": location_address or "TBC"},
                     ]
                 },
             ]

@@ -44,7 +44,7 @@ class Config:
     REMINDER_MINUTES_BEFORE = int(os.getenv('REMINDER_MINUTES_BEFORE', '10'))
 
     # Reminder template (approved WhatsApp template name for session reminders)
-    REMINDER_TEMPLATE_NAME = os.getenv('REMINDER_TEMPLATE_NAME', 'teko_session_reminder')
+    REMINDER_TEMPLATE_NAME = os.getenv('REMINDER_TEMPLATE_NAME', 'session_reminder')
     REMINDER_TEMPLATE_LANGUAGE = os.getenv('REMINDER_TEMPLATE_LANGUAGE', 'en_US')
     
     # JWT
