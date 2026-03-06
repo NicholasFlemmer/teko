@@ -20,7 +20,7 @@ import { MainLayout } from "@/components/layout/MainLayout";
 import { CreateSessionModal } from "@/components/schedule/CreateSessionModal";
 import { SessionDetailModal } from "@/components/schedule/SessionDetailModal";
 import { cn } from "@/lib/utils";
-import { format, addMonths, subMonths, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isToday, isBefore, startOfWeek, endOfWeek } from "date-fns";
+import { format, addMonths, subMonths, addWeeks, subWeeks, addDays, subDays, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, isToday, isBefore, startOfWeek, endOfWeek } from "date-fns";
 import {
   Select,
   SelectContent,
@@ -206,10 +206,14 @@ export default function Schedule() {
 
   const goToPrevious = () => {
     if (viewMode === "month") setCurrentDate(subMonths(currentDate, 1));
+    else if (viewMode === "week") setCurrentDate(subWeeks(currentDate, 1));
+    else if (viewMode === "day") setCurrentDate(subDays(currentDate, 1));
   };
 
   const goToNext = () => {
     if (viewMode === "month") setCurrentDate(addMonths(currentDate, 1));
+    else if (viewMode === "week") setCurrentDate(addWeeks(currentDate, 1));
+    else if (viewMode === "day") setCurrentDate(addDays(currentDate, 1));
   };
 
   const goToToday = () => setCurrentDate(new Date());
@@ -441,7 +445,11 @@ export default function Schedule() {
                       <ChevronRight className="w-4 h-4" />
                     </Button>
                   </div>
-                  <h2 className="text-lg font-semibold text-foreground">{format(currentDate, "MMMM yyyy")}</h2>
+                  <h2 className="text-lg font-semibold text-foreground">
+                    {viewMode === "month" && format(currentDate, "MMMM yyyy")}
+                    {viewMode === "week" && `Week of ${format(startOfWeek(currentDate), "MMM d")} – ${format(endOfWeek(currentDate), "MMM d, yyyy")}`}
+                    {viewMode === "day" && format(currentDate, "EEEE, MMMM d, yyyy")}
+                  </h2>
                   <div className="flex rounded-lg border border-border overflow-hidden">
                     {(["month", "week", "day"] as ViewMode[]).map((mode) => (
                       <button
@@ -460,68 +468,167 @@ export default function Schedule() {
                   </div>
                 </div>
 
-                {/* Calendar grid */}
-                <div className="grid grid-cols-7 gap-px bg-border rounded-lg overflow-hidden">
-                  {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
-                    <div key={day} className="bg-muted/50 px-3 py-2 text-center text-sm font-medium text-muted-foreground">
-                      {day}
-                    </div>
-                  ))}
-                  {calendarDays.map((day) => {
-                    const daySessions = getSessionsForDate(day);
-                    const isPast = isBefore(day, today) && !isToday(day);
-                    const isCurrentMonth = isSameMonth(day, currentDate);
-                    return (
-                      <div
-                        key={day.toISOString()}
-                        className={cn(
-                          "calendar-cell",
-                          isToday(day) && "calendar-cell-today",
-                          isPast && "calendar-cell-past",
-                          !isCurrentMonth && "opacity-40"
-                        )}
-                      >
-                        <span className={cn("text-sm font-medium", isToday(day) ? "text-primary font-bold" : "text-foreground")}>
-                          {format(day, "d")}
-                        </span>
-                        {daySessions.length > 0 && (
-                          <div className="mt-1 space-y-1">
-                            {daySessions.slice(0, 2).map((session) => (
-                              <div
-                                key={session.id}
-                                onClick={(e) => { e.stopPropagation(); handleSessionClick(session); }}
-                                className={cn(
-                                  "text-xs px-1.5 py-0.5 rounded truncate cursor-pointer transition-opacity hover:opacity-80",
-                                  session.type === "match"
-                                    ? "bg-amber-500/20 text-amber-700 dark:text-amber-400"
-                                    : "bg-emerald-500/20 text-emerald-700 dark:text-emerald-400"
-                                )}
-                              >
-                                {session.time} {session.coach}
+                {/* Calendar grid — Month view */}
+                {viewMode === "month" && (
+                  <>
+                    <div className="grid grid-cols-7 gap-px bg-border rounded-lg overflow-hidden">
+                      {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
+                        <div key={day} className="bg-muted/50 px-3 py-2 text-center text-sm font-medium text-muted-foreground">
+                          {day}
+                        </div>
+                      ))}
+                      {calendarDays.map((day) => {
+                        const daySessions = getSessionsForDate(day);
+                        const isPast = isBefore(day, today) && !isToday(day);
+                        const isCurrentMonth = isSameMonth(day, currentDate);
+                        return (
+                          <div
+                            key={day.toISOString()}
+                            className={cn(
+                              "calendar-cell",
+                              isToday(day) && "calendar-cell-today",
+                              isPast && "calendar-cell-past",
+                              !isCurrentMonth && "opacity-40"
+                            )}
+                          >
+                            <span className={cn("text-sm font-medium", isToday(day) ? "text-primary font-bold" : "text-foreground")}>
+                              {format(day, "d")}
+                            </span>
+                            {daySessions.length > 0 && (
+                              <div className="mt-1 space-y-1">
+                                {daySessions.map((session) => (
+                                  <div
+                                    key={session.id}
+                                    onClick={(e) => { e.stopPropagation(); handleSessionClick(session); }}
+                                    className={cn(
+                                      "text-xs px-1.5 py-0.5 rounded truncate cursor-pointer transition-opacity hover:opacity-80",
+                                      session.type === "match"
+                                        ? "bg-amber-500/20 text-amber-700 dark:text-amber-400"
+                                        : "bg-emerald-500/20 text-emerald-700 dark:text-emerald-400"
+                                    )}
+                                  >
+                                    {session.time} {session.coach}
+                                  </div>
+                                ))}
                               </div>
-                            ))}
-                            {daySessions.length > 2 && (
-                              <div className="text-xs text-muted-foreground">+{daySessions.length - 2} more</div>
                             )}
                           </div>
-                        )}
+                        );
+                      })}
+                    </div>
+                    {/* Legend */}
+                    <div className="flex items-center gap-6 mt-4 text-sm text-muted-foreground">
+                      <span className="font-medium">Legend:</span>
+                      <div className="flex items-center gap-2">
+                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                        <span>Practice</span>
                       </div>
-                    );
-                  })}
-                </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                        <span>Match</span>
+                      </div>
+                    </div>
+                  </>
+                )}
 
-                {/* Legend */}
-                <div className="flex items-center gap-6 mt-4 text-sm text-muted-foreground">
-                  <span className="font-medium">Legend:</span>
-                  <div className="flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                    <span>Practice</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                    <span>Match</span>
-                  </div>
-                </div>
+                {/* Week view */}
+                {viewMode === "week" && (() => {
+                  const weekStart = startOfWeek(currentDate);
+                  const weekEnd = endOfWeek(currentDate);
+                  const weekDays = eachDayOfInterval({ start: weekStart, end: weekEnd });
+                  return (
+                    <div className="space-y-2">
+                      {weekDays.map((day) => {
+                        const daySessions = getSessionsForDate(day);
+                        return (
+                          <div key={day.toISOString()} className={cn(
+                            "p-3 rounded-lg border border-border",
+                            isToday(day) && "border-primary bg-primary/5"
+                          )}>
+                            <h4 className={cn("text-sm font-semibold mb-2", isToday(day) ? "text-primary" : "text-foreground")}>
+                              {format(day, "EEEE, MMM d")}
+                            </h4>
+                            {daySessions.length === 0 ? (
+                              <p className="text-xs text-muted-foreground">No sessions</p>
+                            ) : (
+                              <div className="space-y-1.5">
+                                {daySessions.map((session) => (
+                                  <div
+                                    key={session.id}
+                                    onClick={() => handleSessionClick(session)}
+                                    className="flex items-center gap-3 p-2 rounded-md hover:bg-muted/50 cursor-pointer transition-colors"
+                                  >
+                                    <div className={cn(
+                                      "w-1 h-8 rounded-full flex-shrink-0",
+                                      session.type === "match" ? "bg-amber-500" : "bg-emerald-500"
+                                    )} />
+                                    <div className="w-16 text-sm font-medium text-foreground">{session.time}</div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm text-foreground truncate">{session.team}</p>
+                                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                        <span className="flex items-center gap-1"><User className="w-3 h-3" />{session.coach}</span>
+                                        <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{session.location}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+
+                {/* Day view */}
+                {viewMode === "day" && (() => {
+                  const daySessions = getSessionsForDate(currentDate);
+                  return (
+                    <div>
+                      {daySessions.length === 0 ? (
+                        <div className="text-center py-12">
+                          <CalendarIcon className="w-10 h-10 text-muted-foreground/30 mx-auto mb-2" />
+                          <p className="text-sm text-muted-foreground">No sessions on this day</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {daySessions.map((session) => (
+                            <div
+                              key={session.id}
+                              onClick={() => handleSessionClick(session)}
+                              className="flex items-center gap-4 p-4 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer"
+                            >
+                              <div className={cn(
+                                "w-1 h-12 rounded-full flex-shrink-0",
+                                session.type === "match" ? "bg-amber-500" : "bg-emerald-500"
+                              )} />
+                              <div className="w-20 flex-shrink-0">
+                                <p className="text-sm font-semibold text-foreground">{session.time}</p>
+                                {session.endTime && <p className="text-xs text-muted-foreground">to {session.endTime}</p>}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm font-medium text-foreground">{session.team}</p>
+                                  <span className={cn(
+                                    "px-2 py-0.5 rounded-full text-xs font-medium capitalize",
+                                    session.type === "match"
+                                      ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                                      : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                                  )}>{session.type}</span>
+                                </div>
+                                <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                                  <span className="flex items-center gap-1"><User className="w-3 h-3" />{session.coach}</span>
+                                  <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{session.location}</span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </>
             )}
           </div>
