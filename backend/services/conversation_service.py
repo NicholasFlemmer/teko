@@ -563,8 +563,9 @@ Remember: You're helping coaches develop their skills and help their players imp
 
             # Resolve expected location from location_id
             location_id = session.get('location_id')
+            from config import Config
             expected_location = {}
-            allowed_radius = 100  # default
+            allowed_radius = Config.GEOLOCATION_RADIUS_METERS
 
             if location_id:
                 loc_record = FirebaseService.get_location(location_id)
@@ -628,7 +629,7 @@ Remember: You're helping coaches develop their skills and help their players imp
                 radius_str = f"{allowed_radius}m" if allowed_radius < 1000 else f"{allowed_radius/1000:.1f}km"
                 WhatsAppService.send_message(
                     phone_number=from_number,
-                    message_text=f"📍 You're {dist_str} from the venue (need to be within {radius_str}). This has been recorded as missed."
+                    message_text=f"📍 You're {dist_str} from the venue (need to be within {radius_str}). Please try again when you're closer, or contact your administrator if this seems wrong."
                 )
 
             print(f"📍 Check-in result for {coach_name}: within={within}, distance={distance:.1f}m")
