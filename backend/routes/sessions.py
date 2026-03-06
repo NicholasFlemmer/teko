@@ -3,6 +3,7 @@ from services.firebase_service import FirebaseService
 from services.whatsapp_service import WhatsAppService
 from routes.auth import token_required
 from utils.geolocation import verify_location, format_location
+from utils.phone import normalize_sa_phone
 from datetime import datetime, timedelta, timezone
 from config import Config
 import uuid
@@ -229,12 +230,28 @@ def send_reminder(session_id):
 
         coach_name = coach.get('name') or f"{coach.get('first_name', '')} {coach.get('last_name', '')}".strip() or 'Coach'
 
+        phone = normalize_sa_phone(coach.get('phone_number', ''))
+        if not phone:
+            return jsonify({
+                'success': False,
+                'error': f'Invalid or missing phone number for {coach_name}'
+            }), 400
+
+        # Resolve location address
+        location_address = session.get('address', '')
+        if not location_address:
+            location_id = session.get('location_id')
+            if location_id:
+                loc = FirebaseService.get_location(location_id)
+                if loc:
+                    location_address = loc.get('name', '') or loc.get('address', '')
+
         # Send WhatsApp reminder
         result = WhatsAppService.send_check_in_reminder(
-            coach_phone=coach.get('phone_number', ''),
+            coach_phone=phone,
             coach_name=coach_name,
             session_time=session.get('start_time', ''),
-            location_address=session.get('address', ''),
+            location_address=location_address,
             check_in_url=check_in_url
         )
         
