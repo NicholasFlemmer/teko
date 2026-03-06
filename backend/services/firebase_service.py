@@ -144,23 +144,36 @@ class FirebaseService:
             return {'id': doc.id, **doc.to_dict()}
         return None
     
+    @staticmethod
+    def get_session_coach_ids(session):
+        """Get list of coach IDs from a session (handles both coach_id and coach_ids)"""
+        coach_ids = session.get('coach_ids') or []
+        if not coach_ids:
+            single = session.get('coach_id')
+            if single:
+                coach_ids = [single]
+        return coach_ids
+
     @classmethod
     def get_all_sessions(cls, start_date=None, end_date=None, coach_id=None):
         """Get sessions with optional filters"""
         db = cls.get_db()
         query = db.collection('sessions')
-        
+
         if start_date:
             query = query.where('date', '>=', start_date)
         if end_date:
             query = query.where('date', '<=', end_date)
-        if coach_id:
-            query = query.where('coach_id', '==', coach_id)
-        
+
         sessions = []
         docs = query.stream()
         for doc in docs:
             sessions.append({'id': doc.id, **doc.to_dict()})
+
+        # Filter by coach in Python to support both coach_id and coach_ids fields
+        if coach_id:
+            sessions = [s for s in sessions if coach_id in cls.get_session_coach_ids(s)]
+
         return sessions
     
     @classmethod

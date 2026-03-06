@@ -70,7 +70,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
   const [submitting, setSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     team: "",
-    coach: "",
+    coaches: [] as string[],
     date: "",
     startTime: "",
     endTime: "",
@@ -85,7 +85,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
 
   const resetForm = () => {
     setFormData({
-      team: "", coach: "", date: "", startTime: "", endTime: "",
+      team: "", coaches: [], date: "", startTime: "", endTime: "",
       location: "", sessionType: "", notes: "",
     });
   };
@@ -93,7 +93,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.team || !formData.coach || !formData.date || !formData.startTime || !formData.sessionType) {
+    if (!formData.team || formData.coaches.length === 0 || !formData.date || !formData.startTime || !formData.sessionType) {
       toast({ title: "Missing fields", description: "Please fill in all required fields.", variant: "destructive" });
       return;
     }
@@ -102,7 +102,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
     try {
       await sessionsAPI.create({
         team_id: formData.team,
-        coach_id: formData.coach,
+        coach_ids: formData.coaches,
         location_id: formData.location || undefined,
         date: formData.date,
         start_time: formData.startTime,
@@ -257,22 +257,42 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="coach">Coach</Label>
-            <Select
-              value={formData.coach}
-              onValueChange={(value) => setFormData({ ...formData, coach: value })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select a coach" />
-              </SelectTrigger>
-              <SelectContent>
-                {coaches.map((coach) => (
-                  <SelectItem key={coach.id} value={coach.id.toString()}>
+            <Label>Coach(es)</Label>
+            <div className="border border-border rounded-md p-2 max-h-[140px] overflow-y-auto space-y-1">
+              {coaches.map((coach) => {
+                const isSelected = formData.coaches.includes(coach.id.toString());
+                return (
+                  <label
+                    key={coach.id}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted/50 cursor-pointer text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => {
+                        const id = coach.id.toString();
+                        setFormData((prev) => ({
+                          ...prev,
+                          coaches: isSelected
+                            ? prev.coaches.filter((c) => c !== id)
+                            : [...prev.coaches, id],
+                        }));
+                      }}
+                      className="rounded border-border"
+                    />
                     {coach.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                  </label>
+                );
+              })}
+              {coaches.length === 0 && (
+                <p className="text-xs text-muted-foreground px-2 py-1">No coaches available</p>
+              )}
+            </div>
+            {formData.coaches.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {formData.coaches.length} coach{formData.coaches.length > 1 ? "es" : ""} selected
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">

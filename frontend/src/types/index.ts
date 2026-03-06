@@ -20,6 +20,7 @@ export interface Session {
   start_time: string;
   end_time: string;
   coach_id: string;
+  coach_ids?: string[];
   team_id?: string;
   location_id?: string;
   location?: { latitude: number; longitude: number };

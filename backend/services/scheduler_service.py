@@ -44,32 +44,10 @@ class SchedulerService:
 
                     # If within the reminder window (e.g., 9-11 minutes before)
                     if Config.REMINDER_MINUTES_BEFORE - 1 <= time_diff <= Config.REMINDER_MINUTES_BEFORE + 1:
-                        # Get coach information
-                        coach_id = session.get('coach_id')
-                        if not coach_id:
+                        # Get all coaches for this session
+                        coach_ids = FirebaseService.get_session_coach_ids(session)
+                        if not coach_ids:
                             errors.append(f"No coach assigned to session {session['id']}")
-                            continue
-
-                        coach = FirebaseService.get_coach(coach_id)
-
-                        if not coach:
-                            errors.append(f"Coach not found for session {session['id']}")
-                            continue
-
-                        # Generate check-in token
-                        token = str(uuid.uuid4())
-                        expires_at = now + timedelta(minutes=Config.CHECK_IN_TOKEN_EXPIRY_MINUTES)
-
-                        FirebaseService.create_check_in_token(token, session['id'], expires_at)
-
-                        # Generate check-in URL
-                        check_in_url = f"{Config.FRONTEND_URL}/check-in/{token}"
-
-                        coach_name = coach.get('name') or f"{coach.get('first_name', '')} {coach.get('last_name', '')}".strip() or 'Coach'
-
-                        phone = normalize_sa_phone(coach.get('phone_number', ''))
-                        if not phone:
-                            errors.append(f"Invalid/missing phone for coach {coach_name} (session {session['id']})")
                             continue
 
                         # Resolve location address from location_id if not on session
@@ -81,21 +59,40 @@ class SchedulerService:
                                 if loc:
                                     location_address = loc.get('name', '') or loc.get('address', '')
 
-                        # Send WhatsApp reminder
-                        result = WhatsAppService.send_check_in_reminder(
-                            coach_phone=phone,
-                            coach_name=coach_name,
-                            session_time=session.get('start_time', ''),
-                            location_address=location_address,
-                            check_in_url=check_in_url
-                        )
+                        sent_any = False
+                        for coach_id in coach_ids:
+                            coach = FirebaseService.get_coach(coach_id)
+                            if not coach:
+                                errors.append(f"Coach {coach_id} not found for session {session['id']}")
+                                continue
 
-                        if result.get('success'):
-                            # Update session status to 'reminded'
+                            coach_name = coach.get('name') or f"{coach.get('first_name', '')} {coach.get('last_name', '')}".strip() or 'Coach'
+                            phone = normalize_sa_phone(coach.get('phone_number', ''))
+                            if not phone:
+                                errors.append(f"Invalid/missing phone for coach {coach_name} (session {session['id']})")
+                                continue
+
+                            token = str(uuid.uuid4())
+                            expires_at = now + timedelta(minutes=Config.CHECK_IN_TOKEN_EXPIRY_MINUTES)
+                            FirebaseService.create_check_in_token(token, session['id'], expires_at)
+                            check_in_url = f"{Config.FRONTEND_URL}/check-in/{token}"
+
+                            result = WhatsAppService.send_check_in_reminder(
+                                coach_phone=phone,
+                                coach_name=coach_name,
+                                session_time=session.get('start_time', ''),
+                                location_address=location_address,
+                                check_in_url=check_in_url
+                            )
+
+                            if result.get('success'):
+                                sent_any = True
+                                reminders_sent += 1
+                            else:
+                                errors.append(f"Failed to send reminder to {coach_name} for session {session['id']}: {result.get('error')}")
+
+                        if sent_any:
                             FirebaseService.update_session(session['id'], {'status': 'reminded'})
-                            reminders_sent += 1
-                        else:
-                            errors.append(f"Failed to send reminder for session {session['id']}: {result.get('error')}")
 
                 except Exception as e:
                     errors.append(f"Error processing session {session.get('id', 'unknown')}: {str(e)}")

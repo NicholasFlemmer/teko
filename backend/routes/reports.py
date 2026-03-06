@@ -24,23 +24,22 @@ def get_coach_attendance(current_user):
         # Aggregate by coach
         coach_data = {}
         for s in sessions:
-            cid = s.get('coach_id')
-            if not cid:
-                continue
-            if cid not in coach_data:
-                coach = coach_map.get(cid, {})
-                coach_name = coach.get('name') or (
-                    (coach.get('first_name', '') + ' ' + coach.get('last_name', '')).strip()
-                ) or 'Unknown'
-                coach_data[cid] = {
-                    'coach_id': cid,
-                    'coach_name': coach_name,
-                    'total_sessions': 0,
-                    'checked_in': 0,
-                }
-            coach_data[cid]['total_sessions'] += 1
-            if s.get('status') == 'checked_in':
-                coach_data[cid]['checked_in'] += 1
+            cids = FirebaseService.get_session_coach_ids(s)
+            for cid in cids:
+                if cid not in coach_data:
+                    coach = coach_map.get(cid, {})
+                    coach_name = coach.get('name') or (
+                        (coach.get('first_name', '') + ' ' + coach.get('last_name', '')).strip()
+                    ) or 'Unknown'
+                    coach_data[cid] = {
+                        'coach_id': cid,
+                        'coach_name': coach_name,
+                        'total_sessions': 0,
+                        'checked_in': 0,
+                    }
+                coach_data[cid]['total_sessions'] += 1
+                if s.get('status') == 'checked_in':
+                    coach_data[cid]['checked_in'] += 1
 
         data = list(coach_data.values())
 

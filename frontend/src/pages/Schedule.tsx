@@ -106,10 +106,18 @@ export default function Schedule() {
 
   // Map backend session to display format
   const mapSession = useCallback((raw: any): Session => {
+    // Support both coach_ids (array) and coach_id (string)
+    const coachIds: string[] = raw.coach_ids && raw.coach_ids.length > 0
+      ? raw.coach_ids
+      : raw.coach_id ? [raw.coach_id] : [];
+    const coachNames = coachIds
+      .map((id: string) => coachMap[id] || "Unknown Coach")
+      .join(", ") || "Unassigned";
+
     return {
       id: raw.id,
       date: raw.date,
-      coach: coachMap[raw.coach_id] || (raw.coach_id ? "Unknown Coach" : "Unassigned"),
+      coach: coachNames,
       team: teamMap[raw.team_id] || (raw.team_id ? "Unknown Team" : "Unassigned"),
       location: locationMap[raw.location_id] || raw.address || (raw.location_id ? "Unknown Location" : "No Location"),
       time: raw.start_time ? raw.start_time.slice(0, 5) : "",
@@ -485,18 +493,19 @@ export default function Schedule() {
                           <div
                             key={day.toISOString()}
                             className={cn(
-                              "calendar-cell",
+                              "calendar-cell cursor-pointer",
                               isToday(day) && "calendar-cell-today",
                               isPast && "calendar-cell-past",
                               !isCurrentMonth && "opacity-40"
                             )}
+                            onClick={() => { setCurrentDate(day); setViewMode("day"); }}
                           >
                             <span className={cn("text-sm font-medium", isToday(day) ? "text-primary font-bold" : "text-foreground")}>
                               {format(day, "d")}
                             </span>
                             {daySessions.length > 0 && (
                               <div className="mt-1 space-y-1">
-                                {daySessions.map((session) => (
+                                {daySessions.slice(0, 2).map((session) => (
                                   <div
                                     key={session.id}
                                     onClick={(e) => { e.stopPropagation(); handleSessionClick(session); }}
@@ -510,6 +519,11 @@ export default function Schedule() {
                                     {session.time} {session.coach}
                                   </div>
                                 ))}
+                                {daySessions.length > 2 && (
+                                  <div className="text-xs text-primary font-medium cursor-pointer hover:underline">
+                                    +{daySessions.length - 2} more
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>

@@ -70,11 +70,17 @@ def create_session():
             }), 400
 
         # Build session data
+        # Support coach_ids (array) or coach_id (string, backward compat)
+        coach_ids = data.get('coach_ids', [])
+        if not coach_ids and data.get('coach_id'):
+            coach_ids = [data['coach_id']]
+
         session_data = {
             'date': data['date'],
             'start_time': data['start_time'],
             'end_time': data.get('end_time', ''),
-            'coach_id': data.get('coach_id', ''),
+            'coach_ids': coach_ids,
+            'coach_id': coach_ids[0] if coach_ids else '',
             'address': data.get('address', ''),
         }
 
@@ -122,20 +128,18 @@ def update_session(session_id):
         
         # Update allowed fields
         update_data = {}
-        allowed_fields = ['date', 'start_time', 'end_time', 'coach_id', 'location', 'address',
+        allowed_fields = ['date', 'start_time', 'end_time', 'coach_id', 'coach_ids', 'location', 'address',
                           'status', 'team_id', 'type', 'notes', 'location_id']
-        
+
         for field in allowed_fields:
             if field in data:
-                if field == 'coach_id':
-                    # Validate coach exists
-                    coach = FirebaseService.get_coach(data['coach_id'])
-                    if not coach:
-                        return jsonify({
-                            'success': False,
-                            'error': 'Coach not found'
-                        }), 404
-                
+                if field == 'coach_ids':
+                    update_data['coach_ids'] = data['coach_ids']
+                    update_data['coach_id'] = data['coach_ids'][0] if data['coach_ids'] else ''
+                    continue
+                if field == 'coach_id' and 'coach_ids' in data:
+                    continue  # coach_ids takes precedence
+
                 if field == 'location':
                     location = data['location']
                     if 'latitude' not in location or 'longitude' not in location:
@@ -204,37 +208,12 @@ def send_reminder(session_id):
                 'error': 'Session not found'
             }), 404
         
-        # Get coach
-        coach_id = session.get('coach_id')
-        if not coach_id:
+        # Get all coaches for this session
+        coach_ids = FirebaseService.get_session_coach_ids(session)
+        if not coach_ids:
             return jsonify({
                 'success': False,
                 'error': 'No coach assigned to this session'
-            }), 400
-
-        coach = FirebaseService.get_coach(coach_id)
-        if not coach:
-            return jsonify({
-                'success': False,
-                'error': 'Coach not found'
-            }), 404
-
-        # Generate check-in token
-        token = str(uuid.uuid4())
-        expires_at = datetime.utcnow() + timedelta(minutes=Config.CHECK_IN_TOKEN_EXPIRY_MINUTES)
-
-        FirebaseService.create_check_in_token(token, session_id, expires_at)
-
-        # Generate check-in URL
-        check_in_url = f"{Config.FRONTEND_URL}/check-in/{token}"
-
-        coach_name = coach.get('name') or f"{coach.get('first_name', '')} {coach.get('last_name', '')}".strip() or 'Coach'
-
-        phone = normalize_sa_phone(coach.get('phone_number', ''))
-        if not phone:
-            return jsonify({
-                'success': False,
-                'error': f'Invalid or missing phone number for {coach_name}'
             }), 400
 
         # Resolve location address
@@ -246,22 +225,40 @@ def send_reminder(session_id):
                 if loc:
                     location_address = loc.get('name', '') or loc.get('address', '')
 
-        # Send WhatsApp reminder
-        result = WhatsAppService.send_check_in_reminder(
-            coach_phone=phone,
-            coach_name=coach_name,
-            session_time=session.get('start_time', ''),
-            location_address=location_address,
-            check_in_url=check_in_url
-        )
-        
+        results = []
+        for cid in coach_ids:
+            coach = FirebaseService.get_coach(cid)
+            if not coach:
+                results.append({'coach_id': cid, 'error': 'Coach not found'})
+                continue
+
+            coach_name = coach.get('name') or f"{coach.get('first_name', '')} {coach.get('last_name', '')}".strip() or 'Coach'
+            phone = normalize_sa_phone(coach.get('phone_number', ''))
+            if not phone:
+                results.append({'coach_id': cid, 'error': f'Invalid phone for {coach_name}'})
+                continue
+
+            token = str(uuid.uuid4())
+            expires_at = datetime.utcnow() + timedelta(minutes=Config.CHECK_IN_TOKEN_EXPIRY_MINUTES)
+            FirebaseService.create_check_in_token(token, session_id, expires_at)
+            check_in_url = f"{Config.FRONTEND_URL}/check-in/{token}"
+
+            result = WhatsAppService.send_check_in_reminder(
+                coach_phone=phone,
+                coach_name=coach_name,
+                session_time=session.get('start_time', ''),
+                location_address=location_address,
+                check_in_url=check_in_url
+            )
+            results.append({'coach_id': cid, 'coach_name': coach_name, **result})
+
         # Update session status
         FirebaseService.update_session(session_id, {'status': 'reminded'})
-        
+
         return jsonify({
             'success': True,
-            'message': 'Reminder sent successfully',
-            'whatsapp_result': result
+            'message': f'Reminder sent to {len(coach_ids)} coach(es)',
+            'results': results
         }), 200
     except Exception as e:
         return jsonify({
