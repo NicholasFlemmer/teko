@@ -1,5 +1,5 @@
-import { useState, useRef } from "react";
-import { MapPin, Camera, X, ImagePlus, Loader2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { MapPin, Loader2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -20,8 +20,6 @@ interface AddLocationModalProps {
 }
 
 export function AddLocationModal({ open, onOpenChange, onLocationAdded }: AddLocationModalProps) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [photos, setPhotos] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -31,20 +29,13 @@ export function AddLocationModal({ open, onOpenChange, onLocationAdded }: AddLoc
     notes: "",
   });
 
-  const handlePhotosChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader();
-      reader.onloadend = () => setPhotos((prev) => [...prev, reader.result as string]);
-      reader.readAsDataURL(file);
-    });
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  const removePhoto = (index: number) => {
-    setPhotos((prev) => prev.filter((_, i) => i !== index));
-  };
+  // Reset form when modal opens
+  useEffect(() => {
+    if (open) {
+      setFormData({ name: "", address: "", googleMapsLink: "", notes: "" });
+      setError(null);
+    }
+  }, [open]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,7 +56,6 @@ export function AddLocationModal({ open, onOpenChange, onLocationAdded }: AddLoc
         ...(coords && { latitude: coords.latitude, longitude: coords.longitude }),
       });
       onOpenChange(false);
-      setPhotos([]);
       setFormData({
         name: "",
         address: "",
@@ -114,33 +104,33 @@ export function AddLocationModal({ open, onOpenChange, onLocationAdded }: AddLoc
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="address">Full Address</Label>
+            <Label htmlFor="googleMapsLink">Google Maps Link *</Label>
+            <Input
+              id="googleMapsLink"
+              type="url"
+              placeholder="Paste a Google Maps link for the venue"
+              value={formData.googleMapsLink}
+              onChange={(e) => setFormData({ ...formData, googleMapsLink: e.target.value })}
+              required
+            />
+            <p className="text-xs text-muted-foreground">
+              This is used to determine the venue's GPS coordinates for check-in
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="address">Address (optional)</Label>
             <Textarea
               id="address"
               placeholder="e.g. 123 Main Street, Johannesburg, 2000"
               value={formData.address}
               onChange={(e) => setFormData({ ...formData, address: e.target.value })}
               rows={2}
-              required
             />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="googleMapsLink">Google Maps Link</Label>
-            <Input
-              id="googleMapsLink"
-              type="url"
-              placeholder="e.g. https://maps.google.com/..."
-              value={formData.googleMapsLink}
-              onChange={(e) => setFormData({ ...formData, googleMapsLink: e.target.value })}
-            />
-            <p className="text-xs text-muted-foreground">
-              Paste a Google Maps share link for the location
-            </p>
           </div>
 
           {/* Map Preview */}
-          {formData.address.trim() && (
+          {formData.address.trim() && import.meta.env.VITE_GOOGLE_MAPS_API_KEY && (
             <div className="space-y-2">
               <Label>Map Preview</Label>
               <div className="rounded-lg border border-border overflow-hidden">
@@ -158,39 +148,6 @@ export function AddLocationModal({ open, onOpenChange, onLocationAdded }: AddLoc
             </div>
           )}
 
-
-          <div className="space-y-2">
-            <Label>Photos (Optional)</Label>
-            <div className="flex flex-wrap gap-2">
-              {photos.map((photo, index) => (
-                <div key={index} className="relative w-16 h-16 rounded-md overflow-hidden border border-border">
-                  <img src={photo} alt={`Location photo ${index + 1}`} className="w-full h-full object-cover" />
-                  <button
-                    type="button"
-                    className="absolute top-0 right-0 w-4 h-4 bg-destructive text-destructive-foreground rounded-full flex items-center justify-center"
-                    onClick={() => removePhoto(index)}
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                className="w-16 h-16 rounded-md border-2 border-dashed border-border hover:border-primary transition-colors flex items-center justify-center bg-muted"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <ImagePlus className="w-5 h-5 text-muted-foreground" />
-              </button>
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={handlePhotosChange}
-            />
-          </div>
 
           <div className="space-y-2">
             <Label htmlFor="notes">Notes (Optional)</Label>

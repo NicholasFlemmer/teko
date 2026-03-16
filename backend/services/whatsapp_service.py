@@ -1,6 +1,9 @@
 import requests
+import logging
 from config import Config
 from utils.phone import normalize_sa_phone
+
+logger = logging.getLogger(__name__)
 
 class WhatsAppService:
     """Service for WhatsApp Business API operations"""
@@ -28,7 +31,7 @@ class WhatsAppService:
 
         formatted_phone = normalize_sa_phone(phone_number)
         if not formatted_phone:
-            print(f"Invalid phone number: {phone_number}")
+            logger.warning("Invalid phone number provided")
             return {"success": False, "error": f"Invalid phone number: {phone_number}"}
         
         # Construct message body
@@ -48,12 +51,15 @@ class WhatsAppService:
         }
         
         try:
-            print(f"📤 Sending WhatsApp message to: {formatted_phone}")
-            print(f"📝 Message: {full_message[:50]}...")
-            response = requests.post(url, json=payload, headers=headers)
+            logger.info("Sending WhatsApp message to: %s", formatted_phone)
+            logger.debug("Message preview: %s...", full_message[:50])
+            response = requests.post(url, json=payload, headers=headers, timeout=15)
             response.raise_for_status()
-            response_data = response.json()
-            print(f"✅ WhatsApp API Response: {response_data}")
+            try:
+                response_data = response.json()
+            except ValueError:
+                response_data = {}
+            logger.debug("WhatsApp API response: %s", response_data)
             return {
                 "success": True,
                 "data": response_data,
@@ -61,17 +67,22 @@ class WhatsAppService:
             }
         except requests.exceptions.RequestException as e:
             error_detail = str(e)
+            status_code = getattr(e.response, 'status_code', None) if hasattr(e, 'response') else None
             if hasattr(e, 'response') and e.response is not None:
                 try:
                     error_detail = e.response.json()
-                except:
+                except Exception:
                     error_detail = e.response.text
-            print(f"❌ WhatsApp API Error: {error_detail}")
+            if status_code == 429:
+                logger.warning(f"WhatsApp API rate limited when sending to {formatted_phone}")
+            else:
+                logger.error(f"WhatsApp API Error ({status_code}): {error_detail}")
             return {
                 "success": False,
                 "error": str(e),
                 "error_detail": error_detail,
-                "status_code": getattr(e.response, 'status_code', None) if hasattr(e, 'response') else None
+                "status_code": status_code,
+                "rate_limited": status_code == 429,
             }
     
     @classmethod
@@ -88,13 +99,15 @@ class WhatsAppService:
         """
         template_name = Config.REMINDER_TEMPLATE_NAME
         if template_name:
+            # Meta rejects template params with newlines/tabs — strip them
+            clean_location = (location_address or "TBC").replace('\n', ' ').replace('\t', ' ').strip()
             components = [
                 {
                     "type": "body",
                     "parameters": [
                         {"type": "text", "text": coach_name},
                         {"type": "text", "text": session_time},
-                        {"type": "text", "text": location_address or "TBC"},
+                        {"type": "text", "text": clean_location},
                     ]
                 },
             ]
@@ -139,7 +152,7 @@ class WhatsAppService:
         
         formatted_phone = normalize_sa_phone(phone_number)
         if not formatted_phone:
-            print(f"Invalid phone number for template: {phone_number}")
+            logger.warning("Invalid phone number for template")
             return {"success": False, "error": f"Invalid phone number: {phone_number}"}
 
         payload = {
@@ -158,18 +171,31 @@ class WhatsAppService:
             payload["template"]["components"] = components
         
         try:
-            response = requests.post(url, json=payload, headers=headers)
+            response = requests.post(url, json=payload, headers=headers, timeout=15)
             response.raise_for_status()
+            try:
+                resp_data = response.json()
+            except ValueError:
+                resp_data = {}
             return {
                 "success": True,
-                "data": response.json(),
+                "data": resp_data,
                 "status_code": response.status_code
             }
         except requests.exceptions.RequestException as e:
+            error_detail = str(e)
+            status_code = None
+            if hasattr(e, 'response') and e.response is not None:
+                status_code = e.response.status_code
+                try:
+                    error_detail = e.response.json().get('error', {}).get('message', str(e))
+                except Exception:
+                    error_detail = e.response.text or str(e)
+            logger.error("Template send failed: %s (status=%s)", error_detail, status_code)
             return {
                 "success": False,
-                "error": str(e),
-                "status_code": getattr(e.response, 'status_code', None) if hasattr(e, 'response') else None
+                "error": error_detail,
+                "status_code": status_code,
             }
 
     @classmethod
@@ -182,6 +208,8 @@ class WhatsAppService:
         Returns:
             dict: API response or error
         """
+        if not message_id:
+            return {"success": False, "error": "No message_id provided"}
         url = f"{Config.WHATSAPP_API_URL}/{Config.WHATSAPP_PHONE_NUMBER_ID}/messages"
 
         headers = {
@@ -196,18 +224,22 @@ class WhatsAppService:
         }
 
         try:
-            response = requests.post(url, json=payload, headers=headers)
+            response = requests.post(url, json=payload, headers=headers, timeout=10)
             response.raise_for_status()
-            print(f"✅ Marked message {message_id} as read")
-            return {"success": True, "data": response.json()}
+            logger.debug("Marked message %s as read", message_id)
+            try:
+                resp_data = response.json()
+            except ValueError:
+                resp_data = {}
+            return {"success": True, "data": resp_data}
         except requests.exceptions.RequestException as e:
             error_detail = str(e)
             if hasattr(e, 'response') and e.response is not None:
                 try:
                     error_detail = e.response.json()
-                except:
+                except Exception:
                     error_detail = e.response.text
-            print(f"⚠️ Failed to mark message as read: {error_detail}")
+            logger.warning("Failed to mark message as read: %s", error_detail)
             return {"success": False, "error": str(e), "error_detail": error_detail}
 
     @classmethod
@@ -223,6 +255,8 @@ class WhatsAppService:
         Returns:
             dict: API response or error
         """
+        if not message_id:
+            return {"success": False, "error": "No message_id provided"}
         url = f"{Config.WHATSAPP_TYPING_API_URL}/{Config.WHATSAPP_PHONE_NUMBER_ID}/messages"
 
         headers = {
@@ -237,18 +271,22 @@ class WhatsAppService:
         }
 
         try:
-            response = requests.post(url, json=payload, headers=headers)
+            response = requests.post(url, json=payload, headers=headers, timeout=10)
             response.raise_for_status()
-            print(f"⌨️ Typing indicator sent for message {message_id}")
-            return {"success": True, "data": response.json()}
+            logger.debug("Typing indicator sent for message %s", message_id)
+            try:
+                resp_data = response.json()
+            except ValueError:
+                resp_data = {}
+            return {"success": True, "data": resp_data}
         except requests.exceptions.RequestException as e:
             error_detail = str(e)
             if hasattr(e, 'response') and e.response is not None:
                 try:
                     error_detail = e.response.json()
-                except:
+                except Exception:
                     error_detail = e.response.text
-            print(f"⚠️ Failed to send typing indicator: {error_detail}")
+            logger.warning("Failed to send typing indicator: %s", error_detail)
             return {"success": False, "error": str(e), "error_detail": error_detail}
 
     @classmethod
@@ -272,7 +310,7 @@ class WhatsAppService:
         }
 
         try:
-            response = requests.get(url, headers=headers, params=params)
+            response = requests.get(url, headers=headers, params=params, timeout=15)
             response.raise_for_status()
             data = response.json()
             templates = [t for t in data.get("data", []) if t.get("status") == "APPROVED"]
@@ -284,5 +322,5 @@ class WhatsAppService:
                     error_detail = e.response.json()
                 except Exception:
                     error_detail = e.response.text
-            print(f"❌ Failed to fetch templates: {error_detail}")
+            logger.error("Failed to fetch templates: %s", error_detail)
             return {"success": False, "error": str(e), "error_detail": error_detail}

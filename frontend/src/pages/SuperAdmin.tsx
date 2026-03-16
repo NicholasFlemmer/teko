@@ -195,6 +195,10 @@ export default function SuperAdmin() {
       toast({ title: "Error", description: "Password is required for new admins.", variant: "destructive" });
       return;
     }
+    if (adminForm.password && adminForm.password.length < 8) {
+      toast({ title: "Error", description: "Password must be at least 8 characters.", variant: "destructive" });
+      return;
+    }
 
     setSavingAdmin(true);
     try {
@@ -317,9 +321,7 @@ export default function SuperAdmin() {
         maintenance_mode: maintenanceMode,
         auto_backup: autoBackup,
       });
-      setEmailVerified(false);
-      toast({ title: "Email settings saved", description: "A verification email has been sent." });
-      setTimeout(() => setEmailVerified(true), 2000);
+      toast({ title: "Email settings saved", description: "Email sender settings updated successfully." });
     } catch (err: any) {
       toast({
         title: "Save failed",
@@ -331,7 +333,10 @@ export default function SuperAdmin() {
     }
   };
 
+  const [savingSystemSetting, setSavingSystemSetting] = useState(false);
+
   const handleSaveSystemSettings = async (updates: { maintenance_mode?: boolean; auto_backup?: boolean }) => {
+    if (savingSystemSetting) return; // Prevent concurrent toggles
     const newMaintenance = updates.maintenance_mode ?? maintenanceMode;
     const newBackup = updates.auto_backup ?? autoBackup;
 
@@ -339,6 +344,7 @@ export default function SuperAdmin() {
     if (updates.maintenance_mode !== undefined) setMaintenanceMode(updates.maintenance_mode);
     if (updates.auto_backup !== undefined) setAutoBackup(updates.auto_backup);
 
+    setSavingSystemSetting(true);
     try {
       await adminAPI.updateSettings({
         maintenance_mode: newMaintenance,
@@ -355,6 +361,8 @@ export default function SuperAdmin() {
         description: err.message || "Failed to update settings.",
         variant: "destructive",
       });
+    } finally {
+      setSavingSystemSetting(false);
     }
   };
 
@@ -582,6 +590,7 @@ export default function SuperAdmin() {
                   </div>
                   <Switch
                     checked={maintenanceMode}
+                    disabled={savingSystemSetting}
                     onCheckedChange={(checked) => handleSaveSystemSettings({ maintenance_mode: checked })}
                   />
                 </div>
@@ -593,6 +602,7 @@ export default function SuperAdmin() {
                   </div>
                   <Switch
                     checked={autoBackup}
+                    disabled={savingSystemSetting}
                     onCheckedChange={(checked) => handleSaveSystemSettings({ auto_backup: checked })}
                   />
                 </div>

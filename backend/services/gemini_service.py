@@ -1,5 +1,11 @@
 import google.generativeai as genai
+import logging
 from config import Config
+
+logger = logging.getLogger(__name__)
+
+# Timeout for Gemini API calls in seconds
+GEMINI_TIMEOUT = 30
 
 class GeminiService:
     """Service for Google Gemini AI operations"""
@@ -9,7 +15,12 @@ class GeminiService:
     @classmethod
     def initialize(cls):
         """Initialize Gemini AI"""
-        genai.configure(api_key=Config.GEMINI_API_KEY)
+        api_key = Config.GEMINI_API_KEY
+        if not api_key:
+            logger.error("GEMINI_API_KEY not configured — AI features will not work")
+            cls._model = None
+            return None
+        genai.configure(api_key=api_key)
         cls._model = genai.GenerativeModel('gemini-2.5-flash')
         return cls._model
     
@@ -33,7 +44,9 @@ class GeminiService:
             str: Generated message text
         """
         model = cls.get_model()
-        
+        if model is None:
+            return f"Hi {coach_name}! 👋 Your session at {location_address} starts at {session_time}. Please share your location here to check in 📍 (tap + → Location → Send current location)."
+
         prompt = f"""Generate a friendly, professional WhatsApp message to remind a coach about their upcoming session.
 
 Coach Name: {coach_name}
@@ -51,26 +64,34 @@ Generate ONLY the message text, without any additional formatting or explanation
         
         try:
             response = model.generate_content(prompt)
-            message = response.text.strip()
-            return message
+            text = getattr(response, 'text', None)
+            if not text:
+                raise ValueError("Empty response from Gemini")
+            return text.strip()
         except Exception as e:
-            # Fallback to a default message if Gemini fails
+            logger.warning(f"Gemini check-in message failed: {e}")
             return f"Hi {coach_name}! 👋 Your session at {location_address} starts at {session_time}. Please share your location here to check in 📍 (tap + → Location → Send current location)."
-    
+
     @classmethod
     def generate_custom_message(cls, prompt):
         """Generate custom message based on prompt
-        
+
         Args:
             prompt: Custom prompt for message generation
-            
+
         Returns:
             str: Generated text
         """
         model = cls.get_model()
-        
+        if model is None:
+            return "Sorry, the AI assistant is not configured. Please contact your administrator."
+
         try:
             response = model.generate_content(prompt)
-            return response.text.strip()
+            text = getattr(response, 'text', None)
+            if not text:
+                raise ValueError("Empty response from Gemini")
+            return text.strip()
         except Exception as e:
-            return f"Error generating message: {str(e)}"
+            logger.warning(f"Gemini custom message failed: {e}")
+            return "Sorry, I couldn't generate a response right now. Please try again."

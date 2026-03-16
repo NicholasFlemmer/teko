@@ -16,10 +16,10 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { broadcastsAPI, coachesAPI } from "@/services/api";
 
-const COST_PER_MESSAGE = 1; // R1 per WhatsApp message outside 24h window
+const COST_PER_MESSAGE_FALLBACK = 1; // Fallback R1 per WhatsApp message
 
 interface Recipient {
-  id: number;
+  id: string;
   name: string;
   phone: string;
   email: string;
@@ -31,7 +31,7 @@ export default function Broadcasts() {
   const [channel, setChannel] = useState<"whatsapp" | "email">("whatsapp");
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
-  const [selectedRecipients, setSelectedRecipients] = useState<number[]>([]);
+  const [selectedRecipients, setSelectedRecipients] = useState<string[]>([]);
   const [allSelected, setAllSelected] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -45,16 +45,18 @@ export default function Broadcasts() {
   const [broadcasts, setBroadcasts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [pricing, setPricing] = useState<{ marketing: number; utility: number; service: number; usd_to_zar: number } | null>(null);
 
   // Fetch recipients (coaches) and broadcast history on mount
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [coachesRes, broadcastsRes, templatesRes] = await Promise.all([
+        const [coachesRes, broadcastsRes, templatesRes, pricingRes] = await Promise.all([
           coachesAPI.getAll(),
           broadcastsAPI.getAll(),
           broadcastsAPI.getTemplates().catch(() => ({ success: false, templates: [] })),
+          broadcastsAPI.getPricing().catch(() => ({ success: false, pricing: null })),
         ]);
 
         if (coachesRes.success && coachesRes.coaches) {
@@ -75,6 +77,10 @@ export default function Broadcasts() {
 
         if (templatesRes.success && templatesRes.templates) {
           setTemplates(templatesRes.templates);
+        }
+
+        if (pricingRes.success && pricingRes.pricing) {
+          setPricing(pricingRes.pricing);
         }
       } catch (err: any) {
         toast({
@@ -102,26 +108,37 @@ export default function Broadcasts() {
     const bodyText = bodyComp?.text || "";
     // Count variables like {{1}}, {{2}}, etc.
     const vars = bodyText.match(/\{\{\d+\}\}/g) || [];
-    return { bodyText, headerText: headerComp?.text, buttons: buttonComp?.buttons, varCount: vars.length };
+    const uniqueVars = new Set(vars);
+    return { bodyText, headerText: headerComp?.text, buttons: buttonComp?.buttons, varCount: uniqueVars.size };
   }, [activeTemplate]);
 
+  // Determine message type for costing: templates are typically 'utility', custom text in 24h window is 'service' (free)
+  const messageType = messageMode === "template" ? "utility" : "service";
+
   const costBreakdown = useMemo(() => {
-    if (channel !== "whatsapp") return { billable: 0, free: activeRecipients.length, total: 0 };
+    if (channel !== "whatsapp") return { billable: 0, free: activeRecipients.length, totalZar: 0, totalUsd: 0 };
     const now = Date.now();
     const twentyFourHours = 24 * 60 * 60 * 1000;
     let billable = 0;
     let free = 0;
     activeRecipients.forEach(r => {
-      if (now - new Date(r.lastEngaged).getTime() > twentyFourHours) {
+      if (messageMode === "template" || now - new Date(r.lastEngaged).getTime() > twentyFourHours) {
         billable++;
       } else {
         free++;
       }
     });
-    return { billable, free, total: billable * COST_PER_MESSAGE };
-  }, [activeRecipients, channel]);
 
-  const toggleRecipient = (id: number) => {
+    // Use server pricing if available, otherwise fallback
+    const rateUsd = pricing ? (pricing[messageType as keyof typeof pricing] as number || 0) : 0;
+    const usdToZar = pricing?.usd_to_zar || 18.50;
+    const totalUsd = rateUsd * billable;
+    const totalZar = pricing ? totalUsd * usdToZar : billable * COST_PER_MESSAGE_FALLBACK;
+
+    return { billable, free, totalZar: Math.round(totalZar * 100) / 100, totalUsd: Math.round(totalUsd * 10000) / 10000 };
+  }, [activeRecipients, channel, messageMode, pricing, messageType]);
+
+  const toggleRecipient = (id: string) => {
     setAllSelected(false);
     setSelectedRecipients(prev =>
       prev.includes(id) ? prev.filter(r => r !== id) : [...prev, id]
@@ -133,7 +150,7 @@ export default function Broadcasts() {
     setSelectedRecipients([]);
   };
 
-  const removeRecipient = (id: number) => {
+  const removeRecipient = (id: string) => {
     if (allSelected) {
       setAllSelected(false);
       setSelectedRecipients(recipients.filter(r => r.id !== id).map(r => r.id));
@@ -145,7 +162,9 @@ export default function Broadcasts() {
   const canSend = activeRecipients.length > 0 && !sending && (
     messageMode === "template"
       ? !!selectedTemplate
-      : (subject.trim() || channel === "whatsapp") && message.trim()
+      : channel === "email"
+        ? subject.trim() && message.trim()  // Email requires both subject and message
+        : message.trim()                    // WhatsApp only requires message
   );
 
   const handleSend = async () => {
@@ -272,7 +291,7 @@ export default function Broadcasts() {
                   value=""
                   onValueChange={(val) => {
                     if (val === "all") handleSelectAll();
-                    else toggleRecipient(Number(val));
+                    else toggleRecipient(val);
                   }}
                 >
                   <SelectTrigger className="w-full">
@@ -418,7 +437,8 @@ export default function Broadcasts() {
             <div className="rounded-lg border border-border bg-muted/50 p-4 space-y-2">
               <h3 className="text-sm font-semibold text-foreground">WhatsApp Cost Estimate</h3>
               <p className="text-xs text-muted-foreground">
-                Meta charges ~R1 per message for recipients who haven't engaged in the past 24 hours.
+                Meta charges per message for recipients who haven't engaged in the past 24 hours.
+                {!pricing && " (Using estimated pricing — server rates unavailable.)"}
               </p>
               <div className="grid grid-cols-3 gap-4 text-sm">
                 <div>
@@ -431,7 +451,10 @@ export default function Broadcasts() {
                 </div>
                 <div>
                   <p className="text-muted-foreground text-xs">Est. Cost</p>
-                  <p className="font-semibold text-foreground">R{costBreakdown.total.toFixed(2)}</p>
+                  <p className="font-semibold text-foreground">R{costBreakdown.totalZar.toFixed(2)}</p>
+                  {costBreakdown.totalUsd > 0 && (
+                    <p className="text-muted-foreground text-xs">(${costBreakdown.totalUsd.toFixed(4)} USD)</p>
+                  )}
                 </div>
               </div>
             </div>
@@ -476,7 +499,7 @@ export default function Broadcasts() {
                       <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
                         <span>{b.recipient_ids?.length ?? b.recipient_count ?? 0} recipients</span>
                         <span>•</span>
-                        <span>{b.created_at ? new Date(b.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : b.date}</span>
+                        <span>{b.created_at ? new Date(b.created_at).toLocaleDateString("en-ZA", { month: "short", day: "numeric", year: "numeric" }) : b.date}</span>
                         {b.channel === "whatsapp" && (b.cost ?? 0) > 0 && (
                           <>
                             <span>•</span>
@@ -512,9 +535,9 @@ export default function Broadcasts() {
                   Template: <strong>{selectedTemplate.replace(/_/g, " ")}</strong>
                 </span>
               )}
-              {channel === "whatsapp" && costBreakdown.total > 0 && (
+              {channel === "whatsapp" && costBreakdown.totalZar > 0 && (
                 <span className="block font-medium">
-                  Estimated WhatsApp cost: R{costBreakdown.total.toFixed(2)} ({costBreakdown.billable} billable message{costBreakdown.billable !== 1 ? "s" : ""})
+                  Estimated WhatsApp cost: R{costBreakdown.totalZar.toFixed(2)} ({costBreakdown.billable} billable message{costBreakdown.billable !== 1 ? "s" : ""})
                 </span>
               )}
             </AlertDialogDescription>

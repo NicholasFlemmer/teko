@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Plus, X, Loader2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Plus, X, Loader2, Repeat } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -77,6 +77,9 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
     location: "",
     sessionType: "",
     notes: "",
+    recurring: false,
+    recurrenceFrequency: "weekly" as "weekly" | "biweekly" | "monthly",
+    recurrenceEndDate: "",
   });
   const [sessionTypes, setSessionTypes] = useState(defaultSessionTypes);
   const [newTypeName, setNewTypeName] = useState("");
@@ -87,8 +90,14 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
     setFormData({
       team: "", coaches: [], date: "", startTime: "", endTime: "",
       location: "", sessionType: "", notes: "",
+      recurring: false, recurrenceFrequency: "weekly", recurrenceEndDate: "",
     });
   };
+
+  // Reset form when modal opens so stale data doesn't persist after cancel
+  useEffect(() => {
+    if (open) resetForm();
+  }, [open]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,9 +107,19 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
       return;
     }
 
+    if (formData.endTime && formData.endTime <= formData.startTime) {
+      toast({ title: "Invalid time", description: "End time must be after start time.", variant: "destructive" });
+      return;
+    }
+
+    if (formData.recurring && !formData.recurrenceEndDate) {
+      toast({ title: "Missing end date", description: "Please set an end date for the recurring session.", variant: "destructive" });
+      return;
+    }
+
     setSubmitting(true);
     try {
-      await sessionsAPI.create({
+      const payload: any = {
         team_id: formData.team,
         coach_ids: formData.coaches,
         location_id: formData.location || undefined,
@@ -110,8 +129,20 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
         type: formData.sessionType,
         notes: formData.notes || undefined,
         status: "scheduled",
-      });
-      toast({ title: "Session created", description: "The session has been scheduled successfully." });
+      };
+
+      if (formData.recurring && formData.recurrenceEndDate) {
+        payload.recurrence = {
+          frequency: formData.recurrenceFrequency,
+          end_date: formData.recurrenceEndDate,
+        };
+      }
+
+      const result = await sessionsAPI.create(payload);
+      const desc = (result as any).sessions
+        ? `${(result as any).sessions.length} recurring sessions created.`
+        : "The session has been scheduled successfully.";
+      toast({ title: "Session created", description: desc });
       resetForm();
       onOpenChange(false);
       onSuccess();
@@ -169,7 +200,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
             <Label htmlFor="team">Team</Label>
             <Select
               value={formData.team}
-              onValueChange={(value) => setFormData({ ...formData, team: value })}
+              onValueChange={(value) => setFormData(prev => ({ ...prev, team: value }))}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Select a team" />
@@ -230,7 +261,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
                   <div key={type.id} className="group relative">
                     <button
                       type="button"
-                      onClick={() => setFormData({ ...formData, sessionType: type.id })}
+                      onClick={() => setFormData(prev => ({ ...prev, sessionType: type.id }))}
                       className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
                         isSelected
                           ? "bg-primary text-primary-foreground border-primary"
@@ -299,7 +330,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
             <Label htmlFor="location">Location</Label>
             <Select
               value={formData.location}
-              onValueChange={(value) => setFormData({ ...formData, location: value })}
+              onValueChange={(value) => setFormData(prev => ({ ...prev, location: value }))}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Select a location" />
@@ -312,7 +343,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
                 ))}
               </SelectContent>
             </Select>
-            {selectedLocation?.address && (
+            {selectedLocation?.address && import.meta.env.VITE_GOOGLE_MAPS_API_KEY && (
               <div className="rounded-lg border border-border overflow-hidden mt-2">
                 <iframe
                   title="Location Preview"
@@ -334,7 +365,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
               id="date"
               type="date"
               value={formData.date}
-              onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+              onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
             />
           </div>
 
@@ -345,7 +376,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
                 id="startTime"
                 type="time"
                 value={formData.startTime}
-                onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
+                onChange={(e) => setFormData(prev => ({ ...prev, startTime: e.target.value }))}
               />
             </div>
             <div className="space-y-2">
@@ -354,9 +385,55 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
                 id="endTime"
                 type="time"
                 value={formData.endTime}
-                onChange={(e) => setFormData({ ...formData, endTime: e.target.value })}
+                onChange={(e) => setFormData(prev => ({ ...prev, endTime: e.target.value }))}
               />
             </div>
+          </div>
+
+          {/* Recurrence */}
+          <div className="space-y-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.recurring}
+                onChange={(e) => setFormData(prev => ({ ...prev, recurring: e.target.checked }))}
+                className="rounded border-border"
+              />
+              <Repeat className="w-4 h-4 text-muted-foreground" />
+              <span className="text-sm font-medium">Recurring session</span>
+            </label>
+
+            {formData.recurring && (
+              <div className="grid grid-cols-2 gap-4 pl-6">
+                <div className="space-y-2">
+                  <Label>Frequency</Label>
+                  <Select
+                    value={formData.recurrenceFrequency}
+                    onValueChange={(value: "weekly" | "biweekly" | "monthly") =>
+                      setFormData(prev => ({ ...prev, recurrenceFrequency: value }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="weekly">Weekly</SelectItem>
+                      <SelectItem value="biweekly">Every 2 weeks</SelectItem>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Until</Label>
+                  <Input
+                    type="date"
+                    value={formData.recurrenceEndDate}
+                    min={formData.date || undefined}
+                    onChange={(e) => setFormData(prev => ({ ...prev, recurrenceEndDate: e.target.value }))}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -365,7 +442,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
               id="notes"
               placeholder="Any additional notes for this session..."
               value={formData.notes}
-              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+              onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
               rows={2}
             />
           </div>

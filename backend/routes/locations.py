@@ -1,6 +1,10 @@
+import logging
 from flask import Blueprint, request, jsonify
 from services.firebase_service import FirebaseService
 from routes.auth import token_required
+from utils.geolocation import extract_coords_from_maps_url
+
+logger = logging.getLogger(__name__)
 
 locations_bp = Blueprint('locations', __name__)
 
@@ -15,9 +19,10 @@ def get_locations(current_user):
             'locations': locations
         }), 200
     except Exception as e:
+        logger.exception("Error in get_locations")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @locations_bp.route('/<location_id>', methods=['GET'])
@@ -37,9 +42,10 @@ def get_location(current_user, location_id):
             'location': location
         }), 200
     except Exception as e:
+        logger.exception("Error in get_location")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @locations_bp.route('', methods=['POST'])
@@ -48,29 +54,42 @@ def create_location(current_user):
     """Create a new location"""
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'Request body is required'}), 400
 
         # Validate required fields
-        required_fields = ['name', 'address']
-        for field in required_fields:
-            if field not in data:
-                return jsonify({
-                    'success': False,
-                    'error': f'Missing required field: {field}'
-                }), 400
+        if not data.get('name'):
+            return jsonify({'success': False, 'error': 'Missing required field: name'}), 400
+
+        maps_link = data.get('google_maps_link', '')
+
+        # Google Maps link is the source of truth for coordinates
+        coords = extract_coords_from_maps_url(maps_link) if maps_link else None
+
+        # Fall back to explicitly provided lat/lng if no maps link
+        if not coords:
+            has_lat = data.get('latitude') is not None
+            has_lng = data.get('longitude') is not None
+            if has_lat and has_lng:
+                try:
+                    lat = float(data['latitude'])
+                    lng = float(data['longitude'])
+                    if (-90 <= lat <= 90) and (-180 <= lng <= 180):
+                        coords = {'latitude': lat, 'longitude': lng}
+                except (ValueError, TypeError):
+                    pass
 
         # Create location
         location_data = {
             'name': data['name'],
-            'address': data['address'],
-            'google_maps_link': data.get('google_maps_link', ''),
+            'address': data.get('address', ''),
+            'google_maps_link': maps_link,
             'radius': data.get('radius', 100),
             'notes': data.get('notes', '')
         }
-        # Store coordinates if provided
-        if data.get('latitude') is not None:
-            location_data['latitude'] = float(data['latitude'])
-        if data.get('longitude') is not None:
-            location_data['longitude'] = float(data['longitude'])
+        if coords:
+            location_data['latitude'] = coords['latitude']
+            location_data['longitude'] = coords['longitude']
 
         location = FirebaseService.create_location(location_data)
 
@@ -80,9 +99,10 @@ def create_location(current_user):
             'message': 'Location created successfully'
         }), 201
     except Exception as e:
+        logger.exception("Error in create_location")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @locations_bp.route('/<location_id>', methods=['PUT'])
@@ -91,6 +111,8 @@ def update_location(current_user, location_id):
     """Update a location"""
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'Request body is required'}), 400
 
         # Check if location exists
         location = FirebaseService.get_location(location_id)
@@ -99,6 +121,14 @@ def update_location(current_user, location_id):
                 'success': False,
                 'error': 'Location not found'
             }), 404
+
+        # If maps link is provided/changed, re-derive coordinates from it
+        maps_link = data.get('google_maps_link')
+        if maps_link:
+            coords = extract_coords_from_maps_url(maps_link)
+            if coords:
+                data['latitude'] = coords['latitude']
+                data['longitude'] = coords['longitude']
 
         # Update allowed fields
         update_data = {}
@@ -122,9 +152,10 @@ def update_location(current_user, location_id):
             'message': 'Location updated successfully'
         }), 200
     except Exception as e:
+        logger.exception("Error in update_location")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @locations_bp.route('/<location_id>', methods=['DELETE'])
@@ -148,7 +179,8 @@ def delete_location(current_user, location_id):
             'message': 'Location deleted successfully'
         }), 200
     except Exception as e:
+        logger.exception("Error in delete_location")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500

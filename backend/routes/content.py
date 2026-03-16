@@ -1,6 +1,9 @@
+import logging
 from flask import Blueprint, request, jsonify
 from services.firebase_service import FirebaseService
 from routes.auth import token_required
+
+logger = logging.getLogger(__name__)
 
 content_bp = Blueprint('content', __name__)
 
@@ -17,9 +20,10 @@ def get_content(current_user):
             'content': content
         }), 200
     except Exception as e:
+        logger.exception("Error in get_content")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @content_bp.route('', methods=['POST'])
@@ -28,6 +32,8 @@ def create_content(current_user):
     """Create a new content item"""
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'Request body is required'}), 400
 
         # Validate required fields
         required_fields = ['title', 'type']
@@ -60,7 +66,7 @@ def create_content(current_user):
                 if extracted:
                     content_data['content_text'] = extracted
             except Exception as ex:
-                print(f"⚠️ Text extraction failed: {ex}")
+                logger.warning(f"Text extraction failed: {ex}")
 
         content = FirebaseService.create_content(content_data)
 
@@ -70,9 +76,10 @@ def create_content(current_user):
             'message': 'Content created successfully'
         }), 201
     except Exception as e:
+        logger.exception("Error in create_content")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @content_bp.route('/<content_id>', methods=['PUT'])
@@ -81,6 +88,8 @@ def update_content(current_user, content_id):
     """Update a content item"""
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'Request body is required'}), 400
 
         # Check if content exists
         content = FirebaseService.get_content(content_id)
@@ -112,9 +121,10 @@ def update_content(current_user, content_id):
             'message': 'Content updated successfully'
         }), 200
     except Exception as e:
+        logger.exception("Error in update_content")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @content_bp.route('/<content_id>', methods=['DELETE'])
@@ -138,9 +148,10 @@ def delete_content(current_user, content_id):
             'message': 'Content deleted successfully'
         }), 200
     except Exception as e:
+        logger.exception("Error in delete_content")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 # --- URL Resources ---
@@ -156,9 +167,10 @@ def get_urls(current_user):
             'urls': urls
         }), 200
     except Exception as e:
+        logger.exception("Error in get_urls")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @content_bp.route('/urls', methods=['POST'])
@@ -167,6 +179,8 @@ def create_url(current_user):
     """Create a new URL resource"""
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'Request body is required'}), 400
 
         # Validate required fields
         required_fields = ['url', 'title']
@@ -191,9 +205,10 @@ def create_url(current_user):
             'message': 'URL resource created successfully'
         }), 201
     except Exception as e:
+        logger.exception("Error in create_url")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @content_bp.route('/urls/<url_id>', methods=['PUT'])
@@ -202,6 +217,8 @@ def update_url(current_user, url_id):
     """Update a URL resource"""
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'Request body is required'}), 400
 
         # Check if URL exists
         url = FirebaseService.get_url(url_id)
@@ -233,9 +250,10 @@ def update_url(current_user, url_id):
             'message': 'URL resource updated successfully'
         }), 200
     except Exception as e:
+        logger.exception("Error in update_url")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @content_bp.route('/urls/<url_id>', methods=['DELETE'])
@@ -259,7 +277,8 @@ def delete_url(current_user, url_id):
             'message': 'URL resource deleted successfully'
         }), 200
     except Exception as e:
+        logger.exception("Error in delete_url")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500

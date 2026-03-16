@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { MapPin, User, Calendar, Clock, FileText, Shield, Trash2, Loader2, Bell } from "lucide-react";
+import { MapPin, User, Calendar, Clock, FileText, Shield, Trash2, Loader2, Bell, Repeat, Pencil } from "lucide-react";
 import { sessionsAPI } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 
@@ -32,20 +32,28 @@ interface Session {
   type: string;
   status: string;
   notes?: string;
+  recurrence_group_id?: string;
 }
 
 interface SessionDetailModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   session: Session | null;
-  onDelete?: (sessionId: number) => Promise<void>;
+  onDelete?: (sessionId: number, scope?: 'single' | 'future' | 'all') => Promise<void>;
+  onEdit?: (session: Session) => void;
 }
 
-export function SessionDetailModal({ open, onOpenChange, session, onDelete }: SessionDetailModalProps) {
+export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEdit }: SessionDetailModalProps) {
   const { toast } = useToast();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteScope, setDeleteScope] = useState<'single' | 'future' | 'all'>('single');
   const [deleting, setDeleting] = useState(false);
   const [sendingReminder, setSendingReminder] = useState(false);
+
+  // Reset deleteScope when viewing a different session
+  useEffect(() => {
+    setDeleteScope('single');
+  }, [session?.id]);
 
   const handleSendReminder = async () => {
     if (!session) return;
@@ -66,7 +74,7 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete }: Se
     if (!onDelete) return;
     setDeleting(true);
     try {
-      await onDelete(session.id);
+      await onDelete(session.id, session.recurrence_group_id ? deleteScope : 'single');
       setShowDeleteConfirm(false);
     } catch {
       // Error handling is done in the parent
@@ -154,17 +162,34 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete }: Se
             )}
 
             {/* Status */}
-            <div className="pt-2 border-t border-border">
+            <div className="pt-2 border-t border-border space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Status</span>
                 <Badge variant="outline" className="capitalize">
                   {session.status}
                 </Badge>
               </div>
+              {session.recurrence_group_id && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Repeat className="w-4 h-4" />
+                  <span>Part of a recurring series</span>
+                </div>
+              )}
             </div>
 
             {/* Actions */}
             <div className="pt-2 border-t border-border space-y-2">
+              {onEdit && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full gap-2"
+                  onClick={() => onEdit(session)}
+                >
+                  <Pencil className="w-4 h-4" />
+                  Edit Session
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -199,6 +224,29 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete }: Se
               This will permanently delete the session for {session.team} on {session.date} at {session.time}. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          {session.recurrence_group_id && (
+            <div className="space-y-2 py-2">
+              <p className="text-sm font-medium">This is a recurring session. Delete:</p>
+              <div className="space-y-1">
+                {(["single", "future", "all"] as const).map((scope) => (
+                  <label key={scope} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      name="deleteScope"
+                      checked={deleteScope === scope}
+                      onChange={() => setDeleteScope(scope)}
+                      className="rounded-full"
+                    />
+                    {scope === "single" && "Only this session"}
+                    {scope === "future" && "This and all future sessions"}
+                    {scope === "all" && "All sessions in this series"}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction

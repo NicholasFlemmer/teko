@@ -61,7 +61,7 @@ export default function Content() {
               topic: c.topic || "",
               language: c.language || "English",
               date: c.created_at
-                ? new Date(c.created_at._seconds ? c.created_at._seconds * 1000 : c.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                ? new Date(c.created_at._seconds ? c.created_at._seconds * 1000 : c.created_at).toLocaleDateString("en-ZA", { month: "short", day: "numeric", year: "numeric" })
                 : "",
               content: c.content_text || c.content || "",
               fileName: c.file_name || "",
@@ -295,14 +295,18 @@ export default function Content() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <h3 className="font-semibold text-foreground">{item.title}</h3>
-                      <a
-                        href={item.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-primary hover:underline break-all"
-                      >
-                        {item.url}
-                      </a>
+                      {item.url && /^https?:\/\//i.test(item.url) ? (
+                        <a
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-primary hover:underline break-all"
+                        >
+                          {item.url}
+                        </a>
+                      ) : (
+                        <span className="text-xs text-muted-foreground break-all">{item.url}</span>
+                      )}
                       {item.description && (
                         <p className="text-sm text-muted-foreground mt-1">{item.description}</p>
                       )}

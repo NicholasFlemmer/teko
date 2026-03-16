@@ -29,4 +29,5 @@ def normalize_sa_phone(phone_number):
     if cleaned.startswith('27') and len(cleaned) == 11:
         return cleaned
 
-    return cleaned
+    # Didn't match any valid SA phone pattern
+    return ''

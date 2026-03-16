@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { AddCoachModal } from "@/components/coaches/AddCoachModal";
 import { coachesAPI } from "@/services/api";
+import { useToast } from "@/hooks/use-toast";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,6 +40,7 @@ interface CoachDisplay {
 
 export default function Coaches() {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [deleteCoachId, setDeleteCoachId] = useState<string | null>(null);
@@ -96,6 +98,7 @@ export default function Coaches() {
       await fetchCoaches();
     } catch (err: any) {
       console.error("Failed to delete coach:", err);
+      toast({ title: "Delete failed", description: err.message || "Failed to delete coach.", variant: "destructive" });
     } finally {
       setDeleting(false);
     }

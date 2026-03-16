@@ -67,6 +67,12 @@ export function AddContentModal({ open, onOpenChange, onAdd }: AddContentModalPr
 
       // Upload file to Firebase Storage first, then create content record
       if (formData.file) {
+        // Client-side file size validation (10 MB max)
+        if (formData.file.size > 10 * 1024 * 1024) {
+          toast({ title: "File too large", description: "Maximum file size is 10 MB.", variant: "destructive" });
+          setSaving(false);
+          return;
+        }
         const uploadRes = await uploadsAPI.upload(formData.file, 'content');
         apiData.file_name = uploadRes.file.file_name;
         apiData.file_url = uploadRes.file.public_url;
@@ -81,7 +87,7 @@ export function AddContentModal({ open, onOpenChange, onAdd }: AddContentModalPr
         type: formData.type === "text" ? "Text" : formData.type,
         topic: formData.topic,
         language: formData.language,
-        date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+        date: new Date().toLocaleDateString("en-ZA", { month: "short", day: "numeric", year: "numeric" }),
         content: formData.content,
         fileName: formData.file?.name,
       };

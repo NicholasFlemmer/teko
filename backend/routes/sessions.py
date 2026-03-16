@@ -1,17 +1,45 @@
+import logging
 from flask import Blueprint, request, jsonify
 from services.firebase_service import FirebaseService
 from services.whatsapp_service import WhatsAppService
 from routes.auth import token_required
 from utils.geolocation import verify_location, format_location
 from utils.phone import normalize_sa_phone
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date as _date
 from config import Config
 import uuid
+import calendar
+import re
+
+logger = logging.getLogger(__name__)
 
 sessions_bp = Blueprint('sessions', __name__)
 
+
+def _generate_recurrence_dates(start, end, frequency):
+    """Generate a list of dates from start to end based on frequency."""
+    dates = []
+    current = start
+    while current <= end:
+        dates.append(current)
+        if frequency == 'weekly':
+            current += timedelta(weeks=1)
+        elif frequency == 'biweekly':
+            current += timedelta(weeks=2)
+        elif frequency == 'monthly':
+            # Advance by one month, clamp day to valid range
+            month = current.month + 1
+            year = current.year
+            if month > 12:
+                month = 1
+                year += 1
+            day = min(current.day, calendar.monthrange(year, month)[1])
+            current = _date(year, month, day)
+    return dates
+
 @sessions_bp.route('', methods=['GET'])
-def get_sessions():
+@token_required
+def get_sessions(current_user):
     """Get all sessions with optional filters"""
     try:
         # Get query parameters
@@ -30,13 +58,15 @@ def get_sessions():
             'sessions': sessions
         }), 200
     except Exception as e:
+        logger.exception("Error in get_sessions")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @sessions_bp.route('/<session_id>', methods=['GET'])
-def get_session(session_id):
+@token_required
+def get_session(current_user, session_id):
     """Get a specific session by ID"""
     try:
         session = FirebaseService.get_session(session_id)
@@ -51,23 +81,39 @@ def get_session(session_id):
             'session': session
         }), 200
     except Exception as e:
+        logger.exception("Error in get_session")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @sessions_bp.route('', methods=['POST'])
-def create_session():
+@token_required
+def create_session(current_user):
     """Create a new session"""
     try:
         data = request.get_json()
-        
+        if not data:
+            return jsonify({'success': False, 'error': 'Request body is required'}), 400
+
         # Validate required fields - only date and start_time are truly required
         if 'date' not in data or 'start_time' not in data:
             return jsonify({
                 'success': False,
                 'error': 'Missing required fields: date and start_time'
             }), 400
+
+        # Validate date format
+        try:
+            _date.fromisoformat(data['date'])
+        except (ValueError, TypeError):
+            return jsonify({'success': False, 'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
+
+        # Validate time format (HH:MM) with valid hour/minute ranges
+        try:
+            datetime.strptime(data['start_time'], '%H:%M')
+        except ValueError:
+            return jsonify({'success': False, 'error': 'Invalid start_time format. Use HH:MM (00-23:00-59)'}), 400
 
         # Build session data
         # Support coach_ids (array) or coach_id (string, backward compat)
@@ -98,26 +144,66 @@ def create_session():
             if field in data:
                 session_data[field] = data[field]
 
-        # Create session
+        # Handle recurrence
+        recurrence = data.get('recurrence')
+        if recurrence:
+            frequency = recurrence.get('frequency', 'weekly')
+            end_date_str = recurrence.get('end_date')
+            if not end_date_str:
+                return jsonify({'success': False, 'error': 'recurrence.end_date is required'}), 400
+            if frequency not in ('weekly', 'biweekly', 'monthly'):
+                return jsonify({'success': False, 'error': 'frequency must be weekly, biweekly, or monthly'}), 400
+
+            start = _date.fromisoformat(data['date'])
+            end = _date.fromisoformat(end_date_str)
+            if end <= start:
+                return jsonify({'success': False, 'error': 'end_date must be after session date'}), 400
+
+            group_id = str(uuid.uuid4())
+            dates = _generate_recurrence_dates(start, end, frequency)
+            if len(dates) > 52:
+                dates = dates[:52]
+
+            created_sessions = []
+            for d in dates:
+                s = dict(session_data)
+                s['date'] = d.isoformat()
+                s['recurrence_group_id'] = group_id
+                s['recurrence'] = {'frequency': frequency, 'end_date': end_date_str}
+                created = FirebaseService.create_session(s)
+                created_sessions.append(created)
+
+            return jsonify({
+                'success': True,
+                'sessions': created_sessions,
+                'recurrence_group_id': group_id,
+                'message': f'{len(created_sessions)} recurring sessions created'
+            }), 201
+
+        # Create single session
         session = FirebaseService.create_session(session_data)
-        
+
         return jsonify({
             'success': True,
             'session': session,
             'message': 'Session created successfully'
         }), 201
     except Exception as e:
+        logger.exception("Error in create_session")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @sessions_bp.route('/<session_id>', methods=['PUT'])
-def update_session(session_id):
+@token_required
+def update_session(current_user, session_id):
     """Update a session"""
     try:
         data = request.get_json()
-        
+        if not data:
+            return jsonify({'success': False, 'error': 'Request body is required'}), 400
+
         # Check if session exists
         session = FirebaseService.get_session(session_id)
         if not session:
@@ -142,10 +228,10 @@ def update_session(session_id):
 
                 if field == 'location':
                     location = data['location']
-                    if 'latitude' not in location or 'longitude' not in location:
+                    if not isinstance(location, dict) or 'latitude' not in location or 'longitude' not in location:
                         return jsonify({
                             'success': False,
-                            'error': 'Location must include latitude and longitude'
+                            'error': 'Location must be an object with latitude and longitude'
                         }), 400
                     update_data[field] = format_location(location['latitude'], location['longitude'])
                 else:
@@ -156,48 +242,83 @@ def update_session(session_id):
                 'success': False,
                 'error': 'No valid fields to update'
             }), 400
-        
-        # Update session
+
+        scope = request.args.get('scope', 'single')
+        if scope not in ('single', 'future', 'all'):
+            return jsonify({'success': False, 'error': 'scope must be single, future, or all'}), 400
+        group_id = session.get('recurrence_group_id')
+
+        if scope in ('future', 'all') and group_id:
+            # Bulk update: don't change per-session 'date' field
+            bulk_data = {k: v for k, v in update_data.items() if k != 'date'}
+            group_sessions = FirebaseService.get_sessions_by_recurrence_group(group_id)
+            updated_count = 0
+            for s in group_sessions:
+                if scope == 'all' or s.get('date', '') >= session.get('date', ''):
+                    FirebaseService.update_session(s['id'], bulk_data)
+                    updated_count += 1
+            return jsonify({
+                'success': True,
+                'message': f'{updated_count} session(s) updated'
+            }), 200
+
+        # Update single session
         updated_session = FirebaseService.update_session(session_id, update_data)
-        
+
         return jsonify({
             'success': True,
             'session': updated_session,
             'message': 'Session updated successfully'
         }), 200
     except Exception as e:
+        logger.exception("Error in update_session")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @sessions_bp.route('/<session_id>', methods=['DELETE'])
-def delete_session(session_id):
-    """Delete a session"""
+@token_required
+def delete_session(current_user, session_id):
+    """Delete a session.
+
+    Query params:
+        scope: single (default) | future | all
+            - single: delete only this session
+            - future: delete this session and all future sessions in the recurrence group
+            - all: delete all sessions in the recurrence group
+    """
     try:
-        # Check if session exists
         session = FirebaseService.get_session(session_id)
         if not session:
+            return jsonify({'success': False, 'error': 'Session not found'}), 404
+
+        scope = request.args.get('scope', 'single')
+        if scope not in ('single', 'future', 'all'):
+            return jsonify({'success': False, 'error': 'scope must be single, future, or all'}), 400
+        group_id = session.get('recurrence_group_id')
+
+        if scope in ('future', 'all') and group_id:
+            group_sessions = FirebaseService.get_sessions_by_recurrence_group(group_id)
+            deleted = 0
+            for s in group_sessions:
+                if scope == 'all' or s.get('date', '') >= session.get('date', ''):
+                    FirebaseService.delete_session(s['id'])
+                    deleted += 1
             return jsonify({
-                'success': False,
-                'error': 'Session not found'
-            }), 404
-        
-        # Delete session
+                'success': True,
+                'message': f'{deleted} session(s) deleted'
+            }), 200
+
         FirebaseService.delete_session(session_id)
-        
-        return jsonify({
-            'success': True,
-            'message': 'Session deleted successfully'
-        }), 200
+        return jsonify({'success': True, 'message': 'Session deleted successfully'}), 200
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        logger.exception("Error in delete_session")
+        return jsonify({'success': False, 'error': 'An internal error occurred'}), 500
 
 @sessions_bp.route('/<session_id>/send-reminder', methods=['POST'])
-def send_reminder(session_id):
+@token_required
+def send_reminder(current_user, session_id):
     """Manually send reminder for a session"""
     try:
         # Get session
@@ -216,14 +337,22 @@ def send_reminder(session_id):
                 'error': 'No coach assigned to this session'
             }), 400
 
-        # Resolve location address
-        location_address = session.get('address', '')
+        # Resolve location — maps link is source of truth
+        location_address = ''
+        location_id = session.get('location_id')
+        if location_id:
+            loc = FirebaseService.get_location(location_id)
+            if loc:
+                lat = loc.get('latitude')
+                lng = loc.get('longitude')
+                loc_name = loc.get('name', '')
+                if lat is not None and lng is not None:
+                    maps_link = f"https://maps.google.com/?q={lat},{lng}"
+                    location_address = f"{loc_name} {maps_link}".strip() if loc_name else maps_link
+                else:
+                    location_address = loc_name or loc.get('address', '')
         if not location_address:
-            location_id = session.get('location_id')
-            if location_id:
-                loc = FirebaseService.get_location(location_id)
-                if loc:
-                    location_address = loc.get('name', '') or loc.get('address', '')
+            location_address = session.get('address', '') or 'TBC'
 
         results = []
         for cid in coach_ids:
@@ -239,7 +368,7 @@ def send_reminder(session_id):
                 continue
 
             token = str(uuid.uuid4())
-            expires_at = datetime.utcnow() + timedelta(minutes=Config.CHECK_IN_TOKEN_EXPIRY_MINUTES)
+            expires_at = datetime.now(timezone.utc) + timedelta(minutes=Config.CHECK_IN_TOKEN_EXPIRY_MINUTES)
             FirebaseService.create_check_in_token(token, session_id, expires_at)
             check_in_url = f"{Config.FRONTEND_URL}/check-in/{token}"
 
@@ -252,8 +381,9 @@ def send_reminder(session_id):
             )
             results.append({'coach_id': cid, 'coach_name': coach_name, **result})
 
-        # Update session status
-        FirebaseService.update_session(session_id, {'status': 'reminded'})
+        # Update session status only if at least one reminder succeeded
+        if any(r.get('success') for r in results):
+            FirebaseService.update_session(session_id, {'status': 'reminded'})
 
         return jsonify({
             'success': True,
@@ -261,9 +391,10 @@ def send_reminder(session_id):
             'results': results
         }), 200
     except Exception as e:
+        logger.exception("Error in send_reminder")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @sessions_bp.route('/<session_id>/attendance', methods=['GET'])
@@ -281,7 +412,8 @@ def get_attendance(current_user, session_id):
             'attended_player_ids': attended_player_ids
         }), 200
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logger.exception("Error in get_attendance")
+        return jsonify({'success': False, 'error': 'An internal error occurred'}), 500
 
 @sessions_bp.route('/<session_id>/attendance', methods=['PUT'])
 @token_required
@@ -289,6 +421,8 @@ def update_attendance(current_user, session_id):
     """Update attendance for a session - set which players attended"""
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'Request body is required'}), 400
         session = FirebaseService.get_session(session_id)
         if not session:
             return jsonify({'success': False, 'error': 'Session not found'}), 404
@@ -304,7 +438,8 @@ def update_attendance(current_user, session_id):
             'message': 'Attendance updated successfully'
         }), 200
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        logger.exception("Error in update_attendance")
+        return jsonify({'success': False, 'error': 'An internal error occurred'}), 500
 
 @sessions_bp.route('/check-in/<token>', methods=['GET'])
 def get_check_in_info(token):
@@ -332,7 +467,7 @@ def get_check_in_info(token):
             # Convert to naive datetime if it's timezone-aware (from Firestore)
             if hasattr(expires_at, 'tzinfo') and expires_at.tzinfo is not None:
                 expires_at = expires_at.replace(tzinfo=None)
-            if datetime.utcnow() > expires_at:
+            if datetime.now(timezone.utc) > expires_at:
                 return jsonify({
                     'success': False,
                     'error': 'This check-in link has expired'
@@ -383,9 +518,10 @@ def get_check_in_info(token):
             }
         }), 200
     except Exception as e:
+        logger.exception("Error in get_check_in_info")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @sessions_bp.route('/check-in/<token>', methods=['POST'])
@@ -393,9 +529,11 @@ def check_in(token):
     """Check in for a session (public endpoint)"""
     try:
         data = request.get_json()
-        
+        if not data:
+            return jsonify({'success': False, 'error': 'Request body is required'}), 400
+
         # Validate location data
-        if 'location' not in data or 'latitude' not in data['location'] or 'longitude' not in data['location']:
+        if 'location' not in data or not isinstance(data['location'], dict) or 'latitude' not in data['location'] or 'longitude' not in data['location']:
             return jsonify({
                 'success': False,
                 'error': 'Location data required (latitude and longitude)'
@@ -423,7 +561,7 @@ def check_in(token):
             # Convert to naive datetime if it's timezone-aware (from Firestore)
             if hasattr(expires_at, 'tzinfo') and expires_at.tzinfo is not None:
                 expires_at = expires_at.replace(tzinfo=None)
-            if datetime.utcnow() > expires_at:
+            if datetime.now(timezone.utc) > expires_at:
                 return jsonify({
                     'success': False,
                     'error': 'This check-in link has expired'
@@ -482,7 +620,8 @@ def check_in(token):
             'location_verification': location_verification
         }), 200
     except Exception as e:
+        logger.exception("Error in check_in")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500

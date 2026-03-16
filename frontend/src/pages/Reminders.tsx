@@ -89,17 +89,17 @@ export default function Reminders() {
     if (!reminder) return;
 
     const newEnabled = !reminder.enabled;
-    // Optimistic update
-    setReminders(
-      reminders.map((r) => (r.id === id ? { ...r, enabled: newEnabled } : r))
+    // Optimistic update (functional form to avoid stale closure)
+    setReminders((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, enabled: newEnabled } : r))
     );
 
     try {
       await remindersAPI.update(id, { enabled: newEnabled });
     } catch (err: any) {
-      // Revert on failure
-      setReminders(
-        reminders.map((r) => (r.id === id ? { ...r, enabled: !newEnabled } : r))
+      // Revert on failure (functional form)
+      setReminders((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, enabled: !newEnabled } : r))
       );
       toast({
         title: "Update failed",
@@ -110,14 +110,17 @@ export default function Reminders() {
   };
 
   const deleteReminder = async (id: string) => {
-    const prev = reminders;
-    setReminders(reminders.filter((r) => r.id !== id));
+    setReminders((prev) => prev.filter((r) => r.id !== id));
 
     try {
       await remindersAPI.delete(id);
       toast({ title: "Reminder deleted" });
     } catch (err: any) {
-      setReminders(prev);
+      // Re-fetch to restore correct state
+      try {
+        const res = await remindersAPI.getAll();
+        if (res.success) setReminders(res.reminders.map((r: any) => ({ id: String(r.id), type: r.type, timing: r.timing, enabled: r.enabled ?? true, description: r.description || '' })));
+      } catch { /* ignore */ }
       toast({
         title: "Delete failed",
         description: err.message || "Failed to delete reminder.",
@@ -150,7 +153,7 @@ export default function Reminders() {
           enabled: res.reminder.enabled ?? true,
           description: res.reminder.description || descriptions[newReminderType],
         };
-        setReminders([...reminders, newReminder]);
+        setReminders((prev) => [...prev, newReminder]);
         toast({ title: "Reminder created" });
       }
 

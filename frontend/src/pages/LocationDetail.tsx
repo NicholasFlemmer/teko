@@ -12,12 +12,17 @@ import {
   Image as ImageIcon,
   Save,
   X,
-  Loader2
+  Loader2,
+  Trash2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { locationsAPI, sessionsAPI, coachesAPI, playersAPI } from "@/services/api";
 import { geocodeAddress, extractCoordsFromMapsUrl } from "@/lib/geocode";
@@ -38,6 +43,9 @@ export default function LocationDetail() {
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [editData, setEditData] = useState({
     name: "",
     address: "",
@@ -70,6 +78,7 @@ export default function LocationDetail() {
         });
       } catch (err) {
         console.error("Failed to fetch location detail:", err);
+        setFetchError("Failed to load location. Please check your connection and try again.");
       } finally {
         setLoading(false);
       }
@@ -118,6 +127,20 @@ export default function LocationDetail() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!id) return;
+    try {
+      setDeleting(true);
+      await locationsAPI.delete(id);
+      navigate("/locations");
+    } catch (err: any) {
+      setSaveError(err.message || "Failed to delete location");
+      setDeleteConfirmOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const handleCancelEdit = () => {
     if (location) {
       setEditData({
@@ -145,7 +168,7 @@ export default function LocationDetail() {
     return (
       <MainLayout>
         <div className="text-center py-24">
-          <p className="text-muted-foreground">Location not found</p>
+          <p className="text-muted-foreground">{fetchError || "Location not found"}</p>
           <Button variant="outline" className="mt-4" onClick={() => navigate("/locations")}>
             Back to Locations
           </Button>
@@ -208,7 +231,9 @@ export default function LocationDetail() {
     return coach?.name || coach?.username || "Unknown";
   };
 
-  const googleMapsLink = location.google_maps_link || editData.googleMapsLink;
+  const rawMapsLink = location.google_maps_link || editData.googleMapsLink;
+  // Only allow https URLs to prevent javascript: XSS
+  const googleMapsLink = rawMapsLink && /^https?:\/\//i.test(rawMapsLink) ? rawMapsLink : "";
 
   return (
     <MainLayout>
@@ -233,13 +258,17 @@ export default function LocationDetail() {
           {isEditing ? (
             <div className="flex items-center gap-2">
               {saveError && <span className="text-sm text-destructive">{saveError}</span>}
-              <Button className="gap-2" onClick={handleSave} disabled={saving}>
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                {saving ? "Saving..." : "Save"}
+              <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteConfirmOpen(true)}>
+                <Trash2 className="w-4 h-4" />
+                Delete
               </Button>
               <Button variant="outline" className="gap-2" onClick={handleCancelEdit} disabled={saving}>
                 <X className="w-4 h-4" />
                 Cancel
+              </Button>
+              <Button className="gap-2" onClick={handleSave} disabled={saving}>
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {saving ? "Saving..." : "Save"}
               </Button>
             </div>
           ) : (
@@ -324,7 +353,7 @@ export default function LocationDetail() {
             </div>
 
             {/* Embedded Google Map */}
-            {location.address && (
+            {location.address && import.meta.env.VITE_GOOGLE_MAPS_API_KEY && (
               <div className="bg-card rounded-xl border border-border shadow-card overflow-hidden">
                 <iframe
                   title="Location Map"
@@ -487,6 +516,23 @@ export default function LocationDetail() {
           </div>
         </div>
       </div>
+
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Location?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{location.name}</strong>? This action cannot be undone. Sessions at this location will not be deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {deleting ? "Deleting..." : "Delete Location"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </MainLayout>
   );
 }

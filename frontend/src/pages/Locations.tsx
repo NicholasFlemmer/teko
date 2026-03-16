@@ -15,10 +15,12 @@ export default function Locations() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [coaches, setCoaches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchData = async () => {
     try {
       setLoading(true);
+      setError(null);
       const [locationsRes, sessionsRes, coachesRes] = await Promise.all([
         locationsAPI.getAll(),
         sessionsAPI.getAll(),
@@ -27,8 +29,9 @@ export default function Locations() {
       setLocations(locationsRes.locations || []);
       setSessions(sessionsRes.sessions || []);
       setCoaches(coachesRes.coaches || []);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to fetch locations:", err);
+      setError(err.message || "Failed to load locations. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -40,7 +43,14 @@ export default function Locations() {
 
   const getLocationStats = (locationId: string) => {
     const locationSessions = sessions.filter((s) => s.location_id === locationId);
-    const coachIds = new Set(locationSessions.map((s) => s.coach_id).filter(Boolean));
+    const coachIds = new Set<string>();
+    locationSessions.forEach((s) => {
+      if (Array.isArray(s.coach_ids)) {
+        s.coach_ids.forEach((cid: string) => coachIds.add(cid));
+      } else if (s.coach_id) {
+        coachIds.add(s.coach_id);
+      }
+    });
     return {
       sessions: locationSessions.length,
       coaches: coachIds.size,
@@ -95,6 +105,11 @@ export default function Locations() {
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
             <span className="ml-2 text-muted-foreground">Loading locations...</span>
+          </div>
+        ) : error ? (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <p className="text-destructive mb-2">{error}</p>
+            <Button variant="outline" size="sm" onClick={fetchData}>Try Again</Button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

@@ -1,7 +1,10 @@
 import re
+import logging
 import requests
 from geopy.distance import geodesic
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 def calculate_distance(location1, location2):
     """Calculate distance between two coordinates in meters
@@ -79,25 +82,65 @@ def format_location(latitude, longitude):
 
 
 def extract_coords_from_maps_url(url):
-    """Extract lat/lng from a Google Maps URL.
+    """Extract lat/lng from a Google Maps URL, raw coord string, or shortened link.
+
+    Handles:
+        - Full Maps URLs with @lat,lng or ?q=lat,lng or /place/lat,lng
+        - Raw coordinate strings like "-34.046864, 18.707249"
+        - Shortened links (maps.app.goo.gl, share.google, etc.) by following redirects
 
     Returns:
         dict with latitude/longitude or None
     """
     if not url:
         return None
-    # @lat,lng
-    m = re.search(r'@(-?\d+\.?\d*),(-?\d+\.?\d*)', url)
+
+    text = url.strip()
+
+    # Try extracting coords from the text directly (works for full URLs and raw coord strings)
+    coords = _extract_coords_from_text(text)
+    if coords:
+        return coords
+
+    # If it looks like a URL, resolve redirects and try again
+    if text.startswith('http'):
+        try:
+            resp = requests.head(text, allow_redirects=True, timeout=5)
+            resolved = resp.url
+            if resolved != text:
+                coords = _extract_coords_from_text(resolved)
+                if coords:
+                    return coords
+        except Exception as e:
+            logger.debug("Failed to resolve shortened URL %s: %s", text, e)
+
+    return None
+
+
+def _extract_coords_from_text(text):
+    """Extract lat/lng from a string using known coordinate patterns.
+
+    Returns:
+        dict with latitude/longitude or None
+    """
+    # @lat,lng (standard Maps URL)
+    m = re.search(r'@(-?\d+\.?\d*),(-?\d+\.?\d*)', text)
     if m:
         return {'latitude': float(m.group(1)), 'longitude': float(m.group(2))}
     # ?q=lat,lng
-    m = re.search(r'[?&]q=(-?\d+\.?\d*),(-?\d+\.?\d*)', url)
+    m = re.search(r'[?&]q=(-?\d+\.?\d*),(-?\d+\.?\d*)', text)
     if m:
         return {'latitude': float(m.group(1)), 'longitude': float(m.group(2))}
-    # /place/lat,lng
-    m = re.search(r'/place/(-?\d+\.?\d*),(-?\d+\.?\d*)', url)
+    # /place/lat,lng or /search/lat,+lng (resolved shortened links)
+    m = re.search(r'/(?:place|search)/(-?\d+\.?\d*),\+?(-?\d+\.?\d*)', text)
     if m:
         return {'latitude': float(m.group(1)), 'longitude': float(m.group(2))}
+    # Raw coords: "-34.046864, 18.707249" (no URL structure)
+    m = re.fullmatch(r'\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*', text)
+    if m:
+        lat, lng = float(m.group(1)), float(m.group(2))
+        if -90 <= lat <= 90 and -180 <= lng <= 180:
+            return {'latitude': lat, 'longitude': lng}
     return None
 
 
@@ -117,9 +160,17 @@ def geocode_address(address):
             timeout=5
         )
         data = resp.json()
-        if data.get('status') == 'OK' and data.get('results'):
-            loc = data['results'][0]['geometry']['location']
-            return {'latitude': loc['lat'], 'longitude': loc['lng']}
+        if data.get('status') == 'OK':
+            results = data.get('results')
+            if results and isinstance(results, list) and len(results) > 0:
+                geometry = results[0].get('geometry', {})
+                loc = geometry.get('location', {})
+                lat = loc.get('lat')
+                lng = loc.get('lng')
+                if lat is not None and lng is not None:
+                    return {'latitude': lat, 'longitude': lng}
+        elif data.get('status') != 'ZERO_RESULTS':
+            logger.warning(f"Geocoding returned status '{data.get('status')}' for '{address}'")
     except Exception as e:
-        print(f"⚠️ Geocoding failed for '{address}': {e}")
+        logger.warning(f"Geocoding failed for '{address}': {e}")
     return None

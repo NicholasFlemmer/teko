@@ -1,6 +1,9 @@
+import logging
 from flask import Blueprint, request, jsonify
 from services.firebase_service import FirebaseService
 from routes.auth import token_required
+
+logger = logging.getLogger(__name__)
 
 teams_bp = Blueprint('teams', __name__)
 
@@ -16,9 +19,10 @@ def get_teams(current_user):
             'teams': teams
         }), 200
     except Exception as e:
+        logger.exception("Error in get_teams")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @teams_bp.route('/<team_id>', methods=['GET'])
@@ -38,9 +42,10 @@ def get_team(current_user, team_id):
             'team': team
         }), 200
     except Exception as e:
+        logger.exception("Error in get_team")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @teams_bp.route('', methods=['POST'])
@@ -49,14 +54,16 @@ def create_team(current_user):
     """Create a new team"""
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'Request body is required'}), 400
 
         # Validate required fields
         required_fields = ['name', 'age_group']
         for field in required_fields:
-            if field not in data:
+            if field not in data or not str(data[field]).strip():
                 return jsonify({
                     'success': False,
-                    'error': f'Missing required field: {field}'
+                    'error': f'Missing or empty required field: {field}'
                 }), 400
 
         # Create team
@@ -73,9 +80,10 @@ def create_team(current_user):
             'message': 'Team created successfully'
         }), 201
     except Exception as e:
+        logger.exception("Error in create_team")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @teams_bp.route('/<team_id>', methods=['PUT'])
@@ -84,6 +92,8 @@ def update_team(current_user, team_id):
     """Update a team"""
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'Request body is required'}), 400
 
         # Check if team exists
         team = FirebaseService.get_team(team_id)
@@ -115,9 +125,10 @@ def update_team(current_user, team_id):
             'message': 'Team updated successfully'
         }), 200
     except Exception as e:
+        logger.exception("Error in update_team")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @teams_bp.route('/<team_id>', methods=['DELETE'])
@@ -141,7 +152,8 @@ def delete_team(current_user, team_id):
             'message': 'Team deleted successfully'
         }), 200
     except Exception as e:
+        logger.exception("Error in delete_team")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500

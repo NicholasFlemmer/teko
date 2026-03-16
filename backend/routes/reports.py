@@ -1,16 +1,31 @@
+import logging
+from datetime import date as _date
 from flask import Blueprint, request, jsonify
 from services.firebase_service import FirebaseService
 from routes.auth import token_required
 
+logger = logging.getLogger(__name__)
+
 reports_bp = Blueprint('reports', __name__)
+
+
+def _validate_date(date_str):
+    """Validate date string is YYYY-MM-DD format. Returns None if invalid."""
+    if not date_str:
+        return None
+    try:
+        _date.fromisoformat(date_str)
+        return date_str
+    except (ValueError, TypeError):
+        return None
 
 @reports_bp.route('/coach-attendance', methods=['GET'])
 @token_required
 def get_coach_attendance(current_user):
     """Get coach attendance data with optional date range"""
     try:
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
+        start_date = _validate_date(request.args.get('start_date'))
+        end_date = _validate_date(request.args.get('end_date'))
 
         # Get sessions in date range
         if start_date and end_date:
@@ -38,7 +53,7 @@ def get_coach_attendance(current_user):
                         'checked_in': 0,
                     }
                 coach_data[cid]['total_sessions'] += 1
-                if s.get('status') == 'checked_in':
+                if s.get('status') in ('checked_in', 'completed'):
                     coach_data[cid]['checked_in'] += 1
 
         data = list(coach_data.values())
@@ -48,9 +63,10 @@ def get_coach_attendance(current_user):
             'data': data
         }), 200
     except Exception as e:
+        logger.exception("Error in get_coach_attendance")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @reports_bp.route('/location-attendance', methods=['GET'])
@@ -58,8 +74,8 @@ def get_coach_attendance(current_user):
 def get_location_attendance(current_user):
     """Get location attendance data with optional date range"""
     try:
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
+        start_date = _validate_date(request.args.get('start_date'))
+        end_date = _validate_date(request.args.get('end_date'))
 
         if start_date and end_date:
             sessions = FirebaseService.get_sessions_by_date_range(start_date, end_date)
@@ -84,7 +100,7 @@ def get_location_attendance(current_user):
                     'checked_in': 0,
                 }
             location_data[lid]['total_sessions'] += 1
-            if s.get('status') == 'checked_in':
+            if s.get('status') in ('checked_in', 'completed'):
                 location_data[lid]['checked_in'] += 1
 
         data = list(location_data.values())
@@ -94,9 +110,10 @@ def get_location_attendance(current_user):
             'data': data
         }), 200
     except Exception as e:
+        logger.exception("Error in get_location_attendance")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @reports_bp.route('/student-rollcall', methods=['GET'])
@@ -104,8 +121,8 @@ def get_location_attendance(current_user):
 def get_student_rollcall(current_user):
     """Get student participation / roll call data using attended_player_ids"""
     try:
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
+        start_date = _validate_date(request.args.get('start_date'))
+        end_date = _validate_date(request.args.get('end_date'))
 
         # Get sessions in date range
         if start_date and end_date:
@@ -157,9 +174,10 @@ def get_student_rollcall(current_user):
             'data': rollcall
         }), 200
     except Exception as e:
+        logger.exception("Error in get_student_rollcall")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @reports_bp.route('/stats', methods=['GET'])
@@ -169,7 +187,7 @@ def get_stats(current_user):
     try:
         sessions = FirebaseService.get_all_sessions()
         total_sessions = len(sessions)
-        checked_in_count = sum(1 for s in sessions if s.get('status') == 'checked_in')
+        checked_in_count = sum(1 for s in sessions if s.get('status') in ('checked_in', 'completed'))
         check_in_rate = round((checked_in_count / total_sessions) * 100) if total_sessions > 0 else 0
 
         total_students = FirebaseService.count_players()
@@ -187,7 +205,8 @@ def get_stats(current_user):
             'stats': stats
         }), 200
     except Exception as e:
+        logger.exception("Error in get_stats")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500

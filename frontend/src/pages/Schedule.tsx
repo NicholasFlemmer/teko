@@ -13,12 +13,15 @@ import {
   AlertCircle,
   X,
   Loader2,
+  Repeat,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusCard } from "@/components/ui/status-card";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { CreateSessionModal } from "@/components/schedule/CreateSessionModal";
 import { SessionDetailModal } from "@/components/schedule/SessionDetailModal";
+import { EditSessionModal } from "@/components/schedule/EditSessionModal";
+import { LiveActivityFeed } from "@/components/schedule/LiveActivityFeed";
 import { cn } from "@/lib/utils";
 import { format, addMonths, subMonths, addWeeks, subWeeks, addDays, subDays, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, isToday, isBefore, startOfWeek, endOfWeek } from "date-fns";
 import {
@@ -35,6 +38,7 @@ interface Session {
   id: number;
   date: string;
   coach: string;
+  coachIds: string[];
   team: string;
   location: string;
   time: string;
@@ -42,6 +46,7 @@ interface Session {
   type: string;
   status: string;
   notes?: string;
+  recurrence_group_id?: string;
 }
 
 interface CoachOption {
@@ -69,6 +74,8 @@ export default function Schedule() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingRawSession, setEditingRawSession] = useState<any>(null);
 
   // API data state
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -118,6 +125,7 @@ export default function Schedule() {
       id: raw.id,
       date: raw.date,
       coach: coachNames,
+      coachIds,
       team: teamMap[raw.team_id] || (raw.team_id ? "Unknown Team" : "Unassigned"),
       location: locationMap[raw.location_id] || raw.address || (raw.location_id ? "Unknown Location" : "No Location"),
       time: raw.start_time ? raw.start_time.slice(0, 5) : "",
@@ -125,6 +133,7 @@ export default function Schedule() {
       type: raw.type || "practice",
       status: raw.status || "scheduled",
       notes: raw.notes,
+      recurrence_group_id: raw.recurrence_group_id,
     };
   }, [coachMap, teamMap, locationMap]);
 
@@ -174,7 +183,8 @@ export default function Schedule() {
   }, [sessions, mapSession]);
 
   // Derive unique filter options from display sessions
-  const coaches = useMemo(() => [...new Set(displaySessions.map((s) => s.coach))], [displaySessions]);
+  // Use coachOptions directly for filter (individual coaches, not combined strings)
+  const coaches = coachOptions;
   const types = useMemo(() => [...new Set(displaySessions.map((s) => s.type))], [displaySessions]);
   const teams = useMemo(() => [...new Set(displaySessions.map((s) => s.team))], [displaySessions]);
   const locations = useMemo(() => [...new Set(displaySessions.map((s) => s.location))], [displaySessions]);
@@ -182,7 +192,7 @@ export default function Schedule() {
   // Filtered sessions
   const filteredSessions = useMemo(() => {
     return displaySessions.filter((s) => {
-      if (filterCoach !== "all" && s.coach !== filterCoach) return false;
+      if (filterCoach !== "all" && !s.coachIds.includes(filterCoach)) return false;
       if (filterType !== "all" && s.type !== filterType) return false;
       if (filterTeam !== "all" && s.team !== filterTeam) return false;
       if (filterLocation !== "all" && s.location !== filterLocation) return false;
@@ -194,7 +204,7 @@ export default function Schedule() {
   const statusCounts = useMemo(() => {
     const counts = { total: displaySessions.length, scheduled: 0, reminded: 0, checked_in: 0, missed: 0 };
     displaySessions.forEach((s) => {
-      const status = s.status.toLowerCase().replace(/\s+/g, "_");
+      const status = (s.status || 'scheduled').toLowerCase().replace(/\s+/g, "_");
       if (status === "scheduled") counts.scheduled++;
       else if (status === "reminded") counts.reminded++;
       else if (status === "checked_in" || status === "checked-in" || status === "checkedin" || status === "completed") counts.checked_in++;
@@ -213,15 +223,15 @@ export default function Schedule() {
   const today = new Date();
 
   const goToPrevious = () => {
-    if (viewMode === "month") setCurrentDate(subMonths(currentDate, 1));
-    else if (viewMode === "week") setCurrentDate(subWeeks(currentDate, 1));
-    else if (viewMode === "day") setCurrentDate(subDays(currentDate, 1));
+    if (viewMode === "month") setCurrentDate(prev => subMonths(prev, 1));
+    else if (viewMode === "week") setCurrentDate(prev => subWeeks(prev, 1));
+    else if (viewMode === "day") setCurrentDate(prev => subDays(prev, 1));
   };
 
   const goToNext = () => {
-    if (viewMode === "month") setCurrentDate(addMonths(currentDate, 1));
-    else if (viewMode === "week") setCurrentDate(addWeeks(currentDate, 1));
-    else if (viewMode === "day") setCurrentDate(addDays(currentDate, 1));
+    if (viewMode === "month") setCurrentDate(prev => addMonths(prev, 1));
+    else if (viewMode === "week") setCurrentDate(prev => addWeeks(prev, 1));
+    else if (viewMode === "day") setCurrentDate(prev => addDays(prev, 1));
   };
 
   const goToToday = () => setCurrentDate(new Date());
@@ -242,16 +252,26 @@ export default function Schedule() {
     setIsDetailModalOpen(true);
   };
 
-  const handleDeleteSession = async (sessionId: number) => {
+  const handleDeleteSession = async (sessionId: number, scope?: 'single' | 'future' | 'all') => {
     try {
-      await sessionsAPI.delete(sessionId.toString());
-      toast({ title: "Session deleted", description: "The session has been removed." });
+      await sessionsAPI.delete(sessionId.toString(), scope);
+      toast({ title: "Session deleted", description: scope && scope !== 'single' ? `Recurring sessions deleted (${scope}).` : "The session has been removed." });
       setIsDetailModalOpen(false);
       setSelectedSession(null);
       fetchSessions();
     } catch (err) {
       console.error("Failed to delete session:", err);
       toast({ title: "Error", description: "Failed to delete session.", variant: "destructive" });
+    }
+  };
+
+  const handleEditSession = (session: Session) => {
+    // Find the raw session data so the edit modal can populate with IDs
+    const raw = sessions.find((s: any) => s.id === session.id);
+    if (raw) {
+      setEditingRawSession(raw);
+      setIsDetailModalOpen(false);
+      setIsEditModalOpen(true);
     }
   };
 
@@ -308,7 +328,7 @@ export default function Schedule() {
             <SelectContent>
               <SelectItem value="all">All Coaches</SelectItem>
               {coaches.map((c) => (
-                <SelectItem key={c} value={c}>{c}</SelectItem>
+                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -411,6 +431,7 @@ export default function Schedule() {
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2">
                                   <p className="text-sm font-medium text-foreground truncate">{session.team}</p>
+                                  {session.recurrence_group_id && <Repeat className="w-3 h-3 text-muted-foreground shrink-0" title="Recurring session" />}
                                   <span className={cn(
                                     "px-2 py-0.5 rounded-full text-xs font-medium capitalize",
                                     session.type === "match"
@@ -578,7 +599,10 @@ export default function Schedule() {
                                     )} />
                                     <div className="w-16 text-sm font-medium text-foreground">{session.time}</div>
                                     <div className="flex-1 min-w-0">
-                                      <p className="text-sm text-foreground truncate">{session.team}</p>
+                                      <div className="flex items-center gap-1.5">
+                                        <p className="text-sm text-foreground truncate">{session.team}</p>
+                                        {session.recurrence_group_id && <Repeat className="w-3 h-3 text-muted-foreground shrink-0" title="Recurring session" />}
+                                      </div>
                                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                         <span className="flex items-center gap-1"><User className="w-3 h-3" />{session.coach}</span>
                                         <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{session.location}</span>
@@ -624,6 +648,7 @@ export default function Schedule() {
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2">
                                   <p className="text-sm font-medium text-foreground">{session.team}</p>
+                                  {session.recurrence_group_id && <Repeat className="w-3 h-3 text-muted-foreground shrink-0" title="Recurring session" />}
                                   <span className={cn(
                                     "px-2 py-0.5 rounded-full text-xs font-medium capitalize",
                                     session.type === "match"
@@ -648,7 +673,7 @@ export default function Schedule() {
           </div>
 
           {/* Right sidebar */}
-          <div className="w-[300px] space-y-4">
+          <div className="hidden lg:block w-[300px] space-y-4">
             <div className="bg-card rounded-xl border border-border p-4 shadow-card">
               <div className="flex items-center gap-2 mb-4">
                 <Clock className="w-4 h-4 text-primary" />
@@ -693,6 +718,8 @@ export default function Schedule() {
                 <p className="text-sm text-muted-foreground">All good!</p>
               </div>
             </div>
+
+            <LiveActivityFeed />
           </div>
         </div>
         )}
@@ -711,6 +738,16 @@ export default function Schedule() {
         onOpenChange={setIsDetailModalOpen}
         session={selectedSession}
         onDelete={handleDeleteSession}
+        onEdit={handleEditSession}
+      />
+      <EditSessionModal
+        open={isEditModalOpen}
+        onOpenChange={setIsEditModalOpen}
+        session={editingRawSession}
+        coaches={coachOptions}
+        teams={teamOptions}
+        locations={locationOptions}
+        onSuccess={fetchSessions}
       />
     </MainLayout>
   );

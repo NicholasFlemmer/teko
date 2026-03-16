@@ -11,9 +11,21 @@ import {
   CheckCircle2,
   XCircle,
   Clock,
-  Loader2
+  Loader2,
+  Save,
+  X,
+  Trash2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { teamsAPI, playersAPI, coachesAPI, locationsAPI, sessionsAPI } from "@/services/api";
 
@@ -31,11 +43,18 @@ export default function TeamDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [team, setTeam] = useState<any>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [teamPlayers, setTeamPlayers] = useState<any[]>([]);
   const [coaches, setCoaches] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isEditing, setIsEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [editData, setEditData] = useState({ name: "", ageGroup: "", locationId: "" });
 
   useEffect(() => {
     if (!id) return;
@@ -50,13 +69,20 @@ export default function TeamDetail() {
           sessionsAPI.getAll(),
           locationsAPI.getAll(),
         ]);
-        setTeam(teamRes.team);
+        const t = teamRes.team;
+        setTeam(t);
         setTeamPlayers(playersRes.players || []);
         setCoaches(coachesRes.coaches || []);
         setSessions(sessionsRes.sessions || []);
         setLocations(locationsRes.locations || []);
+        setEditData({
+          name: t.name || "",
+          ageGroup: t.age_group || "",
+          locationId: t.location_id || "",
+        });
       } catch (err) {
         console.error("Failed to fetch team detail:", err);
+        setFetchError("Failed to load team. Please check your connection and try again.");
       } finally {
         setLoading(false);
       }
@@ -64,6 +90,58 @@ export default function TeamDetail() {
 
     fetchData();
   }, [id]);
+
+  const ageGroups = ["U8", "U10", "U12", "U14", "U16", "U18", "Senior", "Mixed", "Not Applicable"];
+
+  const handleSave = async () => {
+    if (!id) return;
+    try {
+      setSaving(true);
+      setSaveError(null);
+      await teamsAPI.update(id, {
+        name: editData.name,
+        age_group: editData.ageGroup,
+        location_id: editData.locationId || undefined,
+      });
+      const res = await teamsAPI.getOne(id);
+      setTeam(res.team);
+      setEditData({
+        name: res.team.name || "",
+        ageGroup: res.team.age_group || "",
+        locationId: res.team.location_id || "",
+      });
+      setIsEditing(false);
+    } catch (err: any) {
+      setSaveError(err.message || "Failed to save team");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    if (team) {
+      setEditData({
+        name: team.name || "",
+        ageGroup: team.age_group || "",
+        locationId: team.location_id || "",
+      });
+    }
+    setIsEditing(false);
+  };
+
+  const handleDelete = async () => {
+    if (!id) return;
+    try {
+      setDeleting(true);
+      await teamsAPI.delete(id);
+      navigate("/teams");
+    } catch (err: any) {
+      setSaveError(err.message || "Failed to delete team");
+      setDeleteConfirmOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -80,7 +158,7 @@ export default function TeamDetail() {
     return (
       <MainLayout>
         <div className="text-center py-24">
-          <p className="text-muted-foreground">Team not found</p>
+          <p className="text-muted-foreground">{fetchError || "Team not found"}</p>
           <Button variant="outline" className="mt-4" onClick={() => navigate("/teams")}>
             Back to Teams
           </Button>
@@ -116,7 +194,7 @@ export default function TeamDetail() {
 
   const teamCoaches = (team.coach_ids || []).map((cid: string, idx: number) => {
     const coach = coaches.find((c) => c.id === cid);
-    const coachSessions = teamSessions.filter((s) => s.coach_id === cid);
+    const coachSessions = teamSessions.filter((s) => s.coach_id === cid || (s.coach_ids && s.coach_ids.includes(cid)));
     return {
       id: cid,
       name: coach?.name || coach?.username || "Unknown",
@@ -140,6 +218,7 @@ export default function TeamDetail() {
   }
 
   const getTeamInitials = (name: string) => {
+    if (!name) return "??";
     const words = name.split(" ");
     if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
     return name.substring(0, 2).toUpperCase();
@@ -175,14 +254,34 @@ export default function TeamDetail() {
             <h1 className="page-title">{team.name}</h1>
             <p className="page-subtitle">Team Details</p>
           </div>
-          <Button variant="outline" className="gap-2" onClick={() => navigate(`/players?team=${id}`)}>
-            <UserPlus className="w-4 h-4" />
-            Add Players
-          </Button>
-          <Button className="gap-2" onClick={() => navigate(`/teams`)}>
-            <Edit className="w-4 h-4" />
-            Edit Team
-          </Button>
+          {isEditing ? (
+            <div className="flex items-center gap-2">
+              {saveError && <span className="text-sm text-destructive mr-2">{saveError}</span>}
+              <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteConfirmOpen(true)}>
+                <Trash2 className="w-4 h-4" />
+                Delete
+              </Button>
+              <Button variant="outline" className="gap-2" onClick={handleCancelEdit} disabled={saving}>
+                <X className="w-4 h-4" />
+                Cancel
+              </Button>
+              <Button className="gap-2" onClick={handleSave} disabled={saving}>
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {saving ? "Saving..." : "Save Changes"}
+              </Button>
+            </div>
+          ) : (
+            <>
+              <Button variant="outline" className="gap-2" onClick={() => navigate(`/players?team=${id}`)}>
+                <UserPlus className="w-4 h-4" />
+                Add Players
+              </Button>
+              <Button className="gap-2" onClick={() => setIsEditing(true)}>
+                <Edit className="w-4 h-4" />
+                Edit Team
+              </Button>
+            </>
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -190,28 +289,65 @@ export default function TeamDetail() {
           <div className="space-y-4">
             {/* Team profile card */}
             <div className="bg-card rounded-xl border border-border p-6 shadow-card">
-              <div className="flex items-center gap-4 mb-6">
-                <div className={`w-16 h-16 rounded-full ${teamColor} avatar-initials text-xl`}>
-                  {teamInitials}
+              {isEditing ? (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="teamName">Team Name</Label>
+                    <Input
+                      id="teamName"
+                      value={editData.name}
+                      onChange={(e) => setEditData({ ...editData, name: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Age Group</Label>
+                    <Select value={editData.ageGroup} onValueChange={(v) => setEditData({ ...editData, ageGroup: v })}>
+                      <SelectTrigger><SelectValue placeholder="Select age group" /></SelectTrigger>
+                      <SelectContent>
+                        {ageGroups.map((g) => (
+                          <SelectItem key={g} value={g}>{g}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Default Location</Label>
+                    <Select value={editData.locationId} onValueChange={(v) => setEditData({ ...editData, locationId: v })}>
+                      <SelectTrigger><SelectValue placeholder="Select a location" /></SelectTrigger>
+                      <SelectContent>
+                        {locations.map((loc) => (
+                          <SelectItem key={loc.id} value={loc.id}>{loc.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="text-xl font-semibold text-foreground">{team.name}</h2>
-                  <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary">
-                    {team.age_group || "N/A"}
-                  </span>
-                </div>
-              </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-4 mb-6">
+                    <div className={`w-16 h-16 rounded-full ${teamColor} avatar-initials text-xl`}>
+                      {teamInitials}
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-semibold text-foreground">{team.name}</h2>
+                      <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary">
+                        {team.age_group || "N/A"}
+                      </span>
+                    </div>
+                  </div>
 
-              <div className="space-y-4">
-                <div className="flex items-center gap-3 text-muted-foreground">
-                  <MapPin className="w-5 h-5 flex-shrink-0" />
-                  <span className="text-foreground">{getLocationName(team.location_id)}</span>
-                </div>
-                <div className="flex items-center gap-3 text-muted-foreground">
-                  <GraduationCap className="w-5 h-5 flex-shrink-0" />
-                  <span className="text-foreground">{teamPlayers.length} players</span>
-                </div>
-              </div>
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3 text-muted-foreground">
+                      <MapPin className="w-5 h-5 flex-shrink-0" />
+                      <span className="text-foreground">{getLocationName(team.location_id)}</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-muted-foreground">
+                      <GraduationCap className="w-5 h-5 flex-shrink-0" />
+                      <span className="text-foreground">{teamPlayers.length} players</span>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Stats grid */}
@@ -299,7 +435,7 @@ export default function TeamDetail() {
               <div className="space-y-3">
                 {recentSessions.length > 0 ? recentSessions.map((session) => {
                   const attended = (session.attended_player_ids || []).length;
-                  const absent = teamPlayers.length - attended;
+                  const absent = Math.max(0, teamPlayers.length - attended);
                   const sessionDate = session.date || session.session_date;
                   const sessionType = session.type || session.session_type || "Practice";
                   return (
@@ -386,13 +522,30 @@ export default function TeamDetail() {
                   <p className="text-sm text-muted-foreground text-center py-4">No upcoming sessions</p>
                 )}
               </div>
-              <Button variant="outline" className="w-full mt-4" onClick={() => navigate(`/schedule`)}>
+              <Button variant="outline" className="w-full mt-4" onClick={() => navigate(`/`)}>
                 View Team Schedule
               </Button>
             </div>
           </div>
         </div>
       </div>
+
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Team?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{team.name}</strong>? This action cannot be undone. Players assigned to this team will not be deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {deleting ? "Deleting..." : "Delete Team"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </MainLayout>
   );
 }

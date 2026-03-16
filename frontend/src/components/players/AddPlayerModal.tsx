@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from "react";
-import { GraduationCap, X, Camera, User, Loader2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { GraduationCap, X, Loader2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -24,7 +24,6 @@ export function AddPlayerModal({ open, onOpenChange, onPlayerAdded }: AddPlayerM
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
-    age: "",
     dateOfBirth: "",
     specialNotes: "",
     guardianName: "",
@@ -34,13 +33,17 @@ export function AddPlayerModal({ open, onOpenChange, onPlayerAdded }: AddPlayerM
   });
   const [selectedTeams, setSelectedTeams] = useState<string[]>([]);
   const [teams, setTeams] = useState<any[]>([]);
-  const [profilePicture, setProfilePicture] = useState<{ name: string; preview: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open) {
+      setFormData({
+        firstName: "", lastName: "", dateOfBirth: "", specialNotes: "",
+        guardianName: "", guardianEmail: "", guardianPrimaryPhone: "", guardianSecondaryPhone: "",
+      });
+      setSelectedTeams([]);
+      setError(null);
       teamsAPI.getAll().then((res) => {
         setTeams(res.teams || []);
       }).catch(console.error);
@@ -53,16 +56,6 @@ export function AddPlayerModal({ open, onOpenChange, onPlayerAdded }: AddPlayerM
         ? prev.filter((id) => id !== teamId)
         : [...prev, teamId]
     );
-  };
-
-  const handleProfilePicture = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setProfilePicture({
-        name: file.name,
-        preview: URL.createObjectURL(file),
-      });
-    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -85,7 +78,6 @@ export function AddPlayerModal({ open, onOpenChange, onPlayerAdded }: AddPlayerM
       setFormData({
         firstName: "",
         lastName: "",
-        age: "",
         dateOfBirth: "",
         specialNotes: "",
         guardianName: "",
@@ -94,7 +86,6 @@ export function AddPlayerModal({ open, onOpenChange, onPlayerAdded }: AddPlayerM
         guardianSecondaryPhone: "",
       });
       setSelectedTeams([]);
-      setProfilePicture(null);
       onPlayerAdded?.();
     } catch (err: any) {
       console.error("Failed to create player:", err);
@@ -129,43 +120,6 @@ export function AddPlayerModal({ open, onOpenChange, onPlayerAdded }: AddPlayerM
             {error && (
               <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg">{error}</div>
             )}
-            {/* Profile Picture */}
-            <div className="flex items-center gap-4">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="w-16 h-16 rounded-full bg-muted border-2 border-dashed border-border flex items-center justify-center overflow-hidden hover:border-primary/50 transition-colors flex-shrink-0"
-              >
-                {profilePicture ? (
-                  <img src={profilePicture.preview} alt="Profile" className="w-full h-full object-cover" />
-                ) : (
-                  <User className="w-6 h-6 text-muted-foreground" />
-                )}
-              </button>
-              <div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <Camera className="w-3.5 h-3.5" />
-                  {profilePicture ? "Change Photo" : "Add Photo"}
-                </Button>
-                {profilePicture && (
-                  <p className="text-xs text-muted-foreground mt-1 truncate max-w-[200px]">{profilePicture.name}</p>
-                )}
-              </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleProfilePicture}
-              />
-            </div>
-
             {/* Team Selection */}
             <div className="space-y-2">
               <Label>Assign to Teams</Label>
@@ -238,27 +192,15 @@ export function AddPlayerModal({ open, onOpenChange, onPlayerAdded }: AddPlayerM
               </div>
             </div>
 
-            {/* Age & DOB */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="age">Age</Label>
-                <Input
-                  id="age"
-                  type="number"
-                  placeholder="e.g. 12"
-                  value={formData.age}
-                  onChange={(e) => update("age", e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="dateOfBirth">Date of Birth</Label>
-                <Input
-                  id="dateOfBirth"
-                  type="date"
-                  value={formData.dateOfBirth}
-                  onChange={(e) => update("dateOfBirth", e.target.value)}
-                />
-              </div>
+            {/* Date of Birth */}
+            <div className="space-y-2">
+              <Label htmlFor="dateOfBirth">Date of Birth</Label>
+              <Input
+                id="dateOfBirth"
+                type="date"
+                value={formData.dateOfBirth}
+                onChange={(e) => update("dateOfBirth", e.target.value)}
+              />
             </div>
 
             {/* Special Notes */}

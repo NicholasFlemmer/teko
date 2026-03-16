@@ -1,4 +1,7 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5002';
+const REQUEST_TIMEOUT_MS = 30_000; // 30 second timeout
+
+let isRedirectingTo401 = false;
 
 function getToken(): string | null {
   return localStorage.getItem('token');
@@ -23,14 +26,34 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_URL}${endpoint}`, {
-    ...options,
-    headers,
-  });
+  // Add timeout via AbortController
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${endpoint}`, {
+      ...options,
+      headers,
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error('Request timed out');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (response.status === 401) {
     removeToken();
-    window.location.href = '/login';
+    // Prevent multiple concurrent 401s from racing to redirect
+    if (!isRedirectingTo401) {
+      isRedirectingTo401 = true;
+      window.location.href = '/login';
+    }
     throw new Error('Unauthorized');
   }
 
@@ -56,6 +79,7 @@ export const authAPI = {
       body: JSON.stringify({ username: email, password }),
     }).then(data => {
       setToken(data.token);
+      isRedirectingTo401 = false; // Reset so future 401s can redirect
       return data;
     }),
 
@@ -90,8 +114,14 @@ export const sessionsAPI = {
   },
   getOne: (id: string) => request<{ success: boolean; session: any }>(`/api/sessions/${id}`),
   create: (data: any) => request<{ success: boolean; session: any }>('/api/sessions', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: any) => request<{ success: boolean; session: any }>(`/api/sessions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id: string) => request<{ success: boolean }>(`/api/sessions/${id}`, { method: 'DELETE' }),
+  update: (id: string, data: any, scope?: 'single' | 'future' | 'all') => {
+    const qs = scope && scope !== 'single' ? `?scope=${scope}` : '';
+    return request<{ success: boolean; session?: any; message?: string }>(`/api/sessions/${id}${qs}`, { method: 'PUT', body: JSON.stringify(data) });
+  },
+  delete: (id: string, scope?: 'single' | 'future' | 'all') => {
+    const qs = scope && scope !== 'single' ? `?scope=${scope}` : '';
+    return request<{ success: boolean; message?: string }>(`/api/sessions/${id}${qs}`, { method: 'DELETE' });
+  },
   sendReminder: (id: string) => request<{ success: boolean }>(`/api/sessions/${id}/send-reminder`, { method: 'POST' }),
   getAttendance: (id: string) => request<{ success: boolean; attended_player_ids: string[] }>(`/api/sessions/${id}/attendance`),
   updateAttendance: (id: string, playerIds: string[]) => request<{ success: boolean; session: any }>(`/api/sessions/${id}/attendance`, { method: 'PUT', body: JSON.stringify({ attended_player_ids: playerIds }) }),
@@ -123,6 +153,41 @@ export const playersAPI = {
   create: (data: any) => request<{ success: boolean; player: any }>('/api/players', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: any) => request<{ success: boolean; player: any }>(`/api/players/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) => request<{ success: boolean }>(`/api/players/${id}`, { method: 'DELETE' }),
+  bulkUpload: async (file: File, teamIds: string[] = []) => {
+    const token = getToken();
+    const formData = new FormData();
+    formData.append('file', file);
+    teamIds.forEach(id => formData.append('team_ids', id));
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120_000);
+
+    let response: Response;
+    try {
+      response = await fetch(`${API_URL}/api/players/bulk-upload`, {
+        method: 'POST',
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        body: formData,
+        signal: controller.signal,
+      });
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') throw new Error('Upload timed out');
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    if (response.status === 401) {
+      removeToken();
+      window.location.href = '/login';
+      throw new Error('Unauthorized');
+    }
+
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Bulk upload failed');
+    return data as { success: boolean; created_count: number; error_count: number; errors: { row: number; error: string }[]; message: string };
+  },
 };
 
 // Locations
@@ -137,8 +202,16 @@ export const locationsAPI = {
 // Broadcasts
 export const broadcastsAPI = {
   getAll: () => request<{ success: boolean; broadcasts: any[] }>('/api/broadcasts'),
-  send: (data: any) => request<{ success: boolean; broadcast: any }>('/api/broadcasts', { method: 'POST', body: JSON.stringify(data) }),
+  send: (data: any) => request<{ success: boolean; broadcast: any; estimated_cost?: any }>('/api/broadcasts', { method: 'POST', body: JSON.stringify(data) }),
   getTemplates: () => request<{ success: boolean; templates: any[] }>('/api/broadcasts/templates'),
+  getTemplatePreview: (name: string) => request<{ success: boolean; template: any }>(`/api/broadcasts/templates/${name}`),
+  estimateCost: (recipientCount: number, messageType: 'marketing' | 'utility' | 'service') =>
+    request<{ success: boolean; cost_usd: number; cost_zar: number; recipient_count: number; rate_per_message_usd: number; usd_to_zar_rate: number }>('/api/broadcasts/estimate-cost', {
+      method: 'POST',
+      body: JSON.stringify({ recipient_count: recipientCount, message_type: messageType }),
+    }),
+  getPricing: () => request<{ success: boolean; pricing: any }>('/api/broadcasts/pricing'),
+  updatePricing: (data: any) => request<{ success: boolean; pricing: any }>('/api/broadcasts/pricing', { method: 'PUT', body: JSON.stringify(data) }),
 };
 
 // Content
@@ -196,11 +269,24 @@ export const uploadsAPI = {
     formData.append('file', file);
     formData.append('folder', folder);
 
-    const response = await fetch(`${API_URL}/api/uploads`, {
-      method: 'POST',
-      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-      body: formData,
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120_000); // 2 min upload timeout
+
+    let response: Response;
+    try {
+      response = await fetch(`${API_URL}/api/uploads`, {
+        method: 'POST',
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        body: formData,
+        signal: controller.signal,
+      });
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') throw new Error('Upload timed out');
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (response.status === 401) {
       removeToken();
@@ -213,6 +299,22 @@ export const uploadsAPI = {
     return data as { success: boolean; file: { file_name: string; file_path: string; public_url: string; content_type: string; size: number } };
   },
   delete: (filePath: string) => request<{ success: boolean }>(`/api/uploads/${filePath}`, { method: 'DELETE' }),
+};
+
+// SSE (Server-Sent Events)
+export const sseAPI = {
+  /** Subscribe to the coach activity stream. Returns an EventSource; caller must close it. */
+  coachActivity: (onEvent: (event: { type: string; coach_name: string; preview: string; timestamp: string }) => void): EventSource | null => {
+    const token = getToken();
+    if (!token) return null;
+    const es = new EventSource(`${API_URL}/api/sse/coach-activity?token=${encodeURIComponent(token)}`);
+    es.onmessage = (msg) => {
+      try {
+        onEvent(JSON.parse(msg.data));
+      } catch { /* ignore malformed events */ }
+    };
+    return es;
+  },
 };
 
 // Admin

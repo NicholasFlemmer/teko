@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Search, GraduationCap, Users, LayoutGrid, List, Loader2 } from "lucide-react";
+import { Plus, Search, GraduationCap, Users, LayoutGrid, List, Loader2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { AddPlayerModal } from "@/components/players/AddPlayerModal";
+import { BulkUploadModal } from "@/components/players/BulkUploadModal";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import {
@@ -26,22 +27,26 @@ export default function Players() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
   const [isListView, setIsListView] = useState(false);
   const [players, setPlayers] = useState<any[]>([]);
   const [teams, setTeams] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchData = async () => {
     try {
       setLoading(true);
+      setError(null);
       const [playersRes, teamsRes] = await Promise.all([
         playersAPI.getAll(),
         teamsAPI.getAll(),
       ]);
       setPlayers(playersRes.players || []);
       setTeams(teamsRes.teams || []);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to fetch players:", err);
+      setError(err.message || "Failed to load players. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -63,6 +68,7 @@ export default function Players() {
   const calculateAge = (dob: string) => {
     if (!dob) return "";
     const birthDate = new Date(dob);
+    if (isNaN(birthDate.getTime())) return "";
     const today = new Date();
     let age = today.getFullYear() - birthDate.getFullYear();
     const m = today.getMonth() - birthDate.getMonth();
@@ -97,10 +103,16 @@ export default function Players() {
               Track participation and attendance ({players.length} total)
             </p>
           </div>
-          <Button className="gap-2" onClick={() => setIsAddModalOpen(true)}>
-            <Plus className="w-4 h-4" />
-            Add Player
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" className="gap-2" onClick={() => setIsBulkUploadOpen(true)}>
+              <Upload className="w-4 h-4" />
+              Bulk Upload
+            </Button>
+            <Button className="gap-2" onClick={() => setIsAddModalOpen(true)}>
+              <Plus className="w-4 h-4" />
+              Add Player
+            </Button>
+          </div>
         </div>
 
         <div className="flex items-center gap-4">
@@ -128,6 +140,11 @@ export default function Players() {
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
             <span className="ml-2 text-muted-foreground">Loading players...</span>
+          </div>
+        ) : error ? (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <p className="text-destructive mb-2">{error}</p>
+            <Button variant="outline" size="sm" onClick={fetchData}>Try Again</Button>
           </div>
         ) : isListView ? (
           <div className="rounded-lg border bg-card">
@@ -217,6 +234,7 @@ export default function Players() {
       </div>
 
       <AddPlayerModal open={isAddModalOpen} onOpenChange={setIsAddModalOpen} onPlayerAdded={fetchData} />
+      <BulkUploadModal open={isBulkUploadOpen} onOpenChange={setIsBulkUploadOpen} onPlayersAdded={fetchData} />
     </MainLayout>
   );
 }

@@ -21,10 +21,12 @@ export default function Teams() {
   const [locations, setLocations] = useState<any[]>([]);
   const [coaches, setCoaches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchData = async () => {
     try {
       setLoading(true);
+      setError(null);
       const [teamsRes, playersRes, locationsRes, coachesRes] = await Promise.all([
         teamsAPI.getAll(),
         playersAPI.getAll(),
@@ -35,8 +37,9 @@ export default function Teams() {
       setPlayers(playersRes.players || []);
       setLocations(locationsRes.locations || []);
       setCoaches(coachesRes.coaches || []);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to fetch teams data:", err);
+      setError(err.message || "Failed to load teams. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -65,6 +68,7 @@ export default function Teams() {
   };
 
   const getTeamInitials = (name: string) => {
+    if (!name) return "??";
     const words = name.split(" ");
     if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
     return name.substring(0, 2).toUpperCase();
@@ -118,6 +122,11 @@ export default function Teams() {
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
             <span className="ml-2 text-muted-foreground">Loading teams...</span>
+          </div>
+        ) : error ? (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <p className="text-destructive mb-2">{error}</p>
+            <Button variant="outline" size="sm" onClick={fetchData}>Try Again</Button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">

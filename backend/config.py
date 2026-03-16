@@ -1,14 +1,27 @@
 import os
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
 
+_logger = logging.getLogger(__name__)
+
 class Config:
     """Application configuration"""
-    
+
     # Flask
-    SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
-    FLASK_ENV = os.getenv('FLASK_ENV', 'development')
+    SECRET_KEY = os.getenv('SECRET_KEY', '')
+    DEBUG = os.getenv('FLASK_ENV', 'development') == 'development'
+
+    @classmethod
+    def validate(cls):
+        """Validate critical config on startup. Call from app.py."""
+        if not cls.SECRET_KEY:
+            if cls.DEBUG:
+                cls.SECRET_KEY = 'dev-only-insecure-key'
+                _logger.warning("SECRET_KEY not set — using insecure dev default. Set SECRET_KEY env var for production!")
+            else:
+                raise RuntimeError("SECRET_KEY environment variable must be set in production")
     
     # Firebase
     # Note: FIREBASE_CREDENTIALS_PATH is optional. If not provided, the app will use
@@ -24,7 +37,8 @@ class Config:
     WHATSAPP_TYPING_API_URL = os.getenv('WHATSAPP_TYPING_API_URL', 'https://graph.facebook.com/v21.0').strip()
     WHATSAPP_API_KEY = os.getenv('WHATSAPP_API_KEY', '').strip()
     WHATSAPP_PHONE_NUMBER_ID = os.getenv('WHATSAPP_PHONE_NUMBER_ID', '').strip()
-    WHATSAPP_VERIFY_TOKEN = os.getenv('WHATSAPP_CLOUD_VERIFY_TOKEN', 'teko-webhook-verify-token-2024').strip()
+    WHATSAPP_VERIFY_TOKEN = os.getenv('WHATSAPP_CLOUD_VERIFY_TOKEN', '').strip()
+    WHATSAPP_APP_SECRET = os.getenv('WHATSAPP_APP_SECRET', '').strip()  # For webhook signature verification
     
     # Gemini AI
     GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')

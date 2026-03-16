@@ -169,13 +169,13 @@ export default function CheckIn() {
                 </div>
               </div>
 
-              <Button onClick={handleCheckIn} className="w-full" size="lg">
+              <Button onClick={handleCheckIn} className="w-full" size="lg" disabled={status !== "ready"}>
                 <Navigation className="h-4 w-4 mr-2" />
                 Check In Now
               </Button>
 
               <p className="text-xs text-muted-foreground text-center">
-                You must be within 100m of the session location to check in.
+                You must be within 500m of the session location to check in.
               </p>
             </CardContent>
           </Card>
@@ -201,7 +201,9 @@ export default function CheckIn() {
               <div className="text-center space-y-1">
                 <h2 className="text-lg font-semibold">Checked In!</h2>
                 <p className="text-sm text-muted-foreground">
-                  You're {formatDistance(result.location_verification.distance)} from the venue. Have a great session!
+                  {result.location_verification?.distance != null
+                    ? `You're ${formatDistance(result.location_verification.distance)} from the venue. `
+                    : ""}Have a great session!
                 </p>
               </div>
             </CardContent>
@@ -279,7 +281,7 @@ export default function CheckIn() {
                 <h2 className="text-lg font-semibold">Something went wrong</h2>
                 <p className="text-sm text-muted-foreground">{error}</p>
               </div>
-              <Button variant="outline" onClick={() => { setStatus("ready"); setError(""); }}>
+              <Button variant="outline" onClick={() => { setError(""); fetchCheckInInfo(); }}>
                 Try Again
               </Button>
             </CardContent>

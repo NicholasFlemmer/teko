@@ -112,7 +112,13 @@ export default function CoachDetail() {
   const documents: any[] = coachData?.documents ?? [];
 
   // Filter sessions for this coach
-  const coachSessions = allSessions.filter((s) => s.coach_id === id);
+  const coachSessions = allSessions.filter((s: any) => {
+    // Support both coach_ids (array) and legacy coach_id (string)
+    if (s.coach_ids && Array.isArray(s.coach_ids)) {
+      return s.coach_ids.includes(id);
+    }
+    return String(s.coach_id) === id;
+  });
   const totalSessions = coachSessions.length;
   const checkedIn = coachSessions.filter((s) => {
     const status = (s.status || "").toLowerCase().replace(/[\s-]/g, "_");
@@ -237,7 +243,8 @@ export default function CoachDetail() {
       setProfilePicture(previewUrl);
       try {
         setUploadingPhoto(true);
-        const result = await uploadsAPI.upload(file, 'coach-photos');
+        const result = await uploadsAPI.upload(file, 'profile-pictures');
+        URL.revokeObjectURL(previewUrl);
         setProfilePicture(result.file.public_url);
         // Auto-save the profile picture to the coach record
         if (id) {
@@ -245,6 +252,7 @@ export default function CoachDetail() {
         }
       } catch (err: any) {
         console.error("Failed to upload profile picture:", err);
+        URL.revokeObjectURL(previewUrl);
         setProfilePicture(coachData?.profile_picture || null);
       } finally {
         setUploadingPhoto(false);
@@ -391,7 +399,17 @@ export default function CoachDetail() {
             </div>
           ) : (
             <>
-              <Button variant="outline" className="gap-2">
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={() => {
+                  const phone = formData.mobile?.replace(/\D/g, '');
+                  if (phone && /^\d{1,15}$/.test(phone)) {
+                    window.open(`https://wa.me/${phone}`, '_blank');
+                  }
+                }}
+                disabled={!formData.mobile}
+              >
                 <MessageSquare className="w-4 h-4" />
                 Send Message
               </Button>

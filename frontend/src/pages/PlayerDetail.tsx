@@ -15,20 +15,25 @@ import {
   FileText,
   Image,
   Download,
-  Upload,
+
   Eye,
   Camera,
   Save,
   X,
   Mail,
   AlertCircle,
-  Loader2
+  Loader2,
+  Trash2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { playersAPI, teamsAPI, sessionsAPI, coachesAPI, locationsAPI } from "@/services/api";
 
@@ -50,8 +55,11 @@ export default function PlayerDetail() {
   const [loading, setLoading] = useState(true);
 
   const [isEditing, setIsEditing] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
@@ -101,6 +109,7 @@ export default function PlayerDetail() {
         setSelectedTeams(p.team_ids || []);
       } catch (err) {
         console.error("Failed to fetch player detail:", err);
+        setFetchError("Failed to load player. Please check your connection and try again.");
       } finally {
         setLoading(false);
       }
@@ -141,9 +150,22 @@ export default function PlayerDetail() {
         guardian_secondary_phone: formData.guardianSecondaryPhone,
         team_ids: selectedTeams,
       });
-      // Re-fetch to get fresh data
+      // Re-fetch to get fresh data and sync form
       const res = await playersAPI.getOne(id);
-      setPlayer(res.player);
+      const p = res.player;
+      setPlayer(p);
+      setFormData({
+        firstName: p.first_name || "",
+        lastName: p.last_name || "",
+        age: calculateAge(p.date_of_birth),
+        dateOfBirth: p.date_of_birth || "",
+        specialNotes: p.special_notes || "",
+        guardianName: p.guardian_name || "",
+        guardianEmail: p.guardian_email || "",
+        guardianPrimaryPhone: p.guardian_primary_phone || "",
+        guardianSecondaryPhone: p.guardian_secondary_phone || "",
+      });
+      setSelectedTeams(p.team_ids || []);
       setIsEditing(false);
     } catch (err: any) {
       console.error("Failed to save player:", err);
@@ -168,6 +190,11 @@ export default function PlayerDetail() {
         guardianSecondaryPhone: player.guardian_secondary_phone || "",
       });
       setSelectedTeams(player.team_ids || []);
+      // Revoke blob URL if one was created during editing
+      if (profilePicture?.startsWith('blob:')) {
+        URL.revokeObjectURL(profilePicture);
+      }
+      setProfilePicture(player.profile_picture || null);
     }
     setIsEditing(false);
   };
@@ -175,6 +202,10 @@ export default function PlayerDetail() {
   const handleProfilePictureChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      // Revoke previous blob URL to prevent memory leak
+      if (profilePicture?.startsWith('blob:')) {
+        URL.revokeObjectURL(profilePicture);
+      }
       setProfilePicture(URL.createObjectURL(file));
     }
   };
@@ -183,6 +214,20 @@ export default function PlayerDetail() {
     setSelectedTeams((prev) =>
       prev.includes(teamId) ? prev.filter((tid) => tid !== teamId) : [...prev, teamId]
     );
+  };
+
+  const handleDelete = async () => {
+    if (!id) return;
+    try {
+      setDeleting(true);
+      await playersAPI.delete(id);
+      navigate("/players");
+    } catch (err: any) {
+      setSaveError(err.message || "Failed to delete player");
+      setDeleteConfirmOpen(false);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   if (loading) {
@@ -200,7 +245,7 @@ export default function PlayerDetail() {
     return (
       <MainLayout>
         <div className="text-center py-24">
-          <p className="text-muted-foreground">Player not found</p>
+          <p className="text-muted-foreground">{fetchError || "Player not found"}</p>
           <Button variant="outline" className="mt-4" onClick={() => navigate("/players")}>
             Back to Players
           </Button>
@@ -295,6 +340,10 @@ export default function PlayerDetail() {
               {saveError && (
                 <span className="text-sm text-destructive mr-2">{saveError}</span>
               )}
+              <Button variant="destructive" size="sm" className="gap-2" onClick={() => setDeleteConfirmOpen(true)}>
+                <Trash2 className="w-4 h-4" />
+                Delete
+              </Button>
               <Button variant="outline" className="gap-2" onClick={handleCancel} disabled={saving}>
                 <X className="w-4 h-4" />
                 Cancel
@@ -357,7 +406,7 @@ export default function PlayerDetail() {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
                       <Label htmlFor="age" className="text-xs">Age</Label>
-                      <Input id="age" type="number" value={formData.age} onChange={(e) => update("age", e.target.value)} />
+                      <Input id="age" type="number" value={calculateAge(formData.dateOfBirth)} readOnly className="bg-muted" />
                     </div>
                     <div className="space-y-1.5">
                       <Label htmlFor="dob" className="text-xs">Date of Birth</Label>
@@ -499,15 +548,15 @@ export default function PlayerDetail() {
                 <div className="space-y-3">
                   <div className="flex items-center gap-2 text-sm">
                     <User className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-foreground">{formData.guardianName || "N/A"}</span>
+                    <span className="text-foreground">{formData.guardianName || "Not set"}</span>
                   </div>
                   <div className="flex items-center gap-2 text-sm">
                     <Mail className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-foreground">{formData.guardianEmail || "N/A"}</span>
+                    <span className="text-foreground">{formData.guardianEmail || "Not set"}</span>
                   </div>
                   <div className="flex items-center gap-2 text-sm">
                     <Phone className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-foreground">{formData.guardianPrimaryPhone || "N/A"}</span>
+                    <span className="text-foreground">{formData.guardianPrimaryPhone || "Not set"}</span>
                   </div>
                   {formData.guardianSecondaryPhone && (
                     <div className="flex items-center gap-2 text-sm">
@@ -555,15 +604,9 @@ export default function PlayerDetail() {
               </div>
             </div>
 
-            {/* Documents - placeholder since backend doesn't have docs yet */}
+            {/* Documents */}
             <div className="bg-card rounded-xl border border-border p-5 shadow-card">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-foreground">Documents</h3>
-                <Button variant="outline" size="sm" className="gap-1.5 h-8">
-                  <Upload className="w-3.5 h-3.5" />
-                  Upload
-                </Button>
-              </div>
+              <h3 className="font-semibold text-foreground mb-4">Documents</h3>
               <div className="text-center py-6">
                 <FileText className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
                 <p className="text-sm text-muted-foreground">No documents uploaded</p>
@@ -651,15 +694,27 @@ export default function PlayerDetail() {
                   <p className="text-sm text-muted-foreground text-center py-4">No attendance history</p>
                 )}
               </div>
-              {attendanceHistory.length > 0 && (
-                <Button variant="outline" className="w-full mt-4">
-                  View All History
-                </Button>
-              )}
             </div>
           </div>
         </div>
       </div>
+
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Player?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{fullName}</strong>? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {deleting ? "Deleting..." : "Delete Player"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </MainLayout>
   );
 }

@@ -5,6 +5,9 @@ from config import Config
 import os
 import random
 import string
+import logging
+
+logger = logging.getLogger(__name__)
 
 class FirebaseService:
     """Service for Firebase Firestore operations
@@ -27,28 +30,26 @@ class FirebaseService:
                 # Check if credentials file exists (legacy support)
                 cred_path = getattr(Config, 'FIREBASE_CREDENTIALS_PATH', None)
                 if cred_path and os.path.exists(cred_path):
-                    print(f"📄 Using service account credentials from: {cred_path}")
+                    logger.info("Using service account credentials from: %s", cred_path)
                     cred = credentials.Certificate(cred_path)
                     firebase_admin.initialize_app(cred)
                 else:
                     # Use Application Default Credentials (recommended)
-                    print("🔐 Using Application Default Credentials (ADC)")
+                    logger.info("Using Application Default Credentials (ADC)")
                     firebase_admin.initialize_app()
-                
-                print("✅ Firebase Admin SDK initialized successfully")
+
+                logger.info("Firebase Admin SDK initialized successfully")
             except Exception as e:
-                print(f"❌ Firebase initialization failed: {e}")
-                print("\nTroubleshooting:")
-                print("  For local development, run: gcloud auth application-default login")
-                print("  For Cloud Run, ensure the service account has Firebase Admin permissions")
+                logger.error("Firebase initialization failed: %s", e)
+                logger.error("For local dev, run: gcloud auth application-default login")
                 cls._db = None
                 return None
-            
+
         try:
             cls._db = firestore.client()
-            print("✅ Firestore client connected successfully")
+            logger.info("Firestore client connected successfully")
         except Exception as e:
-            print(f"❌ Firestore client connection failed: {e}")
+            logger.error("Firestore client connection failed: %s", e)
             cls._db = None
         return cls._db
     
@@ -190,6 +191,13 @@ class FirebaseService:
         db = cls.get_db()
         db.collection('sessions').document(session_id).delete()
         return True
+
+    @classmethod
+    def get_sessions_by_recurrence_group(cls, group_id):
+        """Get all sessions sharing a recurrence_group_id."""
+        db = cls.get_db()
+        docs = db.collection('sessions').where('recurrence_group_id', '==', group_id).stream()
+        return [{'id': doc.id, **doc.to_dict()} for doc in docs]
     
     @classmethod
     def get_sessions_for_reminder(cls, target_datetime):
@@ -608,32 +616,41 @@ class FirebaseService:
         doc_ref.set(data)
         return cls.get_admin(doc_ref.id)
 
+    @staticmethod
+    def _strip_admin_password(admin_dict):
+        """Remove password from admin dict before returning to callers."""
+        if admin_dict:
+            admin_dict.pop('password', None)
+            admin_dict.pop('password_hash', None)
+        return admin_dict
+
     @classmethod
     def get_admin(cls, admin_id):
-        """Get admin user by ID"""
+        """Get admin user by ID (password stripped)"""
         db = cls.get_db()
         doc = db.collection('admin_users').document(admin_id).get()
         if doc.exists:
-            return {'id': doc.id, **doc.to_dict()}
+            return cls._strip_admin_password({'id': doc.id, **doc.to_dict()})
         return None
 
     @classmethod
-    def get_admin_by_email(cls, email):
-        """Get admin user by email"""
+    def get_admin_by_email(cls, email, include_password=False):
+        """Get admin user by email. Set include_password=True for auth checks only."""
         db = cls.get_db()
         docs = db.collection('admin_users').where('email', '==', email).limit(1).stream()
         for doc in docs:
-            return {'id': doc.id, **doc.to_dict()}
+            data = {'id': doc.id, **doc.to_dict()}
+            return data if include_password else cls._strip_admin_password(data)
         return None
 
     @classmethod
     def get_all_admins(cls):
-        """Get all admin users"""
+        """Get all admin users (passwords stripped)"""
         db = cls.get_db()
         admins = []
         docs = db.collection('admin_users').stream()
         for doc in docs:
-            admins.append({'id': doc.id, **doc.to_dict()})
+            admins.append(cls._strip_admin_password({'id': doc.id, **doc.to_dict()}))
         return admins
 
     @classmethod

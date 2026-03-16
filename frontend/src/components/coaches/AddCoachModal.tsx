@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { Users, Upload, X, FileText, Image, Camera } from "lucide-react";
+import { Users, Camera } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -11,13 +11,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { coachesAPI, uploadsAPI } from "@/services/api";
-
-interface MockFile {
-  id: string;
-  name: string;
-  type: string;
-  size: string;
-}
 
 interface AddCoachModalProps {
   open: boolean;
@@ -39,12 +32,15 @@ export function AddCoachModal({ open, onOpenChange, onSuccess }: AddCoachModalPr
   const [profilePicture, setProfilePicture] = useState<string | null>(null);
   const [profilePictureUrl, setProfilePictureUrl] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const [mockFiles, setMockFiles] = useState<MockFile[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const resetForm = () => {
+    // Revoke blob URL to prevent memory leak
+    if (profilePicture?.startsWith('blob:')) {
+      URL.revokeObjectURL(profilePicture);
+    }
     setFormData({
       firstName: "",
       lastName: "",
@@ -58,7 +54,6 @@ export function AddCoachModal({ open, onOpenChange, onSuccess }: AddCoachModalPr
     setProfilePicture(null);
     setProfilePictureUrl(null);
     setUploadingPhoto(false);
-    setMockFiles([]);
     setError(null);
   };
 
@@ -96,12 +91,16 @@ export function AddCoachModal({ open, onOpenChange, onSuccess }: AddCoachModalPr
   const handleProfilePictureChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      // Revoke previous blob URL before creating new one
+      if (profilePicture?.startsWith('blob:')) {
+        URL.revokeObjectURL(profilePicture);
+      }
       setProfilePicture(URL.createObjectURL(file));
       try {
         setUploadingPhoto(true);
         setError(null);
-        const result = await uploadsAPI.upload(file, 'coach-photos');
-        setProfilePictureUrl(result.file.public_url);
+        const result = await uploadsAPI.upload(file, 'profile-pictures');
+        setProfilePictureUrl(result?.file?.public_url || null);
       } catch (err: any) {
         setError(err.message || "Failed to upload profile picture");
         setProfilePicture(null);
@@ -110,25 +109,6 @@ export function AddCoachModal({ open, onOpenChange, onSuccess }: AddCoachModalPr
         setUploadingPhoto(false);
       }
     }
-  };
-
-  const handleFileSelect = () => {
-    const mockNewFile: MockFile = {
-      id: Date.now().toString(),
-      name: `document_${mockFiles.length + 1}.pdf`,
-      type: "application/pdf",
-      size: "245 KB",
-    };
-    setMockFiles([...mockFiles, mockNewFile]);
-  };
-
-  const removeFile = (id: string) => {
-    setMockFiles(mockFiles.filter((f) => f.id !== id));
-  };
-
-  const getFileIcon = (type: string) => {
-    if (type.startsWith("image/")) return <Image className="w-4 h-4" />;
-    return <FileText className="w-4 h-4" />;
   };
 
   const update = (field: string, value: string) => {
@@ -280,47 +260,6 @@ export function AddCoachModal({ open, onOpenChange, onSuccess }: AddCoachModalPr
                   </div>
                 </div>
               </div>
-            </div>
-
-            {/* Documents Upload */}
-            <div className="space-y-2">
-              <Label>Documents</Label>
-              <div
-                onClick={handleFileSelect}
-                className="border-2 border-dashed border-border rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 hover:bg-muted/50 transition-colors"
-              >
-                <Upload className="w-6 h-6 mx-auto text-muted-foreground mb-2" />
-                <p className="text-sm text-muted-foreground">Click to upload files</p>
-                <p className="text-xs text-muted-foreground mt-1">PDF, images, or documents</p>
-              </div>
-
-              {mockFiles.length > 0 && (
-                <div className="space-y-2 mt-3">
-                  {mockFiles.map((file) => (
-                    <div
-                      key={file.id}
-                      className="flex items-center gap-3 p-2 rounded-lg bg-muted/50 border border-border"
-                    >
-                      <div className="w-8 h-8 rounded bg-primary/10 flex items-center justify-center text-primary">
-                        {getFileIcon(file.type)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{file.name}</p>
-                        <p className="text-xs text-muted-foreground">{file.size}</p>
-                      </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        onClick={() => removeFile(file.id)}
-                      >
-                        <X className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
 
             <div className="flex gap-3 pt-4">

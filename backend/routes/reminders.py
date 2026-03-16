@@ -1,6 +1,9 @@
+import logging
 from flask import Blueprint, request, jsonify
 from services.firebase_service import FirebaseService
 from routes.auth import token_required
+
+logger = logging.getLogger(__name__)
 
 reminders_bp = Blueprint('reminders', __name__)
 
@@ -15,9 +18,10 @@ def get_reminders(current_user):
             'reminders': reminders
         }), 200
     except Exception as e:
+        logger.exception("Error in get_reminders")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @reminders_bp.route('', methods=['POST'])
@@ -26,6 +30,8 @@ def create_reminder(current_user):
     """Create a new reminder configuration"""
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'Request body is required'}), 400
 
         # Validate required fields
         required_fields = ['type', 'timing', 'enabled']
@@ -50,9 +56,10 @@ def create_reminder(current_user):
             'message': 'Reminder created successfully'
         }), 201
     except Exception as e:
+        logger.exception("Error in create_reminder")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @reminders_bp.route('/<reminder_id>', methods=['PUT'])
@@ -61,6 +68,8 @@ def update_reminder(current_user, reminder_id):
     """Update a reminder configuration"""
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'Request body is required'}), 400
 
         # Check if reminder exists
         reminder = FirebaseService.get_reminder(reminder_id)
@@ -92,9 +101,10 @@ def update_reminder(current_user, reminder_id):
             'message': 'Reminder updated successfully'
         }), 200
     except Exception as e:
+        logger.exception("Error in update_reminder")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500
 
 @reminders_bp.route('/<reminder_id>', methods=['DELETE'])
@@ -118,7 +128,8 @@ def delete_reminder(current_user, reminder_id):
             'message': 'Reminder deleted successfully'
         }), 200
     except Exception as e:
+        logger.exception("Error in delete_reminder")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'An internal error occurred'
         }), 500

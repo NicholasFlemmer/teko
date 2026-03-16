@@ -2,6 +2,18 @@ from firebase_admin import storage
 from config import Config
 import uuid
 import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Map extensions to expected MIME type prefixes for content-type validation
+_EXTENSION_MIME_MAP = {
+    '.jpg': 'image/', '.jpeg': 'image/', '.png': 'image/', '.gif': 'image/',
+    '.webp': 'image/', '.svg': 'image/',
+    '.pdf': 'application/pdf', '.doc': 'application/', '.docx': 'application/',
+    '.xls': 'application/', '.xlsx': 'application/', '.csv': ('text/csv', 'application/'),
+    '.mp4': 'video/', '.mov': 'video/',
+}
 
 class StorageService:
     """Service for Firebase Cloud Storage operations"""
@@ -20,6 +32,14 @@ class StorageService:
             cls._bucket = storage.bucket(bucket_name)
         return cls._bucket
 
+    # 10 MB max upload size
+    MAX_FILE_SIZE = 10 * 1024 * 1024
+    ALLOWED_EXTENSIONS = {
+        '.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg',  # images
+        '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv',  # documents
+        '.mp4', '.mov',  # video
+    }
+
     @classmethod
     def upload_file(cls, file, folder='uploads'):
         """Upload a file to Firebase Storage
@@ -30,11 +50,42 @@ class StorageService:
 
         Returns:
             dict with file_name, file_path, public_url, content_type, size
+
+        Raises:
+            ValueError: if file exceeds size limit or has disallowed extension
         """
+        if not file or not hasattr(file, 'filename') or not file.filename:
+            raise ValueError("No file provided")
+
+        # Prevent path traversal in folder parameter
+        folder = folder.strip()
+        if '..' in folder or folder.startswith('/') or folder.startswith('\\'):
+            raise ValueError("Invalid folder path")
+
         bucket = cls.get_bucket()
 
+        # Validate extension
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in cls.ALLOWED_EXTENSIONS:
+            raise ValueError(f"File type '{ext}' not allowed. Allowed: {', '.join(sorted(cls.ALLOWED_EXTENSIONS))}")
+
+        # Validate content-type matches extension (prevent disguised uploads)
+        content_type = (file.content_type or '').lower()
+        expected = _EXTENSION_MIME_MAP.get(ext)
+        if expected and content_type:
+            prefixes = expected if isinstance(expected, tuple) else (expected,)
+            if not any(content_type.startswith(p) for p in prefixes):
+                logger.warning(f"Content-type mismatch: {file.filename} has type '{content_type}' but expected '{expected}'")
+                raise ValueError(f"File content type '{content_type}' does not match extension '{ext}'")
+
+        # Validate file size (read position, check, reset)
+        file.seek(0, os.SEEK_END)
+        size = file.tell()
+        file.seek(0)
+        if size > cls.MAX_FILE_SIZE:
+            raise ValueError(f"File too large ({size / 1024 / 1024:.1f} MB). Maximum is {cls.MAX_FILE_SIZE / 1024 / 1024:.0f} MB.")
+
         # Generate unique filename
-        ext = os.path.splitext(file.filename)[1]
         unique_name = f"{uuid.uuid4().hex}{ext}"
         blob_path = f"{folder}/{unique_name}"
 
