@@ -83,6 +83,13 @@ if not app.config.get('SCHEDULER_STARTED'):
         replace_existing=True,
     )
     scheduler.add_job(
+        func=SchedulerService.send_end_session_prompts,
+        trigger='interval',
+        minutes=5,
+        id='end_session_prompts',
+        replace_existing=True,
+    )
+    scheduler.add_job(
         func=SchedulerService.mark_missed_sessions,
         trigger='interval',
         minutes=30,

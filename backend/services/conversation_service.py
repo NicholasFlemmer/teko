@@ -794,8 +794,10 @@ Remember: You're helping coaches develop their skills and help their players imp
                 )
                 return
 
-            # Pick the best session: prefer not-yet-checked-in, earliest start time
-            unchecked = [s for s in sessions if s.get('status') not in ('checked_in', 'missed', 'completed')]
+            # Pick the best session: prefer ones this coach hasn't checked into yet
+            unchecked = [s for s in sessions
+                         if s.get('status') != 'cancelled'
+                         and coach_id not in (s.get('coach_check_ins') or {})]
             if unchecked:
                 unchecked.sort(key=lambda s: s.get('start_time', ''))
                 session = unchecked[0]
@@ -847,7 +849,7 @@ Remember: You're helping coaches develop their skills and help their players imp
                 FirebaseService.check_in_session(session['id'], {
                     'location': actual_location,
                     'location_verified': False,  # can't verify without venue coordinates
-                })
+                }, coach_id=coach_id)
                 WhatsAppService.send_message(
                     phone_number=from_number,
                     message_text=f"✅ Checked in, {coach_name}! (Location GPS not configured for this venue, so distance wasn't verified.)"
@@ -862,7 +864,7 @@ Remember: You're helping coaches develop their skills and help their players imp
             FirebaseService.check_in_session(session['id'], {
                 'location': actual_location,
                 'location_verified': within,
-            })
+            }, coach_id=coach_id)
 
             venue_link = format_maps_link(expected_location.get('latitude'), expected_location.get('longitude'))
             venue_ref = f"\n📍 {venue_link}" if venue_link else ""
@@ -902,6 +904,7 @@ Remember: You're helping coaches develop their skills and help their players imp
     @classmethod
     def handle_end_session_command(cls, coach):
         """Mark today's active session as completed."""
+        from firebase_admin import firestore as _firestore
         coach_id = coach.get('id')
         today_str = date.today().strftime('%Y-%m-%d')
 
@@ -911,8 +914,10 @@ Remember: You're helping coaches develop their skills and help their players imp
         if not sessions:
             return "You don't have any sessions scheduled for today. 📋"
 
-        # Pick the first active (non-completed, non-missed) session
-        active = [s for s in sessions if s.get('status') not in ('completed', 'missed')]
+        # Pick the first session this coach checked into that isn't completed/cancelled
+        active = [s for s in sessions
+                  if s.get('status') not in ('completed', 'cancelled')
+                  and coach_id in (s.get('coach_check_ins') or {})]
         if not active:
             return "All of today's sessions are already completed or missed. ✅"
 
@@ -924,7 +929,10 @@ Remember: You're helping coaches develop their skills and help their players imp
         session_type = session.get('type', 'practice').capitalize()
         attended = session.get('attended_player_ids', [])
 
-        FirebaseService.update_session(session['id'], {'status': 'completed'})
+        FirebaseService.update_session(session['id'], {
+            'status': 'completed',
+            'completed_at': _firestore.SERVER_TIMESTAMP,
+        })
 
         # Clear any pending photo request since session is done
         cls.clear_pending_photo(coach.get('phone_number', ''))

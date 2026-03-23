@@ -218,7 +218,7 @@ class FirebaseService:
     
     # Check-in token operations
     @classmethod
-    def create_check_in_token(cls, token, session_id, expires_at):
+    def create_check_in_token(cls, token, session_id, expires_at, coach_id=None):
         """Create check-in token"""
         db = cls.get_db()
         data = {
@@ -228,6 +228,8 @@ class FirebaseService:
             'expires_at': expires_at,
             'used': False
         }
+        if coach_id:
+            data['coach_id'] = coach_id
         doc_ref = db.collection('check_in_tokens').document(token)
         doc_ref.set(data)
         return data
@@ -249,16 +251,45 @@ class FirebaseService:
         return True
     
     @classmethod
-    def check_in_session(cls, session_id, check_in_data):
-        """Update session with check-in data"""
+    def check_in_session(cls, session_id, check_in_data, coach_id=None):
+        """Update session with check-in data.
+
+        When coach_id is provided, stores per-coach check-in under
+        coach_check_ins.{coach_id} so multi-coach sessions work correctly.
+        """
         db = cls.get_db()
         location_verified = check_in_data.get('location_verified', False)
+        location = check_in_data.get('location', {})
+
         update_data = {
-            'status': 'checked_in' if location_verified else 'missed',
             'check_in_time': firestore.SERVER_TIMESTAMP,
-            'check_in_location': check_in_data.get('location', {}),
-            'location_verified': location_verified
+            'check_in_location': location,
+            'location_verified': location_verified,
         }
+
+        if coach_id:
+            update_data[f'coach_check_ins.{coach_id}'] = {
+                'check_in_time': firestore.SERVER_TIMESTAMP,
+                'location': location,
+                'location_verified': location_verified,
+                'distance': check_in_data.get('distance'),
+            }
+
+        # Determine session-level status
+        session = cls.get_session(session_id)
+        all_coach_ids = cls.get_session_coach_ids(session) if session else []
+
+        if len(all_coach_ids) <= 1 or not coach_id:
+            # Single-coach or unknown coach — simple status
+            update_data['status'] = 'checked_in' if location_verified else 'missed'
+        else:
+            # Multi-coach: check if all coaches have now checked in
+            existing_check_ins = dict(session.get('coach_check_ins', {}) or {})
+            existing_check_ins[coach_id] = True  # count this one
+            if all(cid in existing_check_ins for cid in all_coach_ids):
+                update_data['status'] = 'checked_in'
+            # else leave status as-is (scheduled/reminded)
+
         doc_ref = db.collection('sessions').document(session_id)
         doc_ref.update(update_data)
         return cls.get_session(session_id)

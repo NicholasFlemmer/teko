@@ -91,7 +91,7 @@ class SchedulerService:
                             token = str(uuid.uuid4())
                             # Token expiry uses UTC (consistent with check-in verification)
                             expires_at = datetime.now(timezone.utc) + timedelta(minutes=Config.CHECK_IN_TOKEN_EXPIRY_MINUTES)
-                            FirebaseService.create_check_in_token(token, session['id'], expires_at)
+                            FirebaseService.create_check_in_token(token, session['id'], expires_at, coach_id=coach_id)
                             check_in_url = f"{Config.FRONTEND_URL}/check-in/{token}"
 
                             result = WhatsAppService.send_check_in_reminder(
@@ -126,6 +126,69 @@ class SchedulerService:
                 'error': str(e),
                 'reminders_sent': 0
             }
+
+    @classmethod
+    def send_end_session_prompts(cls):
+        """Send a prompt to coaches asking if their session has ended.
+
+        Targets sessions with status 'checked_in' whose end_time (or start + 2h)
+        plus END_SESSION_PROMPT_MINUTES has passed.
+        """
+        try:
+            now = datetime.now(SAST).replace(tzinfo=None)
+            db = FirebaseService.get_db()
+            docs = db.collection('sessions').where('status', '==', 'checked_in').stream()
+            sessions = [{'id': doc.id, **doc.to_dict()} for doc in docs]
+
+            sent = 0
+            errors = []
+
+            for session in sessions:
+                if session.get('end_prompt_sent'):
+                    continue
+
+                session_date = session.get('date', '')
+                session_end = session.get('end_time', '')
+                session_start = session.get('start_time', '')
+                if not session_date or (not session_end and not session_start):
+                    continue
+
+                try:
+                    if session_end:
+                        end_dt = datetime.strptime(f"{session_date} {session_end}", "%Y-%m-%d %H:%M")
+                    else:
+                        end_dt = datetime.strptime(f"{session_date} {session_start}", "%Y-%m-%d %H:%M") + timedelta(hours=2)
+                except ValueError:
+                    continue
+
+                prompt_after = end_dt + timedelta(minutes=Config.END_SESSION_PROMPT_MINUTES)
+                if now < prompt_after:
+                    continue
+
+                coach_ids = FirebaseService.get_session_coach_ids(session)
+                for coach_id in coach_ids:
+                    coach = FirebaseService.get_coach(coach_id)
+                    if not coach:
+                        continue
+                    phone = normalize_sa_phone(coach.get('phone_number', ''))
+                    if not phone:
+                        continue
+                    coach_name = coach.get('name') or coach.get('first_name', '') or 'Coach'
+                    result = WhatsAppService.send_message(
+                        phone_number=phone,
+                        message_text=f"Hi {coach_name}! Has your session ended? Reply /end to mark it as complete. 🏏"
+                    )
+                    if result.get('success'):
+                        sent += 1
+                    else:
+                        errors.append(f"Failed to send end prompt to {coach_name}: {result.get('error')}")
+
+                FirebaseService.update_session(session['id'], {'end_prompt_sent': True})
+
+            return {'success': True, 'prompts_sent': sent, 'errors': errors}
+
+        except Exception as e:
+            return {'success': False, 'error': str(e), 'prompts_sent': 0}
 
     @classmethod
     def mark_missed_sessions(cls):

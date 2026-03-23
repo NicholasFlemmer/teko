@@ -123,6 +123,7 @@ export const sessionsAPI = {
     return request<{ success: boolean; message?: string }>(`/api/sessions/${id}${qs}`, { method: 'DELETE' });
   },
   sendReminder: (id: string) => request<{ success: boolean }>(`/api/sessions/${id}/send-reminder`, { method: 'POST' }),
+  cancel: (id: string, reason?: string) => request<{ success: boolean; session: any }>(`/api/sessions/${id}/cancel`, { method: 'PATCH', body: JSON.stringify({ reason }) }),
   getAttendance: (id: string) => request<{ success: boolean; attended_player_ids: string[] }>(`/api/sessions/${id}/attendance`),
   updateAttendance: (id: string, playerIds: string[]) => request<{ success: boolean; session: any }>(`/api/sessions/${id}/attendance`, { method: 'PUT', body: JSON.stringify({ attended_player_ids: playerIds }) }),
 };

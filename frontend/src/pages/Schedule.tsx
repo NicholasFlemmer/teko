@@ -47,6 +47,13 @@ interface Session {
   status: string;
   notes?: string;
   recurrence_group_id?: string;
+  check_in_time?: any;
+  location_verified?: boolean;
+  distance?: number;
+  completed_at?: any;
+  cancelled_at?: string;
+  cancellation_reason?: string;
+  coach_check_ins?: Record<string, any>;
 }
 
 interface CoachOption {
@@ -134,6 +141,13 @@ export default function Schedule() {
       status: raw.status || "scheduled",
       notes: raw.notes,
       recurrence_group_id: raw.recurrence_group_id,
+      check_in_time: raw.check_in_time,
+      location_verified: raw.location_verified,
+      distance: raw.distance,
+      completed_at: raw.completed_at,
+      cancelled_at: raw.cancelled_at,
+      cancellation_reason: raw.cancellation_reason,
+      coach_check_ins: raw.coach_check_ins,
     };
   }, [coachMap, teamMap, locationMap]);
 
@@ -202,13 +216,14 @@ export default function Schedule() {
 
   // Status counts from display sessions
   const statusCounts = useMemo(() => {
-    const counts = { total: displaySessions.length, scheduled: 0, reminded: 0, checked_in: 0, missed: 0 };
+    const counts = { total: displaySessions.length, scheduled: 0, reminded: 0, checked_in: 0, missed: 0, cancelled: 0 };
     displaySessions.forEach((s) => {
       const status = (s.status || 'scheduled').toLowerCase().replace(/\s+/g, "_");
       if (status === "scheduled") counts.scheduled++;
       else if (status === "reminded") counts.reminded++;
       else if (status === "checked_in" || status === "checked-in" || status === "checkedin" || status === "completed") counts.checked_in++;
       else if (status === "missed" || status === "no_show" || status === "no-show") counts.missed++;
+      else if (status === "cancelled") counts.cancelled++;
     });
     return counts;
   }, [displaySessions]);
@@ -739,6 +754,7 @@ export default function Schedule() {
         session={selectedSession}
         onDelete={handleDeleteSession}
         onEdit={handleEditSession}
+        onStatusChange={fetchSessions}
       />
       <EditSessionModal
         open={isEditModalOpen}

@@ -25,12 +25,18 @@ export interface Session {
   location_id?: string;
   location?: { latitude: number; longitude: number };
   address: string;
-  status: 'scheduled' | 'reminded' | 'checked_in' | 'missed';
+  status: 'scheduled' | 'reminded' | 'checked_in' | 'missed' | 'completed' | 'cancelled';
   type?: 'practice' | 'match';
   notes?: string;
   check_in_time?: any;
   check_in_location?: { latitude: number; longitude: number };
   location_verified?: boolean;
+  distance?: number;
+  coach_check_ins?: Record<string, { check_in_time: any; location_verified: boolean; distance?: number }>;
+  completed_at?: any;
+  cancelled_at?: string;
+  cancellation_reason?: string;
+  end_prompt_sent?: boolean;
   created_at?: any;
 }
 

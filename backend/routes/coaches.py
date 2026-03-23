@@ -2,6 +2,7 @@ import logging
 from flask import Blueprint, request, jsonify
 from services.firebase_service import FirebaseService
 from routes.auth import token_required
+from utils.phone import normalize_sa_phone
 
 logger = logging.getLogger(__name__)
 
@@ -93,8 +94,9 @@ def create_coach(current_user):
             coach_data['first_name'] = parts[0]
             coach_data['last_name'] = parts[1] if len(parts) > 1 else ''
 
-        # Phone number - support both formats
-        coach_data['phone_number'] = data.get('phone_number') or data.get('phone', '')
+        # Phone number - support both formats, normalize on save
+        raw_phone = data.get('phone_number') or data.get('phone', '')
+        coach_data['phone_number'] = normalize_sa_phone(raw_phone) or raw_phone
 
         # Optional expanded fields
         optional_fields = ['dob', 'profile_picture', 'emergency_name', 'emergency_relationship',
@@ -142,9 +144,10 @@ def update_coach(current_user, coach_id):
                           'emergency_phone', 'notes', 'joined_date']
         for field in allowed_fields:
             if field in data:
-                # Normalize phone field
-                if field == 'phone':
-                    update_data['phone_number'] = data[field]
+                # Normalize phone fields on save
+                if field in ('phone', 'phone_number'):
+                    normalized = normalize_sa_phone(data[field])
+                    update_data['phone_number'] = normalized or data[field]
                 else:
                     update_data[field] = data[field]
 

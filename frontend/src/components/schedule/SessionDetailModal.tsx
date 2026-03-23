@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { MapPin, User, Calendar, Clock, FileText, Shield, Trash2, Loader2, Bell, Repeat, Pencil } from "lucide-react";
+import { MapPin, User, Calendar, Clock, FileText, Shield, Trash2, Loader2, Bell, Repeat, Pencil, XCircle, CheckCircle2, Timer } from "lucide-react";
 import { sessionsAPI } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 
@@ -33,6 +33,13 @@ interface Session {
   status: string;
   notes?: string;
   recurrence_group_id?: string;
+  check_in_time?: any;
+  location_verified?: boolean;
+  distance?: number;
+  completed_at?: any;
+  cancelled_at?: string;
+  cancellation_reason?: string;
+  coach_check_ins?: Record<string, { check_in_time: any; location_verified: boolean; distance?: number }>;
 }
 
 interface SessionDetailModalProps {
@@ -41,18 +48,56 @@ interface SessionDetailModalProps {
   session: Session | null;
   onDelete?: (sessionId: number, scope?: 'single' | 'future' | 'all') => Promise<void>;
   onEdit?: (session: Session) => void;
+  onStatusChange?: () => void;
 }
 
-export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEdit }: SessionDetailModalProps) {
+function formatTimestamp(ts: any): string {
+  if (!ts) return '-';
+  // Firestore timestamps have _seconds or seconds property
+  const seconds = ts._seconds ?? ts.seconds;
+  if (seconds) return new Date(seconds * 1000).toLocaleString();
+  // ISO string or Date
+  const d = new Date(ts);
+  return isNaN(d.getTime()) ? '-' : d.toLocaleString();
+}
+
+function formatDuration(startTs: any, endTs: any): string | null {
+  if (!startTs || !endTs) return null;
+  const getMs = (ts: any) => {
+    const seconds = ts._seconds ?? ts.seconds;
+    return seconds ? seconds * 1000 : new Date(ts).getTime();
+  };
+  const ms = getMs(endTs) - getMs(startTs);
+  if (isNaN(ms) || ms < 0) return null;
+  const mins = Math.round(ms / 60000);
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  return `${hrs}h ${mins % 60}m`;
+}
+
+const statusBadgeClass: Record<string, string> = {
+  scheduled: '',
+  reminded: 'bg-blue-500/10 text-blue-600 border-blue-500/30',
+  checked_in: 'bg-green-500/10 text-green-600 border-green-500/30',
+  completed: 'bg-green-500/10 text-green-600 border-green-500/30',
+  missed: 'bg-red-500/10 text-red-600 border-red-500/30',
+  cancelled: 'bg-orange-500/10 text-orange-600 border-orange-500/30',
+};
+
+export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEdit, onStatusChange }: SessionDetailModalProps) {
   const { toast } = useToast();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [deleteScope, setDeleteScope] = useState<'single' | 'future' | 'all'>('single');
   const [deleting, setDeleting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [sendingReminder, setSendingReminder] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
 
-  // Reset deleteScope when viewing a different session
+  // Reset state when viewing a different session
   useEffect(() => {
     setDeleteScope('single');
+    setCancelReason('');
   }, [session?.id]);
 
   const handleSendReminder = async () => {
@@ -65,6 +110,22 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
       toast({ title: "Reminder failed", description: err.message || "Failed to send reminder.", variant: "destructive" });
     } finally {
       setSendingReminder(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!session) return;
+    setCancelling(true);
+    try {
+      await sessionsAPI.cancel(session.id.toString(), cancelReason);
+      toast({ title: "Session cancelled", description: `Session on ${session.date} has been cancelled.` });
+      setShowCancelConfirm(false);
+      onStatusChange?.();
+      onOpenChange(false);
+    } catch (err: any) {
+      toast({ title: "Cancel failed", description: err.message || "Failed to cancel session.", variant: "destructive" });
+    } finally {
+      setCancelling(false);
     }
   };
 
@@ -82,6 +143,10 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
       setDeleting(false);
     }
   };
+
+  const canCancel = !['completed', 'cancelled'].includes(session.status);
+  const showCheckInDetails = ['checked_in', 'completed', 'missed'].includes(session.status);
+  const duration = formatDuration(session.check_in_time, session.completed_at);
 
   return (
     <>
@@ -165,8 +230,8 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
             <div className="pt-2 border-t border-border space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">Status</span>
-                <Badge variant="outline" className="capitalize">
-                  {session.status}
+                <Badge variant="outline" className={`capitalize ${statusBadgeClass[session.status] || ''}`}>
+                  {session.status.replace('_', ' ')}
                 </Badge>
               </div>
               {session.recurrence_group_id && (
@@ -175,7 +240,49 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
                   <span>Part of a recurring series</span>
                 </div>
               )}
+              {session.status === 'cancelled' && session.cancellation_reason && (
+                <p className="text-sm text-muted-foreground">Reason: {session.cancellation_reason}</p>
+              )}
             </div>
+
+            {/* Check-in Details */}
+            {showCheckInDetails && (
+              <div className="pt-2 border-t border-border space-y-2">
+                <p className="text-sm font-medium text-foreground">Check-in Details</p>
+                {session.check_in_time && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Checked in</span>
+                    <span>{formatTimestamp(session.check_in_time)}</span>
+                  </div>
+                )}
+                {session.completed_at && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Completed</span>
+                    <span>{formatTimestamp(session.completed_at)}</span>
+                  </div>
+                )}
+                {duration && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground flex items-center gap-1"><Timer className="w-3.5 h-3.5" />Duration</span>
+                    <span>{duration}</span>
+                  </div>
+                )}
+                {session.distance != null && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Distance from venue</span>
+                    <span>{session.distance < 1000 ? `${Math.round(session.distance)}m` : `${(session.distance / 1000).toFixed(1)}km`}</span>
+                  </div>
+                )}
+                {session.location_verified != null && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Location verified</span>
+                    {session.location_verified
+                      ? <CheckCircle2 className="w-4 h-4 text-green-500" />
+                      : <XCircle className="w-4 h-4 text-red-500" />}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Actions */}
             <div className="pt-2 border-t border-border space-y-2">
@@ -200,6 +307,17 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
                 {sendingReminder ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bell className="w-4 h-4" />}
                 {sendingReminder ? "Sending..." : "Send Reminder"}
               </Button>
+              {canCancel && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full gap-2 text-orange-600 border-orange-300 hover:bg-orange-50"
+                  onClick={() => setShowCancelConfirm(true)}
+                >
+                  <XCircle className="w-4 h-4" />
+                  Cancel Session
+                </Button>
+              )}
               {onDelete && (
                 <Button
                   variant="destructive"
@@ -216,6 +334,40 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
         </DialogContent>
       </Dialog>
 
+      {/* Cancel Confirmation */}
+      <AlertDialog open={showCancelConfirm} onOpenChange={setShowCancelConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel Session?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will mark the session for {session.team} on {session.date} as cancelled.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="py-2">
+            <label className="text-sm font-medium">Reason (optional)</label>
+            <input
+              type="text"
+              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              placeholder="e.g. School has no water"
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={cancelling}>Back</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleCancel}
+              disabled={cancelling}
+              className="bg-orange-600 text-white hover:bg-orange-700"
+            >
+              {cancelling && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              {cancelling ? "Cancelling..." : "Cancel Session"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Confirmation */}
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>

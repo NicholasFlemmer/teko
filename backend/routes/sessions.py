@@ -369,7 +369,7 @@ def send_reminder(current_user, session_id):
 
             token = str(uuid.uuid4())
             expires_at = datetime.now(timezone.utc) + timedelta(minutes=Config.CHECK_IN_TOKEN_EXPIRY_MINUTES)
-            FirebaseService.create_check_in_token(token, session_id, expires_at)
+            FirebaseService.create_check_in_token(token, session_id, expires_at, coach_id=cid)
             check_in_url = f"{Config.FRONTEND_URL}/check-in/{token}"
 
             result = WhatsAppService.send_check_in_reminder(
@@ -439,6 +439,37 @@ def update_attendance(current_user, session_id):
         }), 200
     except Exception as e:
         logger.exception("Error in update_attendance")
+        return jsonify({'success': False, 'error': 'An internal error occurred'}), 500
+
+@sessions_bp.route('/<session_id>/cancel', methods=['PATCH'])
+@token_required
+def cancel_session(current_user, session_id):
+    """Cancel a session (admin-only)"""
+    try:
+        session = FirebaseService.get_session(session_id)
+        if not session:
+            return jsonify({'success': False, 'error': 'Session not found'}), 404
+
+        if session.get('status') in ('completed', 'cancelled'):
+            return jsonify({'success': False, 'error': f"Session is already {session['status']}"}), 400
+
+        data = request.get_json() or {}
+        update = {
+            'status': 'cancelled',
+            'cancelled_at': datetime.now(timezone.utc).isoformat(),
+        }
+        reason = data.get('reason', '').strip()
+        if reason:
+            update['cancellation_reason'] = reason
+
+        updated = FirebaseService.update_session(session_id, update)
+        return jsonify({
+            'success': True,
+            'session': updated,
+            'message': 'Session cancelled'
+        }), 200
+    except Exception as e:
+        logger.exception("Error in cancel_session")
         return jsonify({'success': False, 'error': 'An internal error occurred'}), 500
 
 @sessions_bp.route('/check-in/<token>', methods=['GET'])
@@ -610,8 +641,9 @@ def check_in(token):
             'location_verified': location_verification['within_radius'],
             'distance': location_verification.get('distance')
         }
-        
-        updated_session = FirebaseService.check_in_session(session_id, check_in_data)
+
+        coach_id = token_data.get('coach_id')
+        updated_session = FirebaseService.check_in_session(session_id, check_in_data, coach_id=coach_id)
         
         return jsonify({
             'success': True,

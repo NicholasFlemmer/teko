@@ -55,7 +55,8 @@ class Config:
     # Check-in settings
     CHECK_IN_TOKEN_EXPIRY_MINUTES = int(os.getenv('CHECK_IN_TOKEN_EXPIRY_MINUTES', '30'))
     GEOLOCATION_RADIUS_METERS = int(os.getenv('GEOLOCATION_RADIUS_METERS', '500'))
-    REMINDER_MINUTES_BEFORE = int(os.getenv('REMINDER_MINUTES_BEFORE', '10'))
+    REMINDER_MINUTES_BEFORE = int(os.getenv('REMINDER_MINUTES_BEFORE', '30'))
+    END_SESSION_PROMPT_MINUTES = int(os.getenv('END_SESSION_PROMPT_MINUTES', '10'))
 
     # Reminder template (approved WhatsApp template name for session reminders)
     REMINDER_TEMPLATE_NAME = os.getenv('REMINDER_TEMPLATE_NAME', 'session_reminder')
