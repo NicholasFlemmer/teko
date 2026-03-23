@@ -15,8 +15,8 @@ def normalize_sa_phone(phone_number):
     if not phone_number:
         return ''
 
-    # Strip whitespace, dashes, parentheses, plus sign
-    cleaned = re.sub(r'[\s\-\(\)\+]', '', str(phone_number))
+    # Strip whitespace, dashes, parentheses, plus sign, and Unicode control/formatting chars
+    cleaned = re.sub(r'[^\d]', '', str(phone_number))
 
     if not cleaned.isdigit() or len(cleaned) < 9:
         return ''
