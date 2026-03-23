@@ -149,6 +149,26 @@ def run_reminders():
             'error': 'An internal error occurred'
         }), 500
 
+@app.route('/api/admin/normalize-phones', methods=['POST'])
+def normalize_phones():
+    """One-time migration: normalize all coach phone numbers."""
+    if not _check_scheduler_auth():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        from utils.phone import normalize_sa_phone
+        coaches = FirebaseService.get_all_coaches()
+        updated = []
+        for coach in coaches:
+            raw = coach.get('phone_number', '')
+            normalized = normalize_sa_phone(raw)
+            if normalized and normalized != raw:
+                FirebaseService.update_coach(coach['id'], {'phone_number': normalized})
+                updated.append({'name': coach.get('name', coach['id']), 'old': raw, 'new': normalized})
+        return jsonify({'success': True, 'updated': updated, 'total_coaches': len(coaches)}), 200
+    except Exception as e:
+        logger.exception("Error in normalize_phones")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/scheduler/mark-missed', methods=['POST'])
 def mark_missed():
     """Endpoint to mark missed sessions (called by Cloud Scheduler or admin)."""
