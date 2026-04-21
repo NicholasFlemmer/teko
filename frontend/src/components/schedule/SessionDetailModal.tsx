@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -17,9 +17,15 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { MapPin, User, Calendar, Clock, FileText, Shield, Trash2, Loader2, Bell, Repeat, Pencil, XCircle, CheckCircle2, Timer } from "lucide-react";
-import { sessionsAPI } from "@/services/api";
+import { MapPin, User, Calendar, Clock, FileText, Shield, Trash2, Loader2, Bell, Repeat, Pencil, XCircle, CheckCircle2, Timer, Camera } from "lucide-react";
+import { sessionsAPI, uploadsAPI } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
+
+interface SessionPhoto {
+  id: string;
+  url: string;
+  uploaded_at?: string;
+}
 
 interface Session {
   id: number;
@@ -93,12 +99,58 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
   const [cancelling, setCancelling] = useState(false);
   const [sendingReminder, setSendingReminder] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [photos, setPhotos] = useState<SessionPhoto[]>([]);
+  const [photosLoading, setPhotosLoading] = useState(false);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   // Reset state when viewing a different session
   useEffect(() => {
     setDeleteScope('single');
     setCancelReason('');
+    setPhotos([]);
   }, [session?.id]);
+
+  // Load photos when opening a session
+  useEffect(() => {
+    if (!session?.id || !open) return;
+    let cancelled = false;
+    setPhotosLoading(true);
+    sessionsAPI.getPhotos(session.id.toString())
+      .then((res) => { if (!cancelled) setPhotos(res.photos || []); })
+      .catch(() => { /* silent */ })
+      .finally(() => { if (!cancelled) setPhotosLoading(false); });
+    return () => { cancelled = true; };
+  }, [session?.id, open]);
+
+  const handlePhotoPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || !session) return;
+    setPhotoUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        const upload = await uploadsAPI.upload(file, 'photos');
+        const res = await sessionsAPI.addPhoto(session.id.toString(), upload.file.public_url, upload.file.file_path);
+        setPhotos((prev) => [...prev, res.photo]);
+      }
+      toast({ title: "Photos added", description: `${files.length} photo(s) uploaded.` });
+    } catch (err: any) {
+      toast({ title: "Upload failed", description: err.message || "Failed to upload photo.", variant: "destructive" });
+    } finally {
+      setPhotoUploading(false);
+      if (photoInputRef.current) photoInputRef.current.value = "";
+    }
+  };
+
+  const handlePhotoDelete = async (photoId: string) => {
+    if (!session) return;
+    try {
+      await sessionsAPI.deletePhoto(session.id.toString(), photoId);
+      setPhotos((prev) => prev.filter((p) => p.id !== photoId));
+    } catch (err: any) {
+      toast({ title: "Delete failed", description: err.message || "Failed to delete photo.", variant: "destructive" });
+    }
+  };
 
   const handleSendReminder = async () => {
     if (!session) return;
@@ -144,7 +196,7 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
     }
   };
 
-  const canCancel = !['completed', 'cancelled'].includes(session.status);
+  const canCancel = session.status !== 'cancelled';
   const showCheckInDetails = ['checked_in', 'completed', 'missed'].includes(session.status);
   const duration = formatDuration(session.check_in_time, session.completed_at);
 
@@ -283,6 +335,61 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
                 )}
               </div>
             )}
+
+            {/* Photos */}
+            <div className="pt-2 border-t border-border space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-foreground">Photos</p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1 text-xs"
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={photoUploading}
+                >
+                  {photoUploading
+                    ? <Loader2 className="w-3 h-3 animate-spin" />
+                    : <Camera className="w-3 h-3" />}
+                  {photoUploading ? "Uploading..." : "Add"}
+                </Button>
+              </div>
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={handlePhotoPick}
+              />
+              {photosLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+              ) : photos.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No photos yet.</p>
+              ) : (
+                <div className="grid grid-cols-3 gap-2">
+                  {photos.map((p) => (
+                    <div key={p.id} className="relative group">
+                      <a href={p.url} target="_blank" rel="noreferrer">
+                        <img
+                          src={p.url}
+                          alt="Session"
+                          className="aspect-square w-full rounded-md object-cover border border-border"
+                        />
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => handlePhotoDelete(p.id)}
+                        className="absolute top-1 right-1 w-5 h-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Delete photo"
+                      >
+                        <Trash2 className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Actions */}
             <div className="pt-2 border-t border-border space-y-2">

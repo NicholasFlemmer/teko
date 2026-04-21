@@ -121,12 +121,19 @@ def create_session(current_user):
         if not coach_ids and data.get('coach_id'):
             coach_ids = [data['coach_id']]
 
+        # Support team_ids (array) or team_id (string, backward compat)
+        team_ids = data.get('team_ids', [])
+        if not team_ids and data.get('team_id'):
+            team_ids = [data['team_id']]
+
         session_data = {
             'date': data['date'],
             'start_time': data['start_time'],
             'end_time': data.get('end_time', ''),
             'coach_ids': coach_ids,
             'coach_id': coach_ids[0] if coach_ids else '',
+            'team_ids': team_ids,
+            'team_id': team_ids[0] if team_ids else '',
             'address': data.get('address', ''),
         }
 
@@ -138,8 +145,8 @@ def create_session(current_user):
         elif 'location_id' in data:
             session_data['location_id'] = data['location_id']
 
-        # Optional new fields
-        optional_fields = ['team_id', 'type', 'notes', 'location_id']
+        # Optional new fields (team_id / team_ids handled above)
+        optional_fields = ['type', 'notes', 'location_id']
         for field in optional_fields:
             if field in data:
                 session_data[field] = data[field]
@@ -215,7 +222,7 @@ def update_session(current_user, session_id):
         # Update allowed fields
         update_data = {}
         allowed_fields = ['date', 'start_time', 'end_time', 'coach_id', 'coach_ids', 'location', 'address',
-                          'status', 'team_id', 'type', 'notes', 'location_id']
+                          'status', 'team_id', 'team_ids', 'type', 'notes', 'location_id']
 
         for field in allowed_fields:
             if field in data:
@@ -225,6 +232,12 @@ def update_session(current_user, session_id):
                     continue
                 if field == 'coach_id' and 'coach_ids' in data:
                     continue  # coach_ids takes precedence
+                if field == 'team_ids':
+                    update_data['team_ids'] = data['team_ids']
+                    update_data['team_id'] = data['team_ids'][0] if data['team_ids'] else ''
+                    continue
+                if field == 'team_id' and 'team_ids' in data:
+                    continue  # team_ids takes precedence
 
                 if field == 'location':
                     location = data['location']
@@ -450,8 +463,8 @@ def cancel_session(current_user, session_id):
         if not session:
             return jsonify({'success': False, 'error': 'Session not found'}), 404
 
-        if session.get('status') in ('completed', 'cancelled'):
-            return jsonify({'success': False, 'error': f"Session is already {session['status']}"}), 400
+        if session.get('status') == 'cancelled':
+            return jsonify({'success': False, 'error': 'Session is already cancelled'}), 400
 
         data = request.get_json() or {}
         update = {
@@ -471,6 +484,116 @@ def cancel_session(current_user, session_id):
     except Exception as e:
         logger.exception("Error in cancel_session")
         return jsonify({'success': False, 'error': 'An internal error occurred'}), 500
+
+@sessions_bp.route('/<session_id>/photos', methods=['GET'])
+@token_required
+def get_session_photos(current_user, session_id):
+    """List photos attached to a session (admin)"""
+    try:
+        session = FirebaseService.get_session(session_id)
+        if not session:
+            return jsonify({'success': False, 'error': 'Session not found'}), 404
+        return jsonify({
+            'success': True,
+            'photos': session.get('photos', []) or []
+        }), 200
+    except Exception as e:
+        logger.exception("Error in get_session_photos")
+        return jsonify({'success': False, 'error': 'An internal error occurred'}), 500
+
+
+@sessions_bp.route('/<session_id>/photos', methods=['POST'])
+@token_required
+def add_session_photo_admin(current_user, session_id):
+    """Attach a photo URL to a session (admin path)"""
+    try:
+        data = request.get_json() or {}
+        url = (data.get('url') or '').strip()
+        if not url:
+            return jsonify({'success': False, 'error': 'url is required'}), 400
+
+        session = FirebaseService.get_session(session_id)
+        if not session:
+            return jsonify({'success': False, 'error': 'Session not found'}), 404
+
+        photo = {
+            'id': str(uuid.uuid4()),
+            'url': url,
+            'file_path': data.get('file_path', ''),
+            'uploaded_at': datetime.now(timezone.utc).isoformat(),
+            'uploaded_by': 'admin',
+        }
+        photos = list(session.get('photos', []) or [])
+        photos.append(photo)
+        FirebaseService.update_session(session_id, {'photos': photos})
+        return jsonify({'success': True, 'photo': photo}), 201
+    except Exception as e:
+        logger.exception("Error in add_session_photo_admin")
+        return jsonify({'success': False, 'error': 'An internal error occurred'}), 500
+
+
+@sessions_bp.route('/<session_id>/photos/<photo_id>', methods=['DELETE'])
+@token_required
+def delete_session_photo(current_user, session_id, photo_id):
+    """Remove a photo reference from a session (admin)"""
+    try:
+        session = FirebaseService.get_session(session_id)
+        if not session:
+            return jsonify({'success': False, 'error': 'Session not found'}), 404
+
+        photos = [p for p in (session.get('photos', []) or []) if p.get('id') != photo_id]
+        FirebaseService.update_session(session_id, {'photos': photos})
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        logger.exception("Error in delete_session_photo")
+        return jsonify({'success': False, 'error': 'An internal error occurred'}), 500
+
+
+@sessions_bp.route('/check-in/<token>/photos', methods=['POST'])
+def add_session_photo_via_token(token):
+    """Attach a photo URL to a session using a (still-valid) check-in token.
+
+    Public endpoint — the check-in token authenticates the coach.
+    Accepts photos even after the token has been marked 'used' so coaches
+    can upload pics after rollcall. Rejects expired tokens.
+    """
+    try:
+        data = request.get_json() or {}
+        url = (data.get('url') or '').strip()
+        if not url:
+            return jsonify({'success': False, 'error': 'url is required'}), 400
+
+        token_data = FirebaseService.get_check_in_token(token)
+        if not token_data:
+            return jsonify({'success': False, 'error': 'Invalid token'}), 404
+
+        expires_at = token_data.get('expires_at')
+        if expires_at:
+            if hasattr(expires_at, 'tzinfo') and expires_at.tzinfo is not None:
+                expires_at = expires_at.replace(tzinfo=None)
+            if datetime.now(timezone.utc) > expires_at:
+                return jsonify({'success': False, 'error': 'Check-in link has expired'}), 400
+
+        session_id = token_data.get('session_id')
+        session = FirebaseService.get_session(session_id)
+        if not session:
+            return jsonify({'success': False, 'error': 'Session not found'}), 404
+
+        photo = {
+            'id': str(uuid.uuid4()),
+            'url': url,
+            'file_path': data.get('file_path', ''),
+            'uploaded_at': datetime.now(timezone.utc).isoformat(),
+            'uploaded_by': token_data.get('coach_id') or 'coach',
+        }
+        photos = list(session.get('photos', []) or [])
+        photos.append(photo)
+        FirebaseService.update_session(session_id, {'photos': photos})
+        return jsonify({'success': True, 'photo': photo}), 201
+    except Exception as e:
+        logger.exception("Error in add_session_photo_via_token")
+        return jsonify({'success': False, 'error': 'An internal error occurred'}), 500
+
 
 @sessions_bp.route('/check-in/<token>', methods=['GET'])
 def get_check_in_info(token):

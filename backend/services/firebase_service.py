@@ -155,6 +155,16 @@ class FirebaseService:
                 coach_ids = [single]
         return coach_ids
 
+    @staticmethod
+    def get_session_team_ids(session):
+        """Get list of team IDs from a session (handles both team_id and team_ids)"""
+        team_ids = session.get('team_ids') or []
+        if not team_ids:
+            single = session.get('team_id')
+            if single:
+                team_ids = [single]
+        return team_ids
+
     @classmethod
     def get_all_sessions(cls, start_date=None, end_date=None, coach_id=None):
         """Get sessions with optional filters"""

@@ -2,6 +2,8 @@ import logging
 from flask import Blueprint, request, jsonify
 from werkzeug.security import generate_password_hash
 from services.firebase_service import FirebaseService
+from services.scheduler_service import SchedulerService
+from config import Config
 from routes.auth import token_required, role_required
 
 logger = logging.getLogger(__name__)
@@ -250,3 +252,34 @@ def update_settings(current_user):
             'success': False,
             'error': 'An internal error occurred'
         }), 500
+
+
+@admin_bp.route('/scheduler/status', methods=['GET'])
+@token_required
+def scheduler_status(current_user):
+    """Return last-run diagnostics for the background scheduler jobs.
+
+    Lets admins see whether automated coach reminders are firing and,
+    if not, which coaches/sessions are failing (bad phone, missing coach, etc.).
+    """
+    try:
+        return jsonify({
+            'success': True,
+            'reminder_minutes_before': Config.REMINDER_MINUTES_BEFORE,
+            'last_run': SchedulerService.last_run,
+        }), 200
+    except Exception as e:
+        logger.exception("Error in scheduler_status")
+        return jsonify({'success': False, 'error': 'An internal error occurred'}), 500
+
+
+@admin_bp.route('/scheduler/run-reminders', methods=['POST'])
+@token_required
+def run_reminders_now(current_user):
+    """Manually trigger the reminder scheduler job (admin debug)."""
+    try:
+        result = SchedulerService.check_and_send_reminders()
+        return jsonify({'success': True, 'result': result}), 200
+    except Exception as e:
+        logger.exception("Error in run_reminders_now")
+        return jsonify({'success': False, 'error': 'An internal error occurred'}), 500

@@ -42,6 +42,7 @@ interface RawSession {
   end_time?: string;
   coach_ids?: string[];
   coach_id?: string;
+  team_ids?: string[];
   team_id?: string;
   location_id?: string;
   type?: string;
@@ -65,7 +66,7 @@ export function EditSessionModal({ open, onOpenChange, session, coaches, teams, 
   const [submitting, setSubmitting] = useState(false);
   const [editScope, setEditScope] = useState<'single' | 'future' | 'all'>('single');
   const [formData, setFormData] = useState({
-    team: "",
+    teams: [] as string[],
     coaches: [] as string[],
     date: "",
     startTime: "",
@@ -81,8 +82,11 @@ export function EditSessionModal({ open, onOpenChange, session, coaches, teams, 
       const coachIds = session.coach_ids?.length
         ? session.coach_ids
         : session.coach_id ? [session.coach_id] : [];
+      const teamIds = session.team_ids?.length
+        ? session.team_ids
+        : session.team_id ? [session.team_id] : [];
       setFormData({
-        team: session.team_id || "",
+        teams: teamIds,
         coaches: coachIds,
         date: session.date || "",
         startTime: session.start_time || "",
@@ -99,7 +103,7 @@ export function EditSessionModal({ open, onOpenChange, session, coaches, teams, 
     e.preventDefault();
     if (!session) return;
 
-    if (!formData.team || formData.coaches.length === 0 || !formData.date || !formData.startTime) {
+    if (formData.teams.length === 0 || formData.coaches.length === 0 || !formData.date || !formData.startTime) {
       toast({ title: "Missing fields", description: "Please fill in all required fields.", variant: "destructive" });
       return;
     }
@@ -112,7 +116,7 @@ export function EditSessionModal({ open, onOpenChange, session, coaches, teams, 
     setSubmitting(true);
     try {
       const payload: any = {
-        team_id: formData.team,
+        team_ids: formData.teams,
         coach_ids: formData.coaches,
         location_id: formData.location || undefined,
         date: formData.date,
@@ -184,24 +188,44 @@ export function EditSessionModal({ open, onOpenChange, session, coaches, teams, 
             </div>
           )}
 
-          {/* Team */}
+          {/* Teams (multi) */}
           <div className="space-y-2">
-            <Label>Team</Label>
-            <Select
-              value={formData.team}
-              onValueChange={(value) => setFormData(prev => ({ ...prev, team: value }))}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select a team" />
-              </SelectTrigger>
-              <SelectContent>
-                {teams.map((team) => (
-                  <SelectItem key={team.id} value={team.id.toString()}>
+            <Label>Team(s)</Label>
+            <div className="border border-border rounded-md p-2 max-h-[140px] overflow-y-auto space-y-1">
+              {teams.map((team) => {
+                const isSelected = formData.teams.includes(team.id.toString());
+                return (
+                  <label
+                    key={team.id}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted/50 cursor-pointer text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => {
+                        const id = team.id.toString();
+                        setFormData((prev) => ({
+                          ...prev,
+                          teams: isSelected
+                            ? prev.teams.filter((t) => t !== id)
+                            : [...prev.teams, id],
+                        }));
+                      }}
+                      className="rounded border-border"
+                    />
                     {team.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                  </label>
+                );
+              })}
+              {teams.length === 0 && (
+                <p className="text-xs text-muted-foreground px-2 py-1">No teams available</p>
+              )}
+            </div>
+            {formData.teams.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {formData.teams.length} team{formData.teams.length > 1 ? "s" : ""} selected
+              </p>
+            )}
           </div>
 
           {/* Session Type */}

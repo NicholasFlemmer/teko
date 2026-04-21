@@ -1,12 +1,18 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { MapPin, Clock, CheckCircle2, XCircle, Loader2, Navigation } from "lucide-react";
+import { MapPin, Clock, CheckCircle2, XCircle, Loader2, Navigation, Camera } from "lucide-react";
+import { checkInAPI } from "@/services/api";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5002";
 
 type Status = "loading" | "ready" | "locating" | "submitting" | "success" | "too-far" | "error" | "expired" | "used";
+
+interface UploadedPhoto {
+  id: string;
+  url: string;
+}
 
 interface SessionInfo {
   id: string;
@@ -32,6 +38,31 @@ export default function CheckIn() {
   const [coachName, setCoachName] = useState("");
   const [error, setError] = useState("");
   const [result, setResult] = useState<CheckInResult | null>(null);
+  const [photos, setPhotos] = useState<UploadedPhoto[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [photoError, setPhotoError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const canUploadPhotos = status === "success" || status === "too-far" || status === "used";
+
+  async function handleFilePick(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files || files.length === 0 || !token) return;
+    setPhotoError("");
+    setUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        const upload = await checkInAPI.uploadPhoto(token, file);
+        const attach = await checkInAPI.attachPhoto(token, upload.file.public_url, upload.file.file_path);
+        setPhotos((prev) => [...prev, { id: attach.photo.id, url: attach.photo.url }]);
+      }
+    } catch (err: any) {
+      setPhotoError(err.message || "Upload failed");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
 
   useEffect(() => {
     fetchCheckInInfo();
@@ -133,8 +164,8 @@ export default function CheckIn() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/40 px-4 py-8">
       <div className="w-full max-w-sm space-y-6">
-        <div className="text-center space-y-1">
-          <h1 className="text-3xl font-bold tracking-tight text-primary">Teko</h1>
+        <div className="text-center space-y-2">
+          <img src="/teko-logo.jpeg" alt="Teko" className="h-16 w-auto mx-auto object-contain" />
           <p className="text-sm text-muted-foreground">Coach Check-in</p>
         </div>
 
@@ -284,6 +315,55 @@ export default function CheckIn() {
               <Button variant="outline" onClick={() => { setError(""); fetchCheckInInfo(); }}>
                 Try Again
               </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {canUploadPhotos && (
+          <Card>
+            <CardHeader className="pb-3">
+              <h3 className="text-base font-semibold">Session photos</h3>
+              <p className="text-sm text-muted-foreground">
+                Add photos from today's session (optional).
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                capture="environment"
+                className="hidden"
+                onChange={handleFilePick}
+              />
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+              >
+                {uploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Camera className="h-4 w-4 mr-2" />}
+                {uploading ? "Uploading..." : "Add photos"}
+              </Button>
+              {photoError && <p className="text-xs text-destructive">{photoError}</p>}
+              {photos.length > 0 && (
+                <div className="grid grid-cols-3 gap-2 pt-1">
+                  {photos.map((p) => (
+                    <img
+                      key={p.id}
+                      src={p.url}
+                      alt="Session photo"
+                      className="aspect-square w-full rounded-md object-cover border border-border"
+                    />
+                  ))}
+                </div>
+              )}
+              {photos.length > 0 && (
+                <p className="text-xs text-muted-foreground text-center">
+                  {photos.length} photo{photos.length === 1 ? "" : "s"} uploaded
+                </p>
+              )}
             </CardContent>
           </Card>
         )}

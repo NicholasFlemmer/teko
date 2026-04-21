@@ -11,6 +11,15 @@ SAST = timezone(timedelta(hours=2))
 class SchedulerService:
     """Service for scheduling and sending session reminders"""
 
+    # In-memory last-run diagnostics (survives within a single process).
+    # Exposed via /api/admin/scheduler/status so admins can see why
+    # reminders aren't being delivered.
+    last_run = {
+        'reminders': None,   # {'ran_at': iso, 'reminders_sent': n, 'errors': [...]}
+        'end_prompts': None,
+        'missed': None,
+    }
+
     @classmethod
     def check_and_send_reminders(cls):
         """Check for sessions that need reminders and send them
@@ -114,13 +123,24 @@ class SchedulerService:
                 except Exception as e:
                     errors.append(f"Error processing session {session.get('id', 'unknown')}: {str(e)}")
 
-            return {
+            result = {
                 'success': True,
                 'reminders_sent': reminders_sent,
                 'errors': errors
             }
+            cls.last_run['reminders'] = {
+                'ran_at': datetime.now(timezone.utc).isoformat(),
+                **result,
+            }
+            return result
 
         except Exception as e:
+            cls.last_run['reminders'] = {
+                'ran_at': datetime.now(timezone.utc).isoformat(),
+                'success': False,
+                'error': str(e),
+                'reminders_sent': 0,
+            }
             return {
                 'success': False,
                 'error': str(e),
@@ -185,9 +205,20 @@ class SchedulerService:
 
                 FirebaseService.update_session(session['id'], {'end_prompt_sent': True})
 
-            return {'success': True, 'prompts_sent': sent, 'errors': errors}
+            result = {'success': True, 'prompts_sent': sent, 'errors': errors}
+            cls.last_run['end_prompts'] = {
+                'ran_at': datetime.now(timezone.utc).isoformat(),
+                **result,
+            }
+            return result
 
         except Exception as e:
+            cls.last_run['end_prompts'] = {
+                'ran_at': datetime.now(timezone.utc).isoformat(),
+                'success': False,
+                'error': str(e),
+                'prompts_sent': 0,
+            }
             return {'success': False, 'error': str(e), 'prompts_sent': 0}
 
     @classmethod
@@ -228,12 +259,23 @@ class SchedulerService:
                     FirebaseService.update_session(session['id'], {'status': 'missed'})
                     updated += 1
 
-            return {
+            result = {
                 'success': True,
                 'sessions_marked_missed': updated
             }
+            cls.last_run['missed'] = {
+                'ran_at': datetime.now(timezone.utc).isoformat(),
+                **result,
+            }
+            return result
 
         except Exception as e:
+            cls.last_run['missed'] = {
+                'ran_at': datetime.now(timezone.utc).isoformat(),
+                'success': False,
+                'error': str(e),
+                'sessions_marked_missed': 0,
+            }
             return {
                 'success': False,
                 'error': str(e),

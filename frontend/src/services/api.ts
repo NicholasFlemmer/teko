@@ -122,10 +122,52 @@ export const sessionsAPI = {
     const qs = scope && scope !== 'single' ? `?scope=${scope}` : '';
     return request<{ success: boolean; message?: string }>(`/api/sessions/${id}${qs}`, { method: 'DELETE' });
   },
-  sendReminder: (id: string) => request<{ success: boolean }>(`/api/sessions/${id}/send-reminder`, { method: 'POST' }),
+  sendReminder: (id: string) => request<{ success: boolean; results?: any[] }>(`/api/sessions/${id}/send-reminder`, { method: 'POST' }),
   cancel: (id: string, reason?: string) => request<{ success: boolean; session: any }>(`/api/sessions/${id}/cancel`, { method: 'PATCH', body: JSON.stringify({ reason }) }),
   getAttendance: (id: string) => request<{ success: boolean; attended_player_ids: string[] }>(`/api/sessions/${id}/attendance`),
   updateAttendance: (id: string, playerIds: string[]) => request<{ success: boolean; session: any }>(`/api/sessions/${id}/attendance`, { method: 'PUT', body: JSON.stringify({ attended_player_ids: playerIds }) }),
+  getPhotos: (id: string) => request<{ success: boolean; photos: any[] }>(`/api/sessions/${id}/photos`),
+  addPhoto: (id: string, url: string, file_path?: string) =>
+    request<{ success: boolean; photo: any }>(`/api/sessions/${id}/photos`, { method: 'POST', body: JSON.stringify({ url, file_path }) }),
+  deletePhoto: (id: string, photoId: string) =>
+    request<{ success: boolean }>(`/api/sessions/${id}/photos/${photoId}`, { method: 'DELETE' }),
+};
+
+// Public session endpoints used by the coach check-in flow (token-authenticated, no JWT)
+export const checkInAPI = {
+  uploadPhoto: async (token: string, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120_000);
+    let response: Response;
+    try {
+      response = await fetch(`${API_URL}/api/uploads/check-in/${token}`, {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      });
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') throw new Error('Upload timed out');
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Upload failed');
+    return data as { success: boolean; file: { public_url: string; file_path: string } };
+  },
+  attachPhoto: async (token: string, url: string, file_path?: string) => {
+    const res = await fetch(`${API_URL}/api/sessions/check-in/${token}/photos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, file_path }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to attach photo');
+    return data as { success: boolean; photo: any };
+  },
 };
 
 // Teams
@@ -327,4 +369,16 @@ export const adminAPI = {
   toggleStatus: (id: string) => request<{ success: boolean; admin: any }>(`/api/admin/users/${id}/toggle-status`, { method: 'PUT' }),
   getSettings: () => request<{ success: boolean; settings: any }>('/api/admin/settings'),
   updateSettings: (data: any) => request<{ success: boolean; settings: any }>('/api/admin/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  getSchedulerStatus: () =>
+    request<{
+      success: boolean;
+      reminder_minutes_before: number;
+      last_run: {
+        reminders: { ran_at?: string; reminders_sent?: number; errors?: string[]; success?: boolean; error?: string } | null;
+        end_prompts: { ran_at?: string; prompts_sent?: number; errors?: string[]; success?: boolean; error?: string } | null;
+        missed: { ran_at?: string; sessions_marked_missed?: number; success?: boolean; error?: string } | null;
+      };
+    }>('/api/admin/scheduler/status'),
+  runReminders: () =>
+    request<{ success: boolean; result: { reminders_sent: number; errors: string[] } }>('/api/admin/scheduler/run-reminders', { method: 'POST' }),
 };

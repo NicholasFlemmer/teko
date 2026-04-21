@@ -69,7 +69,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
   const [formData, setFormData] = useState({
-    team: "",
+    teams: [] as string[],
     coaches: [] as string[],
     date: "",
     startTime: "",
@@ -88,7 +88,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
 
   const resetForm = () => {
     setFormData({
-      team: "", coaches: [], date: "", startTime: "", endTime: "",
+      teams: [], coaches: [], date: "", startTime: "", endTime: "",
       location: "", sessionType: "", notes: "",
       recurring: false, recurrenceFrequency: "weekly", recurrenceEndDate: "",
     });
@@ -102,7 +102,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.team || formData.coaches.length === 0 || !formData.date || !formData.startTime || !formData.sessionType) {
+    if (formData.teams.length === 0 || formData.coaches.length === 0 || !formData.date || !formData.startTime || !formData.sessionType) {
       toast({ title: "Missing fields", description: "Please fill in all required fields.", variant: "destructive" });
       return;
     }
@@ -120,7 +120,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
     setSubmitting(true);
     try {
       const payload: any = {
-        team_id: formData.team,
+        team_ids: formData.teams,
         coach_ids: formData.coaches,
         location_id: formData.location || undefined,
         date: formData.date,
@@ -173,7 +173,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
     setDeleteTypeId(null);
   };
 
-  const selectedTeam = teams.find(t => t.id.toString() === formData.team);
+  const selectedTeams = teams.filter(t => formData.teams.includes(t.id.toString()));
   const selectedLocation = locations.find(l => l.id.toString() === formData.location);
 
   return (
@@ -195,27 +195,42 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 mt-4">
-          {/* Team Selection */}
+          {/* Team Selection (multi) */}
           <div className="space-y-2">
-            <Label htmlFor="team">Team</Label>
-            <Select
-              value={formData.team}
-              onValueChange={(value) => setFormData(prev => ({ ...prev, team: value }))}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select a team" />
-              </SelectTrigger>
-              <SelectContent>
-                {teams.map((team) => (
-                  <SelectItem key={team.id} value={team.id.toString()}>
+            <Label>Team(s)</Label>
+            <div className="border border-border rounded-md p-2 max-h-[140px] overflow-y-auto space-y-1">
+              {teams.map((team) => {
+                const isSelected = formData.teams.includes(team.id.toString());
+                return (
+                  <label
+                    key={team.id}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-muted/50 cursor-pointer text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => {
+                        const id = team.id.toString();
+                        setFormData((prev) => ({
+                          ...prev,
+                          teams: isSelected
+                            ? prev.teams.filter((t) => t !== id)
+                            : [...prev.teams, id],
+                        }));
+                      }}
+                      className="rounded border-border"
+                    />
                     {team.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {selectedTeam && (
+                  </label>
+                );
+              })}
+              {teams.length === 0 && (
+                <p className="text-xs text-muted-foreground px-2 py-1">No teams available</p>
+              )}
+            </div>
+            {selectedTeams.length > 0 && (
               <p className="text-xs text-muted-foreground">
-                Players will be loaded from {selectedTeam.name} for roll call
+                Players will be loaded from {selectedTeams.map(t => t.name).join(", ")} for roll call
               </p>
             )}
           </div>

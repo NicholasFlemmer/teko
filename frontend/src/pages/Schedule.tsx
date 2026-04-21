@@ -40,6 +40,7 @@ interface Session {
   coach: string;
   coachIds: string[];
   team: string;
+  teamIds: string[];
   location: string;
   time: string;
   endTime?: string;
@@ -128,12 +129,20 @@ export default function Schedule() {
       .map((id: string) => coachMap[id] || "Unknown Coach")
       .join(", ") || "Unassigned";
 
+    const teamIds: string[] = raw.team_ids && raw.team_ids.length > 0
+      ? raw.team_ids
+      : raw.team_id ? [raw.team_id] : [];
+    const teamNames = teamIds.length > 0
+      ? teamIds.map((id: string) => teamMap[id] || "Unknown Team").join(", ")
+      : "Unassigned";
+
     return {
       id: raw.id,
       date: raw.date,
       coach: coachNames,
       coachIds,
-      team: teamMap[raw.team_id] || (raw.team_id ? "Unknown Team" : "Unassigned"),
+      team: teamNames,
+      teamIds,
       location: locationMap[raw.location_id] || raw.address || (raw.location_id ? "Unknown Location" : "No Location"),
       time: raw.start_time ? raw.start_time.slice(0, 5) : "",
       endTime: raw.end_time ? raw.end_time.slice(0, 5) : undefined,
@@ -200,7 +209,7 @@ export default function Schedule() {
   // Use coachOptions directly for filter (individual coaches, not combined strings)
   const coaches = coachOptions;
   const types = useMemo(() => [...new Set(displaySessions.map((s) => s.type))], [displaySessions]);
-  const teams = useMemo(() => [...new Set(displaySessions.map((s) => s.team))], [displaySessions]);
+  const teams = teamOptions;
   const locations = useMemo(() => [...new Set(displaySessions.map((s) => s.location))], [displaySessions]);
 
   // Filtered sessions
@@ -208,7 +217,7 @@ export default function Schedule() {
     return displaySessions.filter((s) => {
       if (filterCoach !== "all" && !s.coachIds.includes(filterCoach)) return false;
       if (filterType !== "all" && s.type !== filterType) return false;
-      if (filterTeam !== "all" && s.team !== filterTeam) return false;
+      if (filterTeam !== "all" && !s.teamIds.includes(filterTeam)) return false;
       if (filterLocation !== "all" && s.location !== filterLocation) return false;
       return true;
     });
@@ -367,7 +376,7 @@ export default function Schedule() {
             <SelectContent>
               <SelectItem value="all">All Teams</SelectItem>
               {teams.map((t) => (
-                <SelectItem key={t} value={t}>{t}</SelectItem>
+                <SelectItem key={t.id} value={t.id.toString()}>{t.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>

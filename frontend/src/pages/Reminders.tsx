@@ -5,10 +5,10 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Bell, Clock, CheckCircle2, MessageSquare, ClipboardCheck, Users, Plus, Trash2, Loader2 } from "lucide-react";
+import { Bell, Clock, CheckCircle2, MessageSquare, ClipboardCheck, Users, Plus, Trash2, Loader2, AlertTriangle, RefreshCw } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { remindersAPI } from "@/services/api";
+import { remindersAPI, adminAPI } from "@/services/api";
 
 interface ReminderConfig {
   id: string;
@@ -53,6 +53,42 @@ export default function Reminders() {
   // Loading states
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+
+  // Scheduler diagnostics
+  const [schedulerStatus, setSchedulerStatus] = useState<{
+    reminder_minutes_before?: number;
+    last_run?: {
+      reminders: any;
+      end_prompts: any;
+      missed: any;
+    };
+  } | null>(null);
+  const [triggering, setTriggering] = useState(false);
+
+  const loadSchedulerStatus = async () => {
+    try {
+      const res = await adminAPI.getSchedulerStatus();
+      setSchedulerStatus(res);
+    } catch { /* silent — endpoint may not exist on old deployments */ }
+  };
+
+  useEffect(() => { loadSchedulerStatus(); }, []);
+
+  const triggerRemindersNow = async () => {
+    setTriggering(true);
+    try {
+      const res = await adminAPI.runReminders();
+      toast({
+        title: "Reminder job ran",
+        description: `Sent ${res.result.reminders_sent}. ${res.result.errors.length} error(s).`,
+      });
+      await loadSchedulerStatus();
+    } catch (err: any) {
+      toast({ title: "Failed", description: err.message || "Could not run job.", variant: "destructive" });
+    } finally {
+      setTriggering(false);
+    }
+  };
 
   // Fetch reminders on mount
   useEffect(() => {
@@ -189,6 +225,67 @@ export default function Reminders() {
             Add Reminder
           </Button>
         </div>
+
+        {/* Automated scheduler status */}
+        {schedulerStatus && (
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-start justify-between">
+                <div>
+                  <CardTitle className="text-base">Automated Reminder Job</CardTitle>
+                  <CardDescription>
+                    Runs every minute. Sends WhatsApp check-in links {schedulerStatus.reminder_minutes_before ?? 30} minutes before each session.
+                  </CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={triggerRemindersNow} disabled={triggering} className="gap-2">
+                  {triggering ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  Run now
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {(() => {
+                const last = schedulerStatus.last_run?.reminders;
+                if (!last) {
+                  return <p className="text-sm text-muted-foreground">Job has not run yet in this server instance.</p>;
+                }
+                const ran = last.ran_at ? new Date(last.ran_at).toLocaleString() : 'unknown';
+                const errs: string[] = last.errors || [];
+                return (
+                  <>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-muted-foreground">Last run</p>
+                        <p className="font-medium">{ran}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Reminders sent</p>
+                        <p className="font-medium">{last.reminders_sent ?? 0}</p>
+                      </div>
+                    </div>
+                    {last.error && (
+                      <div className="flex items-start gap-2 text-sm text-destructive">
+                        <AlertTriangle className="w-4 h-4 mt-0.5" />
+                        <span>Job failure: {last.error}</span>
+                      </div>
+                    )}
+                    {errs.length > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium text-amber-600 flex items-center gap-1">
+                          <AlertTriangle className="w-4 h-4" />
+                          {errs.length} issue{errs.length > 1 ? 's' : ''} in last run
+                        </p>
+                        <ul className="text-xs text-muted-foreground space-y-0.5 list-disc pl-5 max-h-32 overflow-y-auto">
+                          {errs.slice(0, 10).map((e, i) => <li key={i}>{e}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
