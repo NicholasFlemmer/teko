@@ -48,7 +48,7 @@ if Config.FRONTEND_URL:
 CORS(app, resources={
     r"/api/*": {
         "origins": cors_origins,
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"]
     }
 })
