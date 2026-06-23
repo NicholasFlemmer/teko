@@ -14,6 +14,7 @@ Safe to run more than once:
 """
 import sys
 import os
+import argparse
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from firebase_admin import firestore
@@ -49,16 +50,21 @@ TERMINOLOGY = {
 }
 
 
-def get_or_create_org(db):
+def get_or_create_org(db, dry_run=False):
     """Return the CATCH Trust org ID, creating the org document if needed.
 
     Idempotent: matches an existing org by slug so re-running does not create
-    a duplicate organisation.
+    a duplicate organisation. In dry-run mode, never writes — returns a
+    placeholder id when the org doesn't yet exist.
     """
     existing = db.collection('organisations').where('slug', '==', ORG_SLUG).limit(1).stream()
     for doc in existing:
         print(f"Organisation '{ORG_NAME}' already exists (id: {doc.id}) — reusing it.")
         return doc.id
+
+    if dry_run:
+        print(f"[dry-run] Would create organisation '{ORG_NAME}' (slug: {ORG_SLUG}).")
+        return "<new-org-id>"
 
     doc_ref = db.collection('organisations').document()
     doc_ref.set({
@@ -73,8 +79,11 @@ def get_or_create_org(db):
     return doc_ref.id
 
 
-def backfill_collection(db, collection_name, org_id):
-    """Set org_id on every document in collection_name that doesn't have one."""
+def backfill_collection(db, collection_name, org_id, dry_run=False):
+    """Set org_id on every document in collection_name that doesn't have one.
+
+    In dry-run mode, counts what would change without writing anything.
+    """
     updated = 0
     skipped = 0
     for doc in db.collection(collection_name).stream():
@@ -82,15 +91,25 @@ def backfill_collection(db, collection_name, org_id):
         if data.get('org_id'):
             skipped += 1
             continue
-        doc.reference.update({'org_id': org_id})
+        if not dry_run:
+            doc.reference.update({'org_id': org_id})
         updated += 1
 
     suffix = f" (skipped {skipped} already tagged)" if skipped else ""
-    print(f"Updated {updated} {collection_name}{suffix}")
+    verb = "Would update" if dry_run else "Updated"
+    print(f"{verb} {updated} {collection_name}{suffix}")
     return updated
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Backfill org_id for multi-tenancy.")
+    parser.add_argument(
+        '--dry-run', action='store_true',
+        help="Read and count only — make no changes to Firestore.",
+    )
+    args = parser.parse_args()
+    dry_run = args.dry_run
+
     FirebaseService.initialize()
     db = FirebaseService.get_db()
     if db is None:
@@ -98,16 +117,20 @@ def main():
               "`gcloud auth application-default login` and try again.")
         sys.exit(1)
 
-    print(f"Connected to Firestore project: {db.project}\n")
+    mode = " (DRY RUN — no writes)" if dry_run else ""
+    print(f"Connected to Firestore project: {db.project}{mode}\n")
 
-    org_id = get_or_create_org(db)
-    print(f"\nBackfilling org_id={org_id} across {len(COLLECTIONS)} collections...\n")
+    org_id = get_or_create_org(db, dry_run=dry_run)
+    action = "Would backfill" if dry_run else "Backfilling"
+    print(f"\n{action} org_id={org_id} across {len(COLLECTIONS)} collections...\n")
 
     total = 0
     for collection_name in COLLECTIONS:
-        total += backfill_collection(db, collection_name, org_id)
+        total += backfill_collection(db, collection_name, org_id, dry_run=dry_run)
 
-    print(f"\nDone. Backfilled org_id onto {total} documents across "
+    done = "Dry run complete." if dry_run else "Done."
+    verb = "would be backfilled" if dry_run else "backfilled"
+    print(f"\n{done} org_id {verb} onto {total} documents across "
           f"{len(COLLECTIONS)} collections.")
 
 
