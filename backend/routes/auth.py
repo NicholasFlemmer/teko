@@ -3,10 +3,14 @@ import hmac as _hmac
 import jwt
 import logging
 import os
+import secrets
+import hashlib
+import smtplib
+from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from config import Config
 from functools import wraps
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +125,146 @@ def login():
         }), 200
 
     return jsonify({'error': 'Invalid credentials'}), 401
+
+
+# =============================================================================
+# Password reset
+#
+# Admins are stored in the Firestore `admin_users` collection (not Firebase
+# Auth), so we use a self-contained reset-token flow: a single-use token is
+# hashed and stored on the admin's document with a short expiry, emailed to the
+# user, and exchanged for a new password hash that the login route validates.
+# =============================================================================
+
+RESET_TOKEN_EXPIRY_MINUTES = 60
+GENERIC_RESET_RESPONSE = {
+    'message': 'If that email is registered, you will receive a reset link shortly.'
+}
+
+
+def _hash_reset_token(token):
+    """Hash a reset token for at-rest storage (never store the raw token)."""
+    return hashlib.sha256(token.encode('utf-8')).hexdigest()
+
+
+def _send_reset_email(to_email, reset_link):
+    """Send the password-reset email via SMTP.
+
+    Falls back to logging the link to the console when SMTP env vars are not
+    configured, so the flow works locally without an email provider.
+    """
+    smtp_host = os.environ.get('SMTP_HOST')
+    smtp_port = os.environ.get('SMTP_PORT', '587')
+    smtp_user = os.environ.get('SMTP_USER')
+    smtp_password = os.environ.get('SMTP_PASSWORD')
+    smtp_from = os.environ.get('SMTP_FROM', smtp_user)
+
+    if not smtp_host or not smtp_from:
+        logger.info("[password-reset] SMTP not configured — reset link for %s: %s", to_email, reset_link)
+        return
+
+    msg = EmailMessage()
+    msg['Subject'] = 'Reset your Teko password'
+    msg['From'] = smtp_from
+    msg['To'] = to_email
+    msg.set_content(
+        "We received a request to reset your Teko password.\n\n"
+        f"Use the link below to set a new password (valid for {RESET_TOKEN_EXPIRY_MINUTES} minutes):\n\n"
+        f"{reset_link}\n\n"
+        "If you didn't request this, you can safely ignore this email."
+    )
+
+    try:
+        with smtplib.SMTP(smtp_host, int(smtp_port)) as server:
+            server.starttls()
+            if smtp_user and smtp_password:
+                server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+        logger.info("[password-reset] Sent reset email to %s", to_email)
+    except Exception as e:
+        logger.error("[password-reset] Failed to send reset email to %s: %s", to_email, e)
+
+
+@auth_bp.route('/forgot-password', methods=['POST'])
+def forgot_password():
+    """Start the password-reset flow.
+
+    Always returns a generic 200 response regardless of whether the email is
+    registered, to avoid leaking which accounts exist.
+    """
+    data = request.get_json(silent=True) or {}
+    email = (data.get('email') or '').strip().lower()
+
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+
+    try:
+        from services.firebase_service import FirebaseService
+        admin = FirebaseService.get_admin_by_email(email, include_password=True)
+        if admin:
+            raw_token = secrets.token_urlsafe(32)
+            expires_at = datetime.now(timezone.utc) + timedelta(minutes=RESET_TOKEN_EXPIRY_MINUTES)
+            FirebaseService.update_admin(admin['id'], {
+                'reset_token_hash': _hash_reset_token(raw_token),
+                'reset_token_expires': expires_at.isoformat(),
+            })
+            reset_link = f"{Config.FRONTEND_URL.rstrip('/')}/reset-password?token={raw_token}"
+            _send_reset_email(email, reset_link)
+    except Exception as e:
+        # Never surface internal errors to the caller — keep the response generic.
+        logger.error("[password-reset] forgot-password failed for %s: %s", email, e)
+
+    return jsonify(GENERIC_RESET_RESPONSE), 200
+
+
+@auth_bp.route('/reset-password', methods=['POST'])
+def reset_password():
+    """Complete the password-reset flow by exchanging a valid token for a new password."""
+    data = request.get_json(silent=True) or {}
+    token = (data.get('token') or '').strip()
+    password = data.get('password') or ''
+
+    if not token or not password:
+        return jsonify({'error': 'Token and password are required'}), 400
+
+    if len(password) < 8:
+        return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+    try:
+        from services.firebase_service import FirebaseService
+        db = FirebaseService.get_db()
+        token_hash = _hash_reset_token(token)
+        docs = db.collection('admin_users').where('reset_token_hash', '==', token_hash).limit(1).stream()
+        admin_doc = next(iter(docs), None)
+
+        if admin_doc is None:
+            return jsonify({'error': 'Invalid or expired reset link'}), 400
+
+        admin = admin_doc.to_dict()
+        expires_raw = admin.get('reset_token_expires')
+        expired = True
+        if expires_raw:
+            try:
+                expires_at = datetime.fromisoformat(expires_raw)
+                expired = datetime.now(timezone.utc) >= expires_at
+            except ValueError:
+                expired = True
+
+        if expired:
+            return jsonify({'error': 'Invalid or expired reset link'}), 400
+
+        # Apply the new password and invalidate the single-use token.
+        FirebaseService.update_admin(admin_doc.id, {
+            'password': generate_password_hash(password),
+            'reset_token_hash': None,
+            'reset_token_expires': None,
+        })
+    except Exception as e:
+        logger.error("[password-reset] reset-password failed: %s", e)
+        return jsonify({'error': 'Could not reset password. Please try again.'}), 400
+
+    return jsonify({'message': 'Password reset successfully. You can now sign in.'}), 200
+
 
 @auth_bp.route('/verify', methods=['GET'])
 @token_required

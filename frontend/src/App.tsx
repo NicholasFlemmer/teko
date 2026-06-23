@@ -18,6 +18,8 @@ import Reminders from "./pages/Reminders";
 import SuperAdmin from "./pages/SuperAdmin";
 import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import CheckIn from "./pages/CheckIn";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -41,6 +43,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 const AppRoutes = () => (
   <Routes>
     <Route path="/login" element={<Login />} />
+    <Route path="/forgot-password" element={<ForgotPassword />} />
+    <Route path="/reset-password" element={<ResetPassword />} />
     <Route path="/check-in/:token" element={<CheckIn />} />
     <Route path="/" element={<ProtectedRoute><Schedule /></ProtectedRoute>} />
     <Route path="/coaches" element={<ProtectedRoute><Coaches /></ProtectedRoute>} />
