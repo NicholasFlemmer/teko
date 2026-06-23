@@ -160,7 +160,9 @@ def _send_reset_email(to_email, reset_link):
     smtp_from = os.environ.get('SMTP_FROM', smtp_user)
 
     if not smtp_host or not smtp_from:
-        logger.info("[password-reset] SMTP not configured — reset link for %s: %s", to_email, reset_link)
+        # Logged at WARNING so it's visible without extra logging config — this
+        # is the local-dev fallback when no SMTP provider is configured.
+        logger.warning("[password-reset] SMTP not configured — reset link for %s: %s", to_email, reset_link)
         return
 
     msg = EmailMessage()
@@ -254,8 +256,10 @@ def reset_password():
             return jsonify({'error': 'Invalid or expired reset link'}), 400
 
         # Apply the new password and invalidate the single-use token.
+        # Use pbkdf2 (not werkzeug's scrypt default) so hashing works on
+        # builds without OpenSSL's scrypt; the login route accepts both.
         FirebaseService.update_admin(admin_doc.id, {
-            'password': generate_password_hash(password),
+            'password': generate_password_hash(password, method='pbkdf2:sha256'),
             'reset_token_hash': None,
             'reset_token_expires': None,
         })
