@@ -27,16 +27,21 @@ class FirebaseService:
         """Initialize Firebase Admin SDK using Application Default Credentials"""
         if not firebase_admin._apps:
             try:
+                # Pin the project explicitly so we never inherit the wrong
+                # project from the ADC/gcloud default (e.g. another app).
+                project_id = getattr(Config, 'FIREBASE_PROJECT_ID', None)
+                options = {'projectId': project_id} if project_id else None
+
                 # Check if credentials file exists (legacy support)
                 cred_path = getattr(Config, 'FIREBASE_CREDENTIALS_PATH', None)
                 if cred_path and os.path.exists(cred_path):
                     logger.info("Using service account credentials from: %s", cred_path)
                     cred = credentials.Certificate(cred_path)
-                    firebase_admin.initialize_app(cred)
+                    firebase_admin.initialize_app(cred, options)
                 else:
                     # Use Application Default Credentials (recommended)
-                    logger.info("Using Application Default Credentials (ADC)")
-                    firebase_admin.initialize_app()
+                    logger.info("Using Application Default Credentials (ADC) for project: %s", project_id)
+                    firebase_admin.initialize_app(options=options)
 
                 logger.info("Firebase Admin SDK initialized successfully")
             except Exception as e:
