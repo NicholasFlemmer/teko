@@ -22,6 +22,8 @@ import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
+import AcceptInvite from "./pages/AcceptInvite";
+import UserManagement from "./pages/UserManagement";
 import CheckIn from "./pages/CheckIn";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -47,6 +49,7 @@ const AppRoutes = () => (
     <Route path="/login" element={<Login />} />
     <Route path="/forgot-password" element={<ForgotPassword />} />
     <Route path="/reset-password" element={<ResetPassword />} />
+    <Route path="/accept-invite" element={<AcceptInvite />} />
     <Route path="/check-in/:token" element={<CheckIn />} />
     <Route path="/" element={<ProtectedRoute><Schedule /></ProtectedRoute>} />
     <Route path="/coaches" element={<ProtectedRoute><Coaches /></ProtectedRoute>} />
@@ -62,6 +65,7 @@ const AppRoutes = () => (
     <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
     <Route path="/reminders" element={<ProtectedRoute><Reminders /></ProtectedRoute>} />
     <Route path="/super-admin" element={<ProtectedRoute><SuperAdmin /></ProtectedRoute>} />
+    <Route path="/users" element={<ProtectedRoute><UserManagement /></ProtectedRoute>} />
     <Route path="/settings" element={<ProtectedRoute><OrgSettings /></ProtectedRoute>} />
     <Route path="*" element={<NotFound />} />
   </Routes>

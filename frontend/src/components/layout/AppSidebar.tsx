@@ -15,6 +15,7 @@ import {
   ChevronRight,
   UserCog,
   Settings,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -24,7 +25,7 @@ export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
 
   // Org-customisable nav labels; the rest stay static.
   const navItems = [
@@ -37,6 +38,10 @@ export function AppSidebar() {
     { title: "Broadcasts", path: "/broadcasts", icon: MessageSquare },
     { title: "Content", path: "/content", icon: BookOpen },
     { title: "Reports", path: "/reports", icon: BarChart3 },
+    // Users management is only available to super admins.
+    ...(user?.role === "super_admin"
+      ? [{ title: "Users", path: "/users", icon: Users }]
+      : []),
   ];
 
   return (

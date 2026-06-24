@@ -158,11 +158,12 @@ def _hash_reset_token(token):
     return hashlib.sha256(token.encode('utf-8')).hexdigest()
 
 
-def _send_reset_email(to_email, reset_link):
-    """Send the password-reset email via SMTP.
+def _send_email(to_email, subject, body, fallback_log):
+    """Send an email via SMTP, falling back to a console log when SMTP isn't set.
 
-    Falls back to logging the link to the console when SMTP env vars are not
-    configured, so the flow works locally without an email provider.
+    `fallback_log` is the WARNING-level message (typically containing the
+    action link) logged when no SMTP provider is configured, so flows work
+    locally without email.
     """
     smtp_host = os.environ.get('SMTP_HOST')
     smtp_port = os.environ.get('SMTP_PORT', '587')
@@ -173,19 +174,14 @@ def _send_reset_email(to_email, reset_link):
     if not smtp_host or not smtp_from:
         # Logged at WARNING so it's visible without extra logging config — this
         # is the local-dev fallback when no SMTP provider is configured.
-        logger.warning("[password-reset] SMTP not configured — reset link for %s: %s", to_email, reset_link)
+        logger.warning(fallback_log)
         return
 
     msg = EmailMessage()
-    msg['Subject'] = 'Reset your Teko password'
+    msg['Subject'] = subject
     msg['From'] = smtp_from
     msg['To'] = to_email
-    msg.set_content(
-        "We received a request to reset your Teko password.\n\n"
-        f"Use the link below to set a new password (valid for {RESET_TOKEN_EXPIRY_MINUTES} minutes):\n\n"
-        f"{reset_link}\n\n"
-        "If you didn't request this, you can safely ignore this email."
-    )
+    msg.set_content(body)
 
     try:
         with smtplib.SMTP(smtp_host, int(smtp_port)) as server:
@@ -193,9 +189,41 @@ def _send_reset_email(to_email, reset_link):
             if smtp_user and smtp_password:
                 server.login(smtp_user, smtp_password)
             server.send_message(msg)
-        logger.info("[password-reset] Sent reset email to %s", to_email)
+        logger.info("Sent email to %s (%s)", to_email, subject)
     except Exception as e:
-        logger.error("[password-reset] Failed to send reset email to %s: %s", to_email, e)
+        logger.error("Failed to send email to %s: %s", to_email, e)
+
+
+def _send_reset_email(to_email, reset_link):
+    """Send the password-reset email (or log the link locally)."""
+    body = (
+        "We received a request to reset your Teko password.\n\n"
+        f"Use the link below to set a new password (valid for {RESET_TOKEN_EXPIRY_MINUTES} minutes):\n\n"
+        f"{reset_link}\n\n"
+        "If you didn't request this, you can safely ignore this email."
+    )
+    _send_email(
+        to_email,
+        'Reset your Teko password',
+        body,
+        f"[password-reset] SMTP not configured — reset link for {to_email}: {reset_link}",
+    )
+
+
+def _send_invite_email(to_email, invite_link):
+    """Send the admin-invite email (or log the link locally)."""
+    body = (
+        "You've been invited to join Teko.\n\n"
+        "Use the link below to set up your account (valid for 48 hours):\n\n"
+        f"{invite_link}\n\n"
+        "If you weren't expecting this invitation, you can safely ignore this email."
+    )
+    _send_email(
+        to_email,
+        "You've been invited to Teko",
+        body,
+        f"[invite] SMTP not configured — invite link for {to_email}: {invite_link}",
+    )
 
 
 @auth_bp.route('/forgot-password', methods=['POST'])
@@ -279,6 +307,107 @@ def reset_password():
         return jsonify({'error': 'Could not reset password. Please try again.'}), 400
 
     return jsonify({'message': 'Password reset successfully. You can now sign in.'}), 200
+
+
+# =============================================================================
+# Admin invites
+#
+# A super admin invites a location admin by email. We store a pending invite in
+# the `invites` collection with a single-use token + 48h expiry, and email a
+# link. The invitee sets their name/password via the public accept-invite route,
+# which creates the real admin_users document.
+# =============================================================================
+
+@auth_bp.route('/invite', methods=['POST'])
+@token_required
+def invite_user(current_user):
+    """Invite a location admin to the caller's organisation (super admins only)."""
+    if getattr(g, 'current_user_role', None) != 'super_admin':
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
+    data = request.get_json(silent=True) or {}
+    email = (data.get('email') or '').strip().lower()
+    role = (data.get('role') or '').strip()
+
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+    if role != 'location_admin':
+        return jsonify({'error': 'Role must be location_admin'}), 400
+
+    try:
+        from services.firebase_service import FirebaseService
+        if FirebaseService.get_admin_by_email(email):
+            return jsonify({'error': 'A user with that email already exists'}), 400
+
+        invite = FirebaseService.create_admin_invite({
+            'email': email,
+            'role': role,
+            'org_id': getattr(g, 'current_user_org_id', None),
+            'invited_by': current_user,
+        })
+        invite_link = f"{Config.FRONTEND_URL.rstrip('/')}/accept-invite?token={invite['token']}"
+        _send_invite_email(email, invite_link)
+    except Exception as e:
+        logger.exception("Invite failed")
+        return jsonify({'error': 'Could not send invite'}), 500
+
+    return jsonify({'message': 'Invite sent'}), 200
+
+
+@auth_bp.route('/accept-invite', methods=['POST'])
+def accept_invite():
+    """Public endpoint: an invitee sets their name/password to create the account."""
+    data = request.get_json(silent=True) or {}
+    token = (data.get('token') or '').strip()
+    first_name = (data.get('first_name') or '').strip()
+    last_name = (data.get('last_name') or '').strip()
+    password = data.get('password') or ''
+
+    if not token or not first_name or not last_name or not password:
+        return jsonify({'error': 'All fields are required'}), 400
+    if len(password) < 8:
+        return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+    try:
+        from services.firebase_service import FirebaseService
+        db = FirebaseService.get_db()
+        docs = db.collection('invites').where('token', '==', token).limit(1).stream()
+        invite_doc = next(iter(docs), None)
+
+        if invite_doc is None:
+            return jsonify({'error': 'Invalid or expired invite'}), 400
+
+        invite = invite_doc.to_dict()
+
+        if invite.get('accepted'):
+            return jsonify({'error': 'This invite has already been used'}), 400
+
+        expires_raw = invite.get('expires_at')
+        expired = True
+        if expires_raw:
+            try:
+                expires_at = datetime.fromisoformat(expires_raw)
+                expired = datetime.now(timezone.utc) >= expires_at
+            except ValueError:
+                expired = True
+        if expired:
+            return jsonify({'error': 'This invite has expired'}), 400
+
+        FirebaseService.create_admin({
+            'first_name': first_name,
+            'last_name': last_name,
+            'email': invite.get('email'),
+            'role': invite.get('role'),
+            'org_id': invite.get('org_id'),
+            'password': generate_password_hash(password, method='pbkdf2:sha256'),
+            'is_active': True,
+        })
+        invite_doc.reference.update({'accepted': True})
+    except Exception as e:
+        logger.exception("Accept invite failed")
+        return jsonify({'error': 'Could not create account'}), 400
+
+    return jsonify({'message': 'Account created'}), 200
 
 
 @auth_bp.route('/verify', methods=['GET'])

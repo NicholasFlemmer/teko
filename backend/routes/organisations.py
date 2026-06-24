@@ -115,3 +115,27 @@ def get_organisation_terminology(current_user, org_id):
             'success': False,
             'error': 'An internal error occurred'
         }), 500
+
+
+# Mounted at /api/admins (registered separately in app.py) so the path is
+# /api/admins rather than under the /api/organisations prefix.
+admins_bp = Blueprint('admins', __name__)
+
+
+@admins_bp.route('', methods=['GET'])
+@token_required
+def get_admins(current_user):
+    """List the admin users belonging to the caller's organisation."""
+    try:
+        org_id = getattr(g, 'current_user_org_id', None)
+        admins = FirebaseService.get_all_admins_by_org(org_id)
+        return jsonify({
+            'success': True,
+            'admins': admins
+        }), 200
+    except Exception as e:
+        logger.exception("Error in get_admins")
+        return jsonify({
+            'success': False,
+            'error': 'An internal error occurred'
+        }), 500

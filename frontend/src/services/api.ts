@@ -97,6 +97,18 @@ export const authAPI = {
       body: JSON.stringify({ token, password }),
     }),
 
+  invite: (email: string, role: string) =>
+    request<{ message: string }>('/api/auth/invite', {
+      method: 'POST',
+      body: JSON.stringify({ email, role }),
+    }),
+
+  acceptInvite: (token: string, first_name: string, last_name: string, password: string) =>
+    request<{ message: string }>('/api/auth/accept-invite', {
+      method: 'POST',
+      body: JSON.stringify({ token, first_name, last_name, password }),
+    }),
+
   verify: () => request<{ valid: boolean; username: string }>('/api/auth/verify'),
 
   logout: () => {
@@ -119,6 +131,11 @@ export const organisationsAPI = {
     }),
   getTerminology: (orgId: string) =>
     request<{ success: boolean; terminology: Terminology }>(`/api/organisations/${orgId}/terminology`),
+};
+
+// Admin users (org-scoped)
+export const adminsAPI = {
+  getAll: () => request<{ success: boolean; admins: any[] }>('/api/admins'),
 };
 
 // Coaches

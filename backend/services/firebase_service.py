@@ -1,10 +1,11 @@
 import firebase_admin
 from firebase_admin import credentials, firestore
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from config import Config
 import os
 import random
 import string
+import secrets
 import logging
 
 logger = logging.getLogger(__name__)
@@ -713,6 +714,39 @@ class FirebaseService:
         db = cls.get_db()
         db.collection('admin_users').document(admin_id).delete()
         return True
+
+    @classmethod
+    def get_all_admins_by_org(cls, org_id):
+        """Get all admin users for a given org (passwords stripped)."""
+        db = cls.get_db()
+        admins = []
+        docs = db.collection('admin_users').where('org_id', '==', org_id).stream()
+        for doc in docs:
+            admins.append(cls._strip_admin_password({'id': doc.id, **doc.to_dict()}))
+        return admins
+
+    @classmethod
+    def create_admin_invite(cls, data):
+        """Create a pending admin invite in the `invites` collection.
+
+        Generates a single-use token and a 48-hour expiry. Expects
+        email, role, org_id and invited_by in `data`. Returns the created
+        invite (including its token) so the caller can build the invite link.
+        """
+        db = cls.get_db()
+        invite = {
+            'email': data.get('email'),
+            'role': data.get('role'),
+            'org_id': data.get('org_id'),
+            'invited_by': data.get('invited_by'),
+            'token': secrets.token_hex(16),  # 32-char hex string
+            'expires_at': (datetime.now(timezone.utc) + timedelta(hours=48)).isoformat(),
+            'accepted': False,
+            'created_at': firestore.SERVER_TIMESTAMP,
+        }
+        doc_ref = db.collection('invites').document()
+        doc_ref.set(invite)
+        return {'id': doc_ref.id, **invite}
 
     # =========================================================================
     # Organisation operations (collection: 'organisations')

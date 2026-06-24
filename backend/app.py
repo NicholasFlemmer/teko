@@ -23,7 +23,7 @@ from routes.reminders import reminders_bp
 from routes.admin import admin_bp
 from routes.uploads import uploads_bp
 from routes.sse import sse_bp
-from routes.organisations import organisations_bp
+from routes.organisations import organisations_bp, admins_bp
 from services.firebase_service import FirebaseService
 from services.scheduler_service import SchedulerService
 
@@ -72,6 +72,7 @@ app.register_blueprint(admin_bp, url_prefix='/api/admin')
 app.register_blueprint(uploads_bp, url_prefix='/api/uploads')
 app.register_blueprint(sse_bp, url_prefix='/api/sse')
 app.register_blueprint(organisations_bp, url_prefix='/api/organisations')
+app.register_blueprint(admins_bp, url_prefix='/api/admins')
 
 # Background scheduler for automated reminders & missed-session marking.
 # Guard: only start once (avoid duplicate jobs when gunicorn preloads or reloads).
