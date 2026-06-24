@@ -43,6 +43,8 @@ def token_required(f):
             current_user = data['username']
             g.current_user_role = data.get('role')
             g.current_user_org_id = data.get('org_id')
+            g.current_user_id = data.get('admin_id')
+            g.current_user_email = data.get('email')
         except jwt.ExpiredSignatureError:
             return jsonify({'error': 'Token has expired'}), 401
         except jwt.InvalidTokenError:
@@ -81,6 +83,8 @@ def login():
     display_name = username
     user_role = 'admin'
     org_id = None
+    admin_id = None
+    admin_email = None
 
     # First, check Firestore admin_users by email (indexed query, not full scan)
     try:
@@ -109,6 +113,8 @@ def login():
                 display_name = full_name or admin.get('email') or username
             user_role = admin.get('role', 'admin')
             org_id = admin.get('org_id')
+            admin_id = admin.get('id')
+            admin_email = admin.get('email')
     except Exception as e:
         logger.error(f"Firestore auth lookup failed: {e}")
         # Fail closed — don't fall through to env-var credentials on Firestore errors
@@ -126,6 +132,8 @@ def login():
             'username': display_name,
             'role': user_role,
             'org_id': org_id,
+            'admin_id': admin_id,
+            'email': admin_email,
             'exp': datetime.now(timezone.utc) + timedelta(hours=Config.JWT_EXPIRY_HOURS)
         }, Config.SECRET_KEY, algorithm="HS256")
 

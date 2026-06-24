@@ -122,22 +122,13 @@ def get_organisation_terminology(current_user, org_id):
 admins_bp = Blueprint('admins', __name__)
 
 
-def _admin_display_name(admin):
-    """Reconstruct the display name used as the JWT 'username' claim."""
-    if admin.get('name'):
-        return admin['name']
-    full = f"{admin.get('first_name', '')} {admin.get('last_name', '')}".strip()
-    return full or admin.get('email')
-
-
 @admins_bp.route('', methods=['GET'])
 @token_required
 def get_admins(current_user):
     """List admins for the caller's org.
 
     Super admins see every admin in their org; location admins see only their
-    own record. We match the caller against the org's admins by display name or
-    email, since the JWT does not carry the admin document id.
+    own record, matched by admin document id from the JWT.
     """
     try:
         org_id = getattr(g, 'current_user_org_id', None)
@@ -145,10 +136,8 @@ def get_admins(current_user):
         admins = FirebaseService.get_all_admins_by_org(org_id)
 
         if role != 'super_admin':
-            admins = [
-                a for a in admins
-                if _admin_display_name(a) == current_user or a.get('email') == current_user
-            ]
+            current_user_id = getattr(g, 'current_user_id', None)
+            admins = [a for a in admins if a.get('id') == current_user_id]
 
         return jsonify({
             'success': True,
