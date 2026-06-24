@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTerm } from "@/contexts/TerminologyContext";
 import { useNavigate } from "react-router-dom";
 import { Plus, Search, Users, MapPin, GraduationCap, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ const TEAM_COLORS = [
 ];
 
 export default function Teams() {
+  const teamPlural = useTerm("team_plural");
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -97,9 +99,9 @@ export default function Teams() {
       <div className="space-y-6">
         <div className="page-header">
           <div>
-            <h1 className="page-title">Teams</h1>
+            <h1 className="page-title">{teamPlural}</h1>
             <p className="page-subtitle">
-              Manage squads and age groups ({teams.length} total)
+              Manage your {teamPlural.toLowerCase()} and age groups ({teams.length} total)
             </p>
           </div>
           <Button className="gap-2" onClick={() => setIsAddModalOpen(true)}>

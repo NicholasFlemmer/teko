@@ -2,6 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { TerminologyProvider } from "@/contexts/TerminologyContext";
 import Schedule from "./pages/Schedule";
 import Coaches from "./pages/Coaches";
 import CoachDetail from "./pages/CoachDetail";
@@ -71,7 +72,9 @@ const App = () => (
     <Toaster />
     <BrowserRouter>
       <AuthProvider>
-        <AppRoutes />
+        <TerminologyProvider>
+          <AppRoutes />
+        </TerminologyProvider>
       </AuthProvider>
     </BrowserRouter>
   </TooltipProvider>

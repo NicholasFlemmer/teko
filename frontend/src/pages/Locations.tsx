@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTerm } from "@/contexts/TerminologyContext";
 import { useNavigate } from "react-router-dom";
 import { Plus, Search, MapPin, Users, Calendar, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,6 +9,7 @@ import { AddLocationModal } from "@/components/locations/AddLocationModal";
 import { locationsAPI, sessionsAPI, coachesAPI } from "@/services/api";
 
 export default function Locations() {
+  const locationPlural = useTerm("location_plural");
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -80,9 +82,9 @@ export default function Locations() {
       <div className="space-y-6">
         <div className="page-header">
           <div>
-            <h1 className="page-title">Locations</h1>
+            <h1 className="page-title">{locationPlural}</h1>
             <p className="page-subtitle">
-              Manage venues for coaching sessions
+              Manage your {locationPlural.toLowerCase()}
             </p>
           </div>
           <Button className="gap-2" onClick={() => setIsAddModalOpen(true)}>

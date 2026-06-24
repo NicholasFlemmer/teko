@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Building2, Loader2, Save } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useRefreshTerminology } from "@/contexts/TerminologyContext";
 import { organisationsAPI } from "@/services/api";
 import {
   DEFAULT_TERMINOLOGY,
@@ -39,6 +40,7 @@ const TERMINOLOGY_ROWS: {
 
 export default function OrgSettings() {
   const { toast } = useToast();
+  const refreshTerminology = useRefreshTerminology();
   const [org, setOrg] = useState<Organisation | null>(null);
   const [terminology, setTerminology] = useState<Terminology>(DEFAULT_TERMINOLOGY);
   const [loading, setLoading] = useState(true);
@@ -75,6 +77,9 @@ export default function OrgSettings() {
     try {
       setSaving(true);
       await organisationsAPI.update(ORG_ID, { terminology });
+      // Refresh the shared terminology so the sidebar and page titles update
+      // immediately without a page reload.
+      await refreshTerminology();
       toast({
         title: "Settings saved",
         description: "Your terminology changes have been saved.",

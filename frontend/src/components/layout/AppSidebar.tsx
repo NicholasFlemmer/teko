@@ -18,24 +18,26 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
-
-const navItems = [
-  { title: "Schedule", path: "/", icon: Calendar },
-  { title: "Coaches", path: "/coaches", icon: ClipboardList },
-  { title: "Teams", path: "/teams", icon: Shield },
-  { title: "Players", path: "/players", icon: UserRound },
-  { title: "Locations", path: "/locations", icon: MapPin },
-  { title: "Reminders", path: "/reminders", icon: Bell },
-  { title: "Broadcasts", path: "/broadcasts", icon: MessageSquare },
-  { title: "Content", path: "/content", icon: BookOpen },
-  { title: "Reports", path: "/reports", icon: BarChart3 },
-];
+import { useTerm } from "@/contexts/TerminologyContext";
 
 export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { logout } = useAuth();
+
+  // Org-customisable nav labels; the rest stay static.
+  const navItems = [
+    { title: "Schedule", path: "/", icon: Calendar },
+    { title: useTerm("coach_plural"), path: "/coaches", icon: ClipboardList },
+    { title: useTerm("team_plural"), path: "/teams", icon: Shield },
+    { title: useTerm("player_plural"), path: "/players", icon: UserRound },
+    { title: useTerm("location_plural"), path: "/locations", icon: MapPin },
+    { title: "Reminders", path: "/reminders", icon: Bell },
+    { title: "Broadcasts", path: "/broadcasts", icon: MessageSquare },
+    { title: "Content", path: "/content", icon: BookOpen },
+    { title: "Reports", path: "/reports", icon: BarChart3 },
+  ];
 
   return (
     <aside

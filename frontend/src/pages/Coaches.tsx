@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useTerm } from "@/contexts/TerminologyContext";
 import { useNavigate } from "react-router-dom";
 import { Plus, Search, Mail, Phone, Edit, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,7 @@ interface CoachDisplay {
 }
 
 export default function Coaches() {
+  const coachPlural = useTerm("coach_plural");
   const navigate = useNavigate();
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
@@ -114,9 +116,9 @@ export default function Coaches() {
         {/* Header */}
         <div className="page-header">
           <div>
-            <h1 className="page-title">Coaches</h1>
+            <h1 className="page-title">{coachPlural}</h1>
             <p className="page-subtitle">
-              Manage your coaching team ({coaches.length} total)
+              Manage your {coachPlural.toLowerCase()} ({coaches.length} total)
             </p>
           </div>
           <Button onClick={() => setIsAddModalOpen(true)} className="gap-2">

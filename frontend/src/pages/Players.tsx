@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTerm } from "@/contexts/TerminologyContext";
 import { useNavigate } from "react-router-dom";
 import { Plus, Search, GraduationCap, Users, LayoutGrid, List, Loader2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,7 @@ const PLAYER_COLORS = [
 ];
 
 export default function Players() {
+  const playerPlural = useTerm("player_plural");
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -98,9 +100,9 @@ export default function Players() {
       <div className="space-y-6">
         <div className="page-header">
           <div>
-            <h1 className="page-title">Players</h1>
+            <h1 className="page-title">{playerPlural}</h1>
             <p className="page-subtitle">
-              Track participation and attendance ({players.length} total)
+              Track {playerPlural.toLowerCase()} participation and attendance ({players.length} total)
             </p>
           </div>
           <div className="flex gap-2">

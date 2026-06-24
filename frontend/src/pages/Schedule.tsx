@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
+import { useTerm } from "@/contexts/TerminologyContext";
 import {
   Calendar as CalendarIcon,
   Clock,
@@ -76,6 +77,7 @@ interface LocationOption {
 type ViewMode = "month" | "week" | "day";
 
 export default function Schedule() {
+  const sessionPlural = useTerm("session_plural");
   const { toast } = useToast();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<ViewMode>("month");
@@ -326,7 +328,7 @@ export default function Schedule() {
         <div className="page-header">
           <div>
             <h1 className="page-title">Schedule</h1>
-            <p className="page-subtitle">Manage your coaching sessions</p>
+            <p className="page-subtitle">Manage your {sessionPlural.toLowerCase()}</p>
           </div>
           <Button onClick={() => setIsCreateModalOpen(true)} className="gap-2">
             <Plus className="w-4 h-4" />
