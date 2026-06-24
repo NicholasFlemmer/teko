@@ -101,7 +101,12 @@ def login():
             if status != 'active':
                 return jsonify({'error': f'Account is {status}'}), 401
             authenticated = True
-            display_name = admin.get('name', username)
+            # Prefer an explicit name; otherwise build it from first/last name;
+            # fall back to the email if neither is present.
+            display_name = admin.get('name')
+            if not display_name:
+                full_name = f"{admin.get('first_name', '')} {admin.get('last_name', '')}".strip()
+                display_name = full_name or admin.get('email') or username
             user_role = admin.get('role', 'admin')
             org_id = admin.get('org_id')
     except Exception as e:
