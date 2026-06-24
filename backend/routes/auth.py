@@ -329,8 +329,13 @@ def reset_password():
 @auth_bp.route('/invite', methods=['POST'])
 @token_required
 def invite_user(current_user):
-    """Invite a location admin to the caller's organisation (super admins only)."""
-    if getattr(g, 'current_user_role', None) != 'super_admin':
+    """Invite a user to the caller's organisation.
+
+    Super admins may invite location_admin or coach; location admins may invite
+    coach only.
+    """
+    caller_role = getattr(g, 'current_user_role', None)
+    if caller_role not in ('super_admin', 'location_admin'):
         return jsonify({'error': 'Insufficient permissions'}), 403
 
     data = request.get_json(silent=True) or {}
@@ -339,8 +344,14 @@ def invite_user(current_user):
 
     if not email:
         return jsonify({'error': 'Email is required'}), 400
-    if role != 'location_admin':
-        return jsonify({'error': 'Role must be location_admin'}), 400
+
+    if caller_role == 'super_admin':
+        if role not in ('location_admin', 'coach'):
+            return jsonify({'error': 'Role must be location_admin or coach'}), 400
+    else:  # location_admin
+        if role != 'coach':
+            # Location admins cannot invite other admins — only coaches.
+            return jsonify({'error': 'Location admins can only invite coaches'}), 403
 
     try:
         from services.firebase_service import FirebaseService

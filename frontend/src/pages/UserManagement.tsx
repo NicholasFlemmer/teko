@@ -65,12 +65,17 @@ export default function UserManagement() {
   const { toast } = useToast();
   const { user } = useAuth();
   const isSuperAdmin = user?.role === "super_admin";
+  const isLocationAdmin = user?.role === "location_admin";
+  const canManage = isSuperAdmin || isLocationAdmin;
+  // Super admins may invite location admins or coaches; location admins may
+  // only invite coaches.
+  const defaultInviteRole = isSuperAdmin ? "location_admin" : "coach";
 
   const [admins, setAdmins] = useState<AdminRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState("location_admin");
+  const [inviteRole, setInviteRole] = useState(defaultInviteRole);
   const [inviting, setInviting] = useState(false);
 
   const loadAdmins = async () => {
@@ -90,13 +95,13 @@ export default function UserManagement() {
   };
 
   useEffect(() => {
-    if (isSuperAdmin) {
+    if (canManage) {
       loadAdmins();
     } else {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSuperAdmin]);
+  }, [canManage]);
 
   const handleInvite = async () => {
     if (!inviteEmail.trim()) {
@@ -109,7 +114,7 @@ export default function UserManagement() {
       toast({ title: "Invite sent", description: `An invitation was sent to ${inviteEmail.trim()}.` });
       setDialogOpen(false);
       setInviteEmail("");
-      setInviteRole("location_admin");
+      setInviteRole(defaultInviteRole);
     } catch (err: any) {
       toast({
         title: "Invite failed",
@@ -121,7 +126,7 @@ export default function UserManagement() {
     }
   };
 
-  if (!isSuperAdmin) {
+  if (!canManage) {
     return (
       <MainLayout>
         <div className="space-y-6">
@@ -147,13 +152,20 @@ export default function UserManagement() {
             <h1 className="text-2xl font-bold text-foreground">Users</h1>
             <p className="text-muted-foreground">Manage admins and invite new users to your organisation</p>
           </div>
-          <RoleGuard allowedRoles={["super_admin"]}>
+          <RoleGuard allowedRoles={["super_admin", "location_admin"]}>
             <Button onClick={() => setDialogOpen(true)} className="gap-2">
               <UserPlus className="w-4 h-4" />
               Invite user
             </Button>
           </RoleGuard>
         </div>
+
+        {/* Location filtering isn't wired yet — location admins see all org users for now. */}
+        {isLocationAdmin && (
+          <div className="rounded-md bg-muted px-4 py-2.5 text-sm text-muted-foreground">
+            Location filtering coming soon
+          </div>
+        )}
 
         <Card>
           <CardContent className="p-0">
@@ -233,7 +245,8 @@ export default function UserManagement() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="location_admin">Location Admin</SelectItem>
+                  {isSuperAdmin && <SelectItem value="location_admin">Location Admin</SelectItem>}
+                  <SelectItem value="coach">Coach</SelectItem>
                 </SelectContent>
               </Select>
             </div>

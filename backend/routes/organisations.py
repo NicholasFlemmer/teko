@@ -127,7 +127,8 @@ admins_bp = Blueprint('admins', __name__)
 def get_admins(current_user):
     """List admins for the caller's org.
 
-    Super admins see every admin in their org; location admins see only their
+    Super and location admins see every admin in their org (location-level
+    filtering for location admins comes later). Any other role sees only their
     own record, matched by admin document id from the JWT.
     """
     try:
@@ -135,7 +136,7 @@ def get_admins(current_user):
         role = getattr(g, 'current_user_role', None)
         admins = FirebaseService.get_all_admins_by_org(org_id)
 
-        if role != 'super_admin':
+        if role not in ('super_admin', 'location_admin'):
             current_user_id = getattr(g, 'current_user_id', None)
             admins = [a for a in admins if a.get('id') == current_user_id]
 

@@ -46,26 +46,31 @@ export function AppSidebar() {
   const roleLabel = user?.role ? ROLE_LABELS[user.role] ?? user.role : "";
 
   const isSuperAdmin = user?.role === "super_admin";
-  const isLocationAdmin = user?.role === "location_admin";
+  // Super and location admins get the full operational nav; coaches see only
+  // Schedule.
+  const canSeeOps = isSuperAdmin || user?.role === "location_admin";
 
-  // Org-customisable nav labels; the rest stay static. Broadcasts, Content,
-  // Users and Settings are hidden from location admins.
+  // Terminology labels — called unconditionally so hook order stays stable.
+  const coachPlural = useTerm("coach_plural");
+  const teamPlural = useTerm("team_plural");
+  const playerPlural = useTerm("player_plural");
+  const locationPlural = useTerm("location_plural");
+
   const navItems = [
     { title: "Schedule", path: "/", icon: Calendar },
-    { title: useTerm("coach_plural"), path: "/coaches", icon: ClipboardList },
-    { title: useTerm("team_plural"), path: "/teams", icon: Shield },
-    { title: useTerm("player_plural"), path: "/players", icon: UserRound },
-    { title: useTerm("location_plural"), path: "/locations", icon: MapPin },
-    { title: "Reminders", path: "/reminders", icon: Bell },
-    ...(!isLocationAdmin
+    ...(canSeeOps
       ? [
+          { title: coachPlural, path: "/coaches", icon: ClipboardList },
+          { title: teamPlural, path: "/teams", icon: Shield },
+          { title: playerPlural, path: "/players", icon: UserRound },
+          { title: locationPlural, path: "/locations", icon: MapPin },
+          { title: "Reminders", path: "/reminders", icon: Bell },
           { title: "Broadcasts", path: "/broadcasts", icon: MessageSquare },
           { title: "Content", path: "/content", icon: BookOpen },
+          { title: "Reports", path: "/reports", icon: BarChart3 },
+          { title: "Users", path: "/users", icon: Users },
         ]
       : []),
-    { title: "Reports", path: "/reports", icon: BarChart3 },
-    // Users management is only available to super admins.
-    ...(isSuperAdmin ? [{ title: "Users", path: "/users", icon: Users }] : []),
   ];
 
   return (

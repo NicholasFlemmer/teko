@@ -63,10 +63,28 @@ const AppRoutes = () => (
     <Route path="/content" element={<ProtectedRoute><Content /></ProtectedRoute>} />
     <Route path="/locations" element={<ProtectedRoute><Locations /></ProtectedRoute>} />
     <Route path="/locations/:id" element={<ProtectedRoute><LocationDetail /></ProtectedRoute>} />
-    <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+    <Route
+      path="/reports"
+      element={
+        <ProtectedRoute>
+          <RoleGuard allowedRoles={["super_admin", "location_admin"]} fallback={<Navigate to="/" replace />}>
+            <Reports />
+          </RoleGuard>
+        </ProtectedRoute>
+      }
+    />
     <Route path="/reminders" element={<ProtectedRoute><Reminders /></ProtectedRoute>} />
     <Route path="/super-admin" element={<ProtectedRoute><SuperAdmin /></ProtectedRoute>} />
-    <Route path="/users" element={<ProtectedRoute><UserManagement /></ProtectedRoute>} />
+    <Route
+      path="/users"
+      element={
+        <ProtectedRoute>
+          <RoleGuard allowedRoles={["super_admin", "location_admin"]} fallback={<Navigate to="/" replace />}>
+            <UserManagement />
+          </RoleGuard>
+        </ProtectedRoute>
+      }
+    />
     <Route
       path="/settings"
       element={

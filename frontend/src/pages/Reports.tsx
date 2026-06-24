@@ -5,7 +5,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/contexts/AuthContext";
 import { reportsAPI } from "@/services/api";
 
 function sanitizeCSVValue(val: unknown): string {
@@ -86,8 +85,6 @@ function ProgressBar({ value, max, className = "" }: { value: number; max: numbe
 
 export default function Reports() {
   const { toast } = useToast();
-  const { user } = useAuth();
-  const isLocationAdmin = user?.role === "location_admin";
   const [dateRange, setDateRange] = useState({ from: "", to: "" });
 
   const [stats, setStats] = useState<QuickStats | null>(null);
@@ -183,13 +180,6 @@ export default function Reports() {
             <p className="page-subtitle">Attendance tracking and accountability reporting</p>
           </div>
         </div>
-
-        {/* Location admins see a scoped-data notice (filtering wired in a later step). */}
-        {isLocationAdmin && (
-          <div className="rounded-md bg-muted px-4 py-2.5 text-sm text-muted-foreground">
-            Showing data for your assigned locations only.
-          </div>
-        )}
 
         {/* Quick Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
