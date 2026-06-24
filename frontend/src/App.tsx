@@ -3,6 +3,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { TerminologyProvider } from "@/contexts/TerminologyContext";
+import { RoleGuard } from "@/components/ui/RoleGuard";
 import Schedule from "./pages/Schedule";
 import Coaches from "./pages/Coaches";
 import CoachDetail from "./pages/CoachDetail";
@@ -66,7 +67,16 @@ const AppRoutes = () => (
     <Route path="/reminders" element={<ProtectedRoute><Reminders /></ProtectedRoute>} />
     <Route path="/super-admin" element={<ProtectedRoute><SuperAdmin /></ProtectedRoute>} />
     <Route path="/users" element={<ProtectedRoute><UserManagement /></ProtectedRoute>} />
-    <Route path="/settings" element={<ProtectedRoute><OrgSettings /></ProtectedRoute>} />
+    <Route
+      path="/settings"
+      element={
+        <ProtectedRoute>
+          <RoleGuard allowedRoles={["super_admin"]} fallback={<Navigate to="/" replace />}>
+            <OrgSettings />
+          </RoleGuard>
+        </ProtectedRoute>
+      }
+    />
     <Route path="*" element={<NotFound />} />
   </Routes>
 );

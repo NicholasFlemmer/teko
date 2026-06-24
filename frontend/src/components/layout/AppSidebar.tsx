@@ -45,7 +45,11 @@ export function AppSidebar() {
   const initials = getInitials(fullName);
   const roleLabel = user?.role ? ROLE_LABELS[user.role] ?? user.role : "";
 
-  // Org-customisable nav labels; the rest stay static.
+  const isSuperAdmin = user?.role === "super_admin";
+  const isLocationAdmin = user?.role === "location_admin";
+
+  // Org-customisable nav labels; the rest stay static. Broadcasts, Content,
+  // Users and Settings are hidden from location admins.
   const navItems = [
     { title: "Schedule", path: "/", icon: Calendar },
     { title: useTerm("coach_plural"), path: "/coaches", icon: ClipboardList },
@@ -53,13 +57,15 @@ export function AppSidebar() {
     { title: useTerm("player_plural"), path: "/players", icon: UserRound },
     { title: useTerm("location_plural"), path: "/locations", icon: MapPin },
     { title: "Reminders", path: "/reminders", icon: Bell },
-    { title: "Broadcasts", path: "/broadcasts", icon: MessageSquare },
-    { title: "Content", path: "/content", icon: BookOpen },
+    ...(!isLocationAdmin
+      ? [
+          { title: "Broadcasts", path: "/broadcasts", icon: MessageSquare },
+          { title: "Content", path: "/content", icon: BookOpen },
+        ]
+      : []),
     { title: "Reports", path: "/reports", icon: BarChart3 },
     // Users management is only available to super admins.
-    ...(user?.role === "super_admin"
-      ? [{ title: "Users", path: "/users", icon: Users }]
-      : []),
+    ...(isSuperAdmin ? [{ title: "Users", path: "/users", icon: Users }] : []),
   ];
 
   return (
@@ -140,18 +146,21 @@ export function AppSidebar() {
         {/* Divider between profile and actions */}
         <div className="border-t border-border my-2" />
 
-        <NavLink
-          to="/settings"
-          className={cn(
-            "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium w-full transition-all",
-            location.pathname === "/settings"
-              ? "bg-primary text-primary-foreground shadow-sm"
-              : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-          )}
-        >
-          <Settings className="w-5 h-5 flex-shrink-0" />
-          {!collapsed && <span>Settings</span>}
-        </NavLink>
+        {/* Org settings are super-admin only. */}
+        {isSuperAdmin && (
+          <NavLink
+            to="/settings"
+            className={cn(
+              "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium w-full transition-all",
+              location.pathname === "/settings"
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            )}
+          >
+            <Settings className="w-5 h-5 flex-shrink-0" />
+            {!collapsed && <span>Settings</span>}
+          </NavLink>
+        )}
 
         <button
           onClick={() => logout()}

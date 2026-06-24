@@ -31,6 +31,7 @@ import {
 import { UserPlus, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { RoleGuard } from "@/components/ui/RoleGuard";
 import { adminsAPI, authAPI } from "@/services/api";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -146,10 +147,12 @@ export default function UserManagement() {
             <h1 className="text-2xl font-bold text-foreground">Users</h1>
             <p className="text-muted-foreground">Manage admins and invite new users to your organisation</p>
           </div>
-          <Button onClick={() => setDialogOpen(true)} className="gap-2">
-            <UserPlus className="w-4 h-4" />
-            Invite user
-          </Button>
+          <RoleGuard allowedRoles={["super_admin"]}>
+            <Button onClick={() => setDialogOpen(true)} className="gap-2">
+              <UserPlus className="w-4 h-4" />
+              Invite user
+            </Button>
+          </RoleGuard>
         </div>
 
         <Card>
