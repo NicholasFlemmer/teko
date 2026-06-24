@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Building2, Loader2, Save } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import { useRefreshTerminology } from "@/contexts/TerminologyContext";
 import { organisationsAPI } from "@/services/api";
 import {
@@ -14,9 +15,6 @@ import {
   type OrganisationType,
   type Terminology,
 } from "@/types/Organisation";
-
-// TODO: replace with org_id from user session once auth is multi-tenant
-const ORG_ID = "2I8r2Hb2q7pNgjDbcG8w";
 
 const ORG_TYPE_LABELS: Record<OrganisationType, string> = {
   sports: "Sports",
@@ -40,6 +38,8 @@ const TERMINOLOGY_ROWS: {
 
 export default function OrgSettings() {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const orgId = user?.org_id ?? null;
   const refreshTerminology = useRefreshTerminology();
   const [org, setOrg] = useState<Organisation | null>(null);
   const [terminology, setTerminology] = useState<Terminology>(DEFAULT_TERMINOLOGY);
@@ -47,12 +47,16 @@ export default function OrgSettings() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    if (!orgId) {
+      setLoading(false);
+      return;
+    }
     const load = async () => {
       try {
         setLoading(true);
         const [orgRes, termRes] = await Promise.all([
-          organisationsAPI.getById(ORG_ID),
-          organisationsAPI.getTerminology(ORG_ID),
+          organisationsAPI.getById(orgId),
+          organisationsAPI.getTerminology(orgId),
         ]);
         setOrg(orgRes.organisation);
         setTerminology({ ...DEFAULT_TERMINOLOGY, ...termRes.terminology });
@@ -67,16 +71,17 @@ export default function OrgSettings() {
       }
     };
     load();
-  }, [toast]);
+  }, [orgId, toast]);
 
   const handleChange = (key: keyof Terminology, value: string) => {
     setTerminology((prev) => ({ ...prev, [key]: value }));
   };
 
   const handleSave = async () => {
+    if (!orgId) return;
     try {
       setSaving(true);
-      await organisationsAPI.update(ORG_ID, { terminology });
+      await organisationsAPI.update(orgId, { terminology });
       // Refresh the shared terminology so the sidebar and page titles update
       // immediately without a page reload.
       await refreshTerminology();
@@ -106,7 +111,13 @@ export default function OrgSettings() {
           </p>
         </div>
 
-        {loading ? (
+        {!orgId ? (
+          <Card>
+            <CardContent className="py-12 text-center text-muted-foreground">
+              No organisation configured
+            </CardContent>
+          </Card>
+        ) : loading ? (
           <div className="flex items-center justify-center py-16 text-muted-foreground">
             <Loader2 className="w-5 h-5 animate-spin mr-2" />
             Loading settings...

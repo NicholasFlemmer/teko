@@ -10,9 +10,6 @@ import { organisationsAPI } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { DEFAULT_TERMINOLOGY, type Terminology } from "@/types/Organisation";
 
-// TODO: replace hardcoded org_id with value from user session
-const ORG_ID = "2I8r2Hb2q7pNgjDbcG8w";
-
 interface TerminologyContextType {
   terminology: Terminology;
   isLoading: boolean;
@@ -26,11 +23,18 @@ export function TerminologyProvider({ children }: { children: ReactNode }) {
   // text while the real terminology loads.
   const [terminology, setTerminology] = useState<Terminology>(DEFAULT_TERMINOLOGY);
   const [isLoading, setIsLoading] = useState(true);
-  const { isAuthenticated } = useAuth();
+  const { user } = useAuth();
+  const orgId = user?.org_id ?? null;
 
   const refreshTerminology = useCallback(async () => {
+    // No org (e.g. the env-fallback admin) → just use the default labels.
+    if (!orgId) {
+      setTerminology(DEFAULT_TERMINOLOGY);
+      setIsLoading(false);
+      return;
+    }
     try {
-      const res = await organisationsAPI.getTerminology(ORG_ID);
+      const res = await organisationsAPI.getTerminology(orgId);
       // Merge over defaults so any missing key still resolves to a label.
       setTerminology({ ...DEFAULT_TERMINOLOGY, ...res.terminology });
     } catch {
@@ -38,19 +42,13 @@ export function TerminologyProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [orgId]);
 
-  // The terminology endpoint requires a valid JWT, so only fetch once the user
-  // is authenticated (and refetch when they log in). On public pages we keep
-  // the default labels rather than triggering a 401 redirect.
+  // Fetch terminology for the current org (and refetch if the org changes).
+  // When there is no org the callback falls back to defaults without a request.
   useEffect(() => {
-    if (isAuthenticated) {
-      refreshTerminology();
-    } else {
-      setTerminology(DEFAULT_TERMINOLOGY);
-      setIsLoading(false);
-    }
-  }, [isAuthenticated, refreshTerminology]);
+    refreshTerminology();
+  }, [refreshTerminology]);
 
   return (
     <TerminologyContext.Provider value={{ terminology, isLoading, refreshTerminology }}>

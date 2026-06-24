@@ -1,5 +1,5 @@
 import logging
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from services.firebase_service import FirebaseService
 from routes.auth import token_required
 
@@ -11,9 +11,18 @@ organisations_bp = Blueprint('organisations', __name__)
 @organisations_bp.route('', methods=['GET'])
 @token_required
 def get_organisations(current_user):
-    """Get all organisations. Super-admin only — for now a valid JWT suffices."""
+    """List organisations, scoped by the caller's role.
+
+    Super admins see every org; everyone else sees only their own org.
+    """
     try:
-        orgs = FirebaseService.get_all_organisations()
+        role = getattr(g, 'current_user_role', None)
+        if role == 'super_admin':
+            orgs = FirebaseService.get_all_organisations()
+        else:
+            org_id = getattr(g, 'current_user_org_id', None)
+            org = FirebaseService.get_organisation(org_id) if org_id else None
+            orgs = [org] if org else []
         return jsonify({
             'success': True,
             'organisations': orgs

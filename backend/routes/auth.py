@@ -41,7 +41,8 @@ def token_required(f):
             # Decode token
             data = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
             current_user = data['username']
-            g.current_user_role = data.get('role', 'admin')
+            g.current_user_role = data.get('role')
+            g.current_user_org_id = data.get('org_id')
         except jwt.ExpiredSignatureError:
             return jsonify({'error': 'Token has expired'}), 401
         except jwt.InvalidTokenError:
@@ -79,6 +80,7 @@ def login():
     authenticated = False
     display_name = username
     user_role = 'admin'
+    org_id = None
 
     # First, check Firestore admin_users by email (indexed query, not full scan)
     try:
@@ -101,20 +103,24 @@ def login():
             authenticated = True
             display_name = admin.get('name', username)
             user_role = admin.get('role', 'admin')
+            org_id = admin.get('org_id')
     except Exception as e:
         logger.error(f"Firestore auth lookup failed: {e}")
         # Fail closed — don't fall through to env-var credentials on Firestore errors
         return jsonify({'error': 'Authentication service unavailable'}), 503
 
-    # Fallback to environment-variable credentials (only if explicitly configured)
+    # Fallback to environment-variable credentials (only if explicitly configured).
+    # This admin is not tied to any organisation, so org_id stays None.
     if not authenticated and ADMIN_USERNAME and ADMIN_PASSWORD and username == ADMIN_USERNAME and _hmac.compare_digest(ADMIN_PASSWORD, password):
         authenticated = True
-        user_role = 'superadmin'
+        user_role = 'super_admin'
+        org_id = None
 
     if authenticated:
         token = jwt.encode({
             'username': display_name,
             'role': user_role,
+            'org_id': org_id,
             'exp': datetime.now(timezone.utc) + timedelta(hours=Config.JWT_EXPIRY_HOURS)
         }, Config.SECRET_KEY, algorithm="HS256")
 
