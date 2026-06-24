@@ -16,6 +16,7 @@ import LocationDetail from "./pages/LocationDetail";
 import Reports from "./pages/Reports";
 import Reminders from "./pages/Reminders";
 import SuperAdmin from "./pages/SuperAdmin";
+import OrgSettings from "./pages/OrgSettings";
 import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
 import ForgotPassword from "./pages/ForgotPassword";
@@ -60,6 +61,7 @@ const AppRoutes = () => (
     <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
     <Route path="/reminders" element={<ProtectedRoute><Reminders /></ProtectedRoute>} />
     <Route path="/super-admin" element={<ProtectedRoute><SuperAdmin /></ProtectedRoute>} />
+    <Route path="/settings" element={<ProtectedRoute><OrgSettings /></ProtectedRoute>} />
     <Route path="*" element={<NotFound />} />
   </Routes>
 );

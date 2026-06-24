@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   UserCog,
+  Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -83,6 +84,19 @@ export function AppSidebar() {
 
       {/* Footer actions */}
       <div className="p-3 border-t border-border space-y-1">
+        <NavLink
+          to="/settings"
+          className={cn(
+            "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium w-full transition-all",
+            location.pathname === "/settings"
+              ? "bg-primary text-primary-foreground shadow-sm"
+              : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          )}
+        >
+          <Settings className="w-5 h-5 flex-shrink-0" />
+          {!collapsed && <span>Settings</span>}
+        </NavLink>
+
         <NavLink
           to="/super-admin"
           className={cn(
