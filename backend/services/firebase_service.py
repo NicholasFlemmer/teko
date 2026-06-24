@@ -715,6 +715,81 @@ class FirebaseService:
         return True
 
     # =========================================================================
+    # Organisation operations (collection: 'organisations')
+    # =========================================================================
+    DEFAULT_TERMINOLOGY = {
+        "coach_singular": "Coach",
+        "coach_plural": "Coaches",
+        "player_singular": "Player",
+        "player_plural": "Players",
+        "team_singular": "Team",
+        "team_plural": "Teams",
+        "session_singular": "Session",
+        "session_plural": "Sessions",
+        "location_singular": "Location",
+        "location_plural": "Locations",
+    }
+
+    @classmethod
+    def get_organisation(cls, org_id):
+        """Get a single organisation by ID."""
+        db = cls.get_db()
+        doc = db.collection('organisations').document(org_id).get()
+        if doc.exists:
+            return {'id': doc.id, **doc.to_dict()}
+        return None
+
+    @classmethod
+    def get_organisation_by_slug(cls, slug):
+        """Get an organisation by its slug field."""
+        db = cls.get_db()
+        docs = db.collection('organisations').where('slug', '==', slug).limit(1).stream()
+        for doc in docs:
+            return {'id': doc.id, **doc.to_dict()}
+        return None
+
+    @classmethod
+    def get_all_organisations(cls):
+        """Get all organisations."""
+        db = cls.get_db()
+        orgs = []
+        for doc in db.collection('organisations').stream():
+            orgs.append({'id': doc.id, **doc.to_dict()})
+        return orgs
+
+    @classmethod
+    def create_organisation(cls, data):
+        """Create a new organisation document.
+
+        Fields: name, slug, type, terminology, is_active, created_at
+        """
+        db = cls.get_db()
+        data['created_at'] = firestore.SERVER_TIMESTAMP
+        doc_ref = db.collection('organisations').document()
+        doc_ref.set(data)
+        return cls.get_organisation(doc_ref.id)
+
+    @classmethod
+    def update_organisation(cls, org_id, data):
+        """Update organisation fields."""
+        db = cls.get_db()
+        doc_ref = db.collection('organisations').document(org_id)
+        doc_ref.update(data)
+        return cls.get_organisation(org_id)
+
+    @classmethod
+    def get_org_terminology(cls, org_id):
+        """Get just the terminology for an org, falling back to defaults.
+
+        Any missing keys are filled from DEFAULT_TERMINOLOGY so callers always
+        receive the full set of 10 labels.
+        """
+        org = cls.get_organisation(org_id)
+        if org and org.get('terminology'):
+            return {**cls.DEFAULT_TERMINOLOGY, **org['terminology']}
+        return dict(cls.DEFAULT_TERMINOLOGY)
+
+    # =========================================================================
     # Settings operations (single document 'app_settings')
     # =========================================================================
     @classmethod

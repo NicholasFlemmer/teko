@@ -1,3 +1,5 @@
+import type { Organisation, Terminology } from '@/types/Organisation';
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5002';
 const REQUEST_TIMEOUT_MS = 30_000; // 30 second timeout
 
@@ -103,6 +105,20 @@ export const authAPI = {
   },
 
   isAuthenticated: () => !!getToken(),
+};
+
+// Organisations
+export const organisationsAPI = {
+  getAll: () => request<{ success: boolean; organisations: Organisation[] }>('/api/organisations'),
+  getById: (orgId: string) =>
+    request<{ success: boolean; organisation: Organisation }>(`/api/organisations/${orgId}`),
+  update: (orgId: string, data: Partial<Pick<Organisation, 'name' | 'type' | 'terminology'>>) =>
+    request<{ success: boolean; organisation: Organisation }>(`/api/organisations/${orgId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  getTerminology: (orgId: string) =>
+    request<{ success: boolean; terminology: Terminology }>(`/api/organisations/${orgId}/terminology`),
 };
 
 // Coaches
