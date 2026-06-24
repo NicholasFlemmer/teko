@@ -5,12 +5,11 @@ import logging
 import os
 import secrets
 import hashlib
-import smtplib
-from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from config import Config
 from functools import wraps
 from werkzeug.security import check_password_hash, generate_password_hash
+from services import email_service
 
 logger = logging.getLogger(__name__)
 
@@ -166,72 +165,26 @@ def _hash_reset_token(token):
     return hashlib.sha256(token.encode('utf-8')).hexdigest()
 
 
-def _send_email(to_email, subject, body, fallback_log):
-    """Send an email via SMTP, falling back to a console log when SMTP isn't set.
+def _admin_display_name(admin):
+    """Best display name for an admin: name, else first+last, else email."""
+    if admin.get('name'):
+        return admin['name']
+    full = f"{admin.get('first_name', '')} {admin.get('last_name', '')}".strip()
+    return full or admin.get('email') or 'there'
 
-    `fallback_log` is the WARNING-level message (typically containing the
-    action link) logged when no SMTP provider is configured, so flows work
-    locally without email.
-    """
-    smtp_host = os.environ.get('SMTP_HOST')
-    smtp_port = os.environ.get('SMTP_PORT', '587')
-    smtp_user = os.environ.get('SMTP_USER')
-    smtp_password = os.environ.get('SMTP_PASSWORD')
-    smtp_from = os.environ.get('SMTP_FROM', smtp_user)
 
-    if not smtp_host or not smtp_from:
-        # Logged at WARNING so it's visible without extra logging config — this
-        # is the local-dev fallback when no SMTP provider is configured.
-        logger.warning(fallback_log)
-        return
-
-    msg = EmailMessage()
-    msg['Subject'] = subject
-    msg['From'] = smtp_from
-    msg['To'] = to_email
-    msg.set_content(body)
-
+def _org_name(org_id):
+    """Look up an organisation's display name, with a safe fallback."""
+    if not org_id:
+        return 'your organisation'
     try:
-        with smtplib.SMTP(smtp_host, int(smtp_port)) as server:
-            server.starttls()
-            if smtp_user and smtp_password:
-                server.login(smtp_user, smtp_password)
-            server.send_message(msg)
-        logger.info("Sent email to %s (%s)", to_email, subject)
+        from services.firebase_service import FirebaseService
+        org = FirebaseService.get_organisation(org_id)
+        if org and org.get('name'):
+            return org['name']
     except Exception as e:
-        logger.error("Failed to send email to %s: %s", to_email, e)
-
-
-def _send_reset_email(to_email, reset_link):
-    """Send the password-reset email (or log the link locally)."""
-    body = (
-        "We received a request to reset your Teko password.\n\n"
-        f"Use the link below to set a new password (valid for {RESET_TOKEN_EXPIRY_MINUTES} minutes):\n\n"
-        f"{reset_link}\n\n"
-        "If you didn't request this, you can safely ignore this email."
-    )
-    _send_email(
-        to_email,
-        'Reset your Teko password',
-        body,
-        f"[password-reset] SMTP not configured — reset link for {to_email}: {reset_link}",
-    )
-
-
-def _send_invite_email(to_email, invite_link):
-    """Send the admin-invite email (or log the link locally)."""
-    body = (
-        "You've been invited to join Teko.\n\n"
-        "Use the link below to set up your account (valid for 48 hours):\n\n"
-        f"{invite_link}\n\n"
-        "If you weren't expecting this invitation, you can safely ignore this email."
-    )
-    _send_email(
-        to_email,
-        "You've been invited to Teko",
-        body,
-        f"[invite] SMTP not configured — invite link for {to_email}: {invite_link}",
-    )
+        logger.error("Could not load org name for %s: %s", org_id, e)
+    return 'your organisation'
 
 
 @auth_bp.route('/forgot-password', methods=['POST'])
@@ -258,7 +211,7 @@ def forgot_password():
                 'reset_token_expires': expires_at.isoformat(),
             })
             reset_link = f"{Config.FRONTEND_URL.rstrip('/')}/reset-password?token={raw_token}"
-            _send_reset_email(email, reset_link)
+            email_service.send_password_reset_email(email, reset_link, _admin_display_name(admin))
     except Exception as e:
         # Never surface internal errors to the caller — keep the response generic.
         logger.error("[password-reset] forgot-password failed for %s: %s", email, e)
@@ -358,14 +311,17 @@ def invite_user(current_user):
         if FirebaseService.get_admin_by_email(email):
             return jsonify({'error': 'A user with that email already exists'}), 400
 
+        org_id = getattr(g, 'current_user_org_id', None)
         invite = FirebaseService.create_admin_invite({
             'email': email,
             'role': role,
-            'org_id': getattr(g, 'current_user_org_id', None),
+            'org_id': org_id,
             'invited_by': current_user,
         })
         invite_link = f"{Config.FRONTEND_URL.rstrip('/')}/accept-invite?token={invite['token']}"
-        _send_invite_email(email, invite_link)
+        email_service.send_invite_email(
+            email, invite_link, _org_name(org_id), current_user, role
+        )
     except Exception as e:
         logger.exception("Invite failed")
         return jsonify({'error': 'Could not send invite'}), 500
@@ -425,6 +381,18 @@ def accept_invite():
     except Exception as e:
         logger.exception("Accept invite failed")
         return jsonify({'error': 'Could not create account'}), 400
+
+    # Best-effort welcome email — never fail the (already-created) account on this.
+    try:
+        login_url = f"{Config.FRONTEND_URL.rstrip('/')}/login"
+        email_service.send_welcome_email(
+            invite.get('email'),
+            f"{first_name} {last_name}".strip(),
+            _org_name(invite.get('org_id')),
+            login_url,
+        )
+    except Exception as e:
+        logger.error("Welcome email failed: %s", e)
 
     return jsonify({'message': 'Account created'}), 200
 

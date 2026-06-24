@@ -43,6 +43,10 @@ class Config:
     # Gemini AI
     GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
+    # Resend (transactional email)
+    RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
+    RESEND_FROM_EMAIL = os.environ.get('RESEND_FROM_EMAIL', 'noreply@tekohq.com')
+
     # Google Maps
     GOOGLE_MAPS_API_KEY = os.getenv('GOOGLE_MAPS_API_KEY')
 
