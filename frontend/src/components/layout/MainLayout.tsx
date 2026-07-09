@@ -1,5 +1,6 @@
 import { ReactNode } from "react";
 import { AppSidebar } from "./AppSidebar";
+import { RoleBadge } from "./RoleBadge";
 
 interface MainLayoutProps {
   children: ReactNode;
@@ -12,6 +13,7 @@ export function MainLayout({ children }: MainLayoutProps) {
         <AppSidebar />
       </div>
       <main className="flex-1 overflow-auto p-6">
+        <RoleBadge />
         {children}
       </main>
     </div>
