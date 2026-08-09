@@ -6,6 +6,7 @@ Creates test-org-a and test-org-b, each with:
   - 2 coaches, each with a distinct phone number
   - 1 team (both coaches assigned)
   - 2 players on that team
+  - 1 location
   - 1 session
   - 1 broadcast
   - 1 content item and 1 content_url item (for RAG/knowledge-base checks)
@@ -66,6 +67,7 @@ _COLLECTION_FOR = {
     'team': 'teams',
     'player_1': 'players',
     'player_2': 'players',
+    'location': 'locations',
     'session': 'sessions',
     'broadcast': 'broadcasts',
     'content': 'content',
@@ -185,6 +187,18 @@ def _seed_org(db, org_cfg):
         })
         created.append(('players', doc_id))
 
+    # Location
+    db.collection('locations').document(ids['location']).set({
+        'name': f'{label} Location',
+        'address': f'FAKE test address, {label}',
+        'google_maps_link': '',
+        'radius': 100,
+        'notes': 'FAKE TEST DATA — isolation testing only.',
+        'org_id': org_id,
+        'created_at': now,
+    })
+    created.append(('locations', ids['location']))
+
     # Session
     db.collection('sessions').document(ids['session']).set({
         'date': '2026-12-31',
@@ -259,7 +273,8 @@ def _verify_org(db, org_cfg):
     org_id = org_cfg['org_id']
     expected = {
         'admin_users': 1, 'coaches': 2, 'teams': 1, 'players': 2,
-        'sessions': 1, 'broadcasts': 1, 'content': 1, 'content_urls': 1,
+        'locations': 1, 'sessions': 1, 'broadcasts': 1, 'content': 1,
+        'content_urls': 1,
     }
     print(f"  Verifying org_id='{org_id}' counts:")
     all_ok = True

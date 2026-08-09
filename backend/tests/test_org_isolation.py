@@ -96,16 +96,16 @@ def _assert_seed_data_present():
 # get_all_* isolation: query as org A, must see only org A, never org B.
 # ---------------------------------------------------------------------------
 
-# (label, callable, minimum expected count for org A/B — 0 means the seed
-# script does not currently create data for this collection, so the check
-# below is vacuously true rather than a strong proof; see the note printed
-# for that case.)
+# (label, callable, minimum expected count for org A/B — 0 would mean the
+# seed script doesn't create data for this collection, making the check
+# below vacuously true rather than a strong proof; see the note printed for
+# that case. All 8 collections are now seeded, so none are currently 0.)
 GET_ALL_METHODS = [
     ('get_all_coaches', FirebaseService.get_all_coaches, 2),
     ('get_all_sessions', FirebaseService.get_all_sessions, 1),
     ('get_all_players', FirebaseService.get_all_players, 2),
     ('get_all_teams', FirebaseService.get_all_teams, 1),
-    ('get_all_locations', FirebaseService.get_all_locations, 0),
+    ('get_all_locations', FirebaseService.get_all_locations, 1),
     ('get_all_broadcasts', FirebaseService.get_all_broadcasts, 1),
     ('get_all_content', FirebaseService.get_all_content, 1),
     ('get_all_urls', FirebaseService.get_all_urls, 1),
@@ -117,11 +117,10 @@ def test_get_all_isolates_by_org(label, method, min_expected):
     _assert_seed_data_present()
 
     if min_expected == 0:
-        print(f"\nNOTE: {label} — no test data seeded for this collection "
-              f"(seed_staging_test_data.py does not create locations). This "
-              f"check is vacuously true and does not strongly prove isolation "
-              f"for {label}; it only proves org B records don't leak into an "
-              f"empty result.")
+        print(f"\nNOTE: {label} — no test data seeded for this collection. "
+              f"This check is vacuously true and does not strongly prove "
+              f"isolation for {label}; it only proves org B records don't "
+              f"leak into an empty result.")
 
     org_a_records = method(ORG_A)
     org_b_records = method(ORG_B)
