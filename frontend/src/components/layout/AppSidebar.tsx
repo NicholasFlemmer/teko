@@ -159,8 +159,11 @@ export function AppSidebar() {
         {/* Divider between profile and actions */}
         <div className="border-t border-border my-2" />
 
-        {/* Org settings are super-admin only. */}
-        {isSuperAdmin && (
+        {/* Org settings: super_admin and location_admin, matching the /settings
+            RoleGuard in App.tsx. super_admin has org_id = null so the page
+            currently loads nothing for them (known gap) — location_admin is
+            who actually uses this. */}
+        {canSeeOps && (
           <NavLink
             to="/settings"
             className={cn(

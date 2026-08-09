@@ -89,7 +89,10 @@ const AppRoutes = () => (
       path="/settings"
       element={
         <ProtectedRoute>
-          <RoleGuard allowedRoles={["super_admin"]} fallback={<Navigate to="/" replace />}>
+          {/* super_admin users have org_id = null, so OrgSettings currently loads
+              nothing for them — a known gap, tracked separately (needs an org
+              picker). location_admin is the role that actually uses this page. */}
+          <RoleGuard allowedRoles={["super_admin", "location_admin"]} fallback={<Navigate to="/" replace />}>
             <OrgSettings />
           </RoleGuard>
         </ProtectedRoute>
