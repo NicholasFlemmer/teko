@@ -1,11 +1,26 @@
 import logging
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from services.firebase_service import FirebaseService
 from routes.auth import token_required
 
 logger = logging.getLogger(__name__)
 
 content_bp = Blueprint('content', __name__)
+
+
+def _resolve_org_scope():
+    """Resolve the org_id to filter by for the current request.
+
+    Returns (org_id, None) on success, or (None, error_response) if the
+    caller has no org context and isn't the intentional super_admin
+    cross-org case (role == 'super_admin' with no assigned org).
+    """
+    org_id = getattr(g, 'current_user_org_id', None)
+    role = getattr(g, 'current_user_role', None)
+    if org_id is None and role != 'super_admin':
+        return None, (jsonify({'success': False, 'error': 'Organisation context missing'}), 403)
+    return org_id, None
+
 
 # --- Content Items ---
 
@@ -14,7 +29,10 @@ content_bp = Blueprint('content', __name__)
 def get_content(current_user):
     """Get all content items"""
     try:
-        content = FirebaseService.get_all_content()
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+        content = FirebaseService.get_all_content(org_id)
         return jsonify({
             'success': True,
             'content': content
@@ -44,6 +62,10 @@ def create_content(current_user):
                     'error': f'Missing required field: {field}'
                 }), 400
 
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Create content
         content_data = {
             'title': data['title'],
@@ -54,6 +76,7 @@ def create_content(current_user):
             'file_name': data.get('file_name', ''),
             'file_url': data.get('file_url', ''),
             'file_path': data.get('file_path', ''),
+            'org_id': org_id,
         }
 
         # If a file was uploaded but no content_text, try to extract text
@@ -91,8 +114,12 @@ def update_content(current_user, content_id):
         if not data:
             return jsonify({'success': False, 'error': 'Request body is required'}), 400
 
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Check if content exists
-        content = FirebaseService.get_content(content_id)
+        content = FirebaseService.get_content(content_id, org_id)
         if not content:
             return jsonify({
                 'success': False,
@@ -132,8 +159,12 @@ def update_content(current_user, content_id):
 def delete_content(current_user, content_id):
     """Delete a content item"""
     try:
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Check if content exists
-        content = FirebaseService.get_content(content_id)
+        content = FirebaseService.get_content(content_id, org_id)
         if not content:
             return jsonify({
                 'success': False,
@@ -161,7 +192,10 @@ def delete_content(current_user, content_id):
 def get_urls(current_user):
     """Get all URL resources"""
     try:
-        urls = FirebaseService.get_all_urls()
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+        urls = FirebaseService.get_all_urls(org_id)
         return jsonify({
             'success': True,
             'urls': urls
@@ -191,12 +225,17 @@ def create_url(current_user):
                     'error': f'Missing required field: {field}'
                 }), 400
 
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Create URL resource
         url = FirebaseService.create_url({
             'url': data['url'],
             'title': data['title'],
             'description': data.get('description', ''),
-            'instructions': data.get('instructions', '')
+            'instructions': data.get('instructions', ''),
+            'org_id': org_id,
         })
 
         return jsonify({
@@ -220,8 +259,12 @@ def update_url(current_user, url_id):
         if not data:
             return jsonify({'success': False, 'error': 'Request body is required'}), 400
 
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Check if URL exists
-        url = FirebaseService.get_url(url_id)
+        url = FirebaseService.get_url(url_id, org_id)
         if not url:
             return jsonify({
                 'success': False,
@@ -261,8 +304,12 @@ def update_url(current_user, url_id):
 def delete_url(current_user, url_id):
     """Delete a URL resource"""
     try:
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Check if URL exists
-        url = FirebaseService.get_url(url_id)
+        url = FirebaseService.get_url(url_id, org_id)
         if not url:
             return jsonify({
                 'success': False,

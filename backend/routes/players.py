@@ -1,11 +1,25 @@
 import csv
 import io
 import logging
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from services.firebase_service import FirebaseService
 from routes.auth import token_required
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_org_scope():
+    """Resolve the org_id to filter by for the current request.
+
+    Returns (org_id, None) on success, or (None, error_response) if the
+    caller has no org context and isn't the intentional super_admin
+    cross-org case (role == 'super_admin' with no assigned org).
+    """
+    org_id = getattr(g, 'current_user_org_id', None)
+    role = getattr(g, 'current_user_role', None)
+    if org_id is None and role != 'super_admin':
+        return None, (jsonify({'success': False, 'error': 'Organisation context missing'}), 403)
+    return org_id, None
 
 # Column name mappings: CSV header -> player field
 _COLUMN_MAP = {
@@ -26,8 +40,11 @@ players_bp = Blueprint('players', __name__)
 def get_players(current_user):
     """Get all players with optional team_id filter"""
     try:
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
         team_id = request.args.get('team_id')
-        players = FirebaseService.get_all_players(team_id=team_id)
+        players = FirebaseService.get_all_players(org_id, team_id=team_id)
         return jsonify({
             'success': True,
             'players': players
@@ -44,7 +61,10 @@ def get_players(current_user):
 def get_player(current_user, player_id):
     """Get a specific player by ID"""
     try:
-        player = FirebaseService.get_player(player_id)
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+        player = FirebaseService.get_player(player_id, org_id)
         if not player:
             return jsonify({
                 'success': False,
@@ -80,6 +100,10 @@ def create_player(current_user):
                     'error': f'Missing or empty required field: {field}'
                 }), 400
 
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Create player
         player = FirebaseService.create_player({
             'first_name': data['first_name'],
@@ -90,7 +114,8 @@ def create_player(current_user):
             'guardian_primary_phone': data.get('guardian_primary_phone', ''),
             'guardian_secondary_phone': data.get('guardian_secondary_phone', ''),
             'special_notes': data.get('special_notes', ''),
-            'team_ids': data.get('team_ids', [])
+            'team_ids': data.get('team_ids', []),
+            'org_id': org_id,
         })
 
         return jsonify({
@@ -114,8 +139,12 @@ def update_player(current_user, player_id):
         if not data:
             return jsonify({'success': False, 'error': 'Request body is required'}), 400
 
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Check if player exists
-        player = FirebaseService.get_player(player_id)
+        player = FirebaseService.get_player(player_id, org_id)
         if not player:
             return jsonify({
                 'success': False,
@@ -157,8 +186,12 @@ def update_player(current_user, player_id):
 def delete_player(current_user, player_id):
     """Delete a player"""
     try:
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Check if player exists
-        player = FirebaseService.get_player(player_id)
+        player = FirebaseService.get_player(player_id, org_id)
         if not player:
             return jsonify({
                 'success': False,
@@ -200,6 +233,10 @@ def bulk_upload_players(current_user):
       - team_ids (optional, repeated): team IDs to assign all players to
     """
     try:
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         file = request.files.get('file')
         if not file or not file.filename:
             return jsonify({'success': False, 'error': 'No file provided'}), 400
@@ -277,6 +314,7 @@ def bulk_upload_players(current_user):
                     'guardian_secondary_phone': player_data.get('guardian_secondary_phone', ''),
                     'special_notes': player_data.get('special_notes', ''),
                     'team_ids': team_ids,
+                    'org_id': org_id,
                 })
                 created.append(player)
             except Exception as e:

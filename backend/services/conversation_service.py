@@ -161,11 +161,11 @@ Remember: You're helping coaches develop their skills and help their players imp
             logger.error("Error saving message: %s", e)
     
     @classmethod
-    def load_rag_context(cls):
-        """Load all content and URLs from Firestore for RAG context"""
+    def load_rag_context(cls, org_id):
+        """Load all content and URLs from Firestore for RAG context, scoped to org_id"""
         try:
-            content_items = FirebaseService.get_all_content()
-            url_items = FirebaseService.get_all_urls()
+            content_items = FirebaseService.get_all_content(org_id)
+            url_items = FirebaseService.get_all_urls(org_id)
 
             sections = []
 
@@ -212,8 +212,8 @@ Remember: You're helping coaches develop their skills and help their players imp
             return ''
 
     @classmethod
-    def load_coach_context(cls, coach_id):
-        """Load coach-specific context: their teams, players, and upcoming sessions."""
+    def load_coach_context(cls, coach_id, org_id):
+        """Load coach-specific context: their teams, players, and upcoming sessions, scoped to org_id."""
         if not coach_id:
             return ''
         try:
@@ -221,7 +221,7 @@ Remember: You're helping coaches develop their skills and help their players imp
             sections = []
 
             # Teams this coach belongs to
-            all_teams = FirebaseService.get_all_teams()
+            all_teams = FirebaseService.get_all_teams(org_id)
             coach_teams = [t for t in all_teams if coach_id in (t.get('coach_ids') or [])]
 
             if coach_teams:
@@ -232,7 +232,7 @@ Remember: You're helping coaches develop their skills and help their players imp
                     lines.append(f"- {team_name} ({age_group})" if age_group else f"- {team_name}")
 
                     # Players in this team
-                    players = FirebaseService.get_all_players(team_id=team.get('id'))
+                    players = FirebaseService.get_all_players(org_id, team_id=team.get('id'))
                     if players:
                         for p in players:
                             pname = _sanitize_for_prompt(
@@ -246,7 +246,7 @@ Remember: You're helping coaches develop their skills and help their players imp
 
             # Upcoming sessions (today and future)
             today_str = _date.today().strftime('%Y-%m-%d')
-            sessions = FirebaseService.get_all_sessions(coach_id=coach_id, start_date=today_str)
+            sessions = FirebaseService.get_all_sessions(org_id, coach_id=coach_id, start_date=today_str)
             if sessions:
                 sessions.sort(key=lambda s: (s.get('date', ''), s.get('start_time', '')))
                 lines = ["YOUR UPCOMING SESSIONS:"]
@@ -278,11 +278,17 @@ Remember: You're helping coaches develop their skills and help their players imp
             # Get conversation history
             history = cls.get_conversation_history(coach_phone, limit=5)
 
+            # Determine the coach's org from their own record (matched by
+            # phone number, which carries org_id after the migration script)
+            # so RAG content and coach context stay scoped to their org.
+            requesting_coach = cls.get_coach_by_phone(coach_phone)
+            org_id = requesting_coach.get('org_id') if requesting_coach else None
+
             # Load RAG content
-            rag_context = cls.load_rag_context()
+            rag_context = cls.load_rag_context(org_id)
 
             # Load coach-specific context (teams, players, sessions)
-            coach_context = cls.load_coach_context(coach_id)
+            coach_context = cls.load_coach_context(coach_id, org_id)
 
             # Build context for Gemini
             context = cls.CRICKET_COACHING_PROMPT + "\n\n"
@@ -399,12 +405,13 @@ Remember: You're helping coaches develop their skills and help their players imp
     @classmethod
     def _handle_attendance_command_inner(cls, coach):
         coach_id = coach.get('id')
+        org_id = coach.get('org_id')
         today_str = date.today().strftime('%Y-%m-%d')
         logger.info("Attendance command from coach %s (id=%s) for %s", coach.get('name'), coach_id, today_str)
 
         # Query by coach_id only to avoid Firestore composite index requirement,
         # then filter by date in Python
-        all_coach_sessions = FirebaseService.get_all_sessions(coach_id=coach_id)
+        all_coach_sessions = FirebaseService.get_all_sessions(org_id, coach_id=coach_id)
         sessions = [s for s in all_coach_sessions if s.get('date') == today_str and s.get('team_id')]
         logger.info("Found %d session(s) with teams for today (out of %d total)", len(sessions), len(all_coach_sessions))
 
@@ -419,7 +426,7 @@ Remember: You're helping coaches develop their skills and help their players imp
         # Check if attendance already recorded
         if session.get('attended_player_ids') is not None and len(session.get('attended_player_ids', [])) > 0:
             attended_ids = set(session['attended_player_ids'])
-            players = FirebaseService.get_all_players(team_id=team_id)
+            players = FirebaseService.get_all_players(org_id, team_id=team_id)
             total = len(players)
             present_count = 0
             absent_names = []
@@ -441,10 +448,10 @@ Remember: You're helping coaches develop their skills and help their players imp
             lines.append("\nSend /attendance-redo to record it again.")
             return '\n'.join(lines)
 
-        team = FirebaseService.get_team(team_id)
+        team = FirebaseService.get_team(team_id, org_id)
         team_name = team.get('name', 'your team') if team else 'your team'
 
-        players = FirebaseService.get_all_players(team_id=team_id)
+        players = FirebaseService.get_all_players(org_id, team_id=team_id)
         if not players:
             return f"No players found for {team_name}. Please contact your administrator."
 
@@ -557,8 +564,10 @@ Remember: You're helping coaches develop their skills and help their players imp
         lines.append("\n📸 Please send a group photo of the team!")
         lines.append("Reply /end to mark this session as completed.")
 
-        # Set pending photo state so next image is linked to this session
-        session_data = FirebaseService.get_session(session_id)
+        # Set pending photo state so next image is linked to this session.
+        # session_id comes from our own server-side pending-attendance state
+        # for this coach, not user input, so no org filter is needed here.
+        session_data = FirebaseService.get_session(session_id, None)
         team_id = session_data.get('team_id', '') if session_data else ''
         cls.set_pending_photo(coach_phone, session_id, team_id)
 
@@ -568,8 +577,9 @@ Remember: You're helping coaches develop their skills and help their players imp
     def handle_attendance_redo(cls, coach):
         """Allow re-recording attendance for today's session"""
         coach_id = coach.get('id')
+        org_id = coach.get('org_id')
         today_str = date.today().strftime('%Y-%m-%d')
-        all_coach_sessions = FirebaseService.get_all_sessions(coach_id=coach_id)
+        all_coach_sessions = FirebaseService.get_all_sessions(org_id, coach_id=coach_id)
         sessions = [s for s in all_coach_sessions if s.get('date') == today_str and s.get('team_id')]
         if not sessions:
             return "You don't have any sessions scheduled for today. 📋"
@@ -779,11 +789,12 @@ Remember: You're helping coaches develop their skills and help their players imp
                 return
 
             coach_id = coach.get('id')
+            org_id = coach.get('org_id')
             coach_name = coach.get('name', 'Coach')
             today_str = date.today().strftime('%Y-%m-%d')
 
             # Find today's sessions for this coach
-            all_sessions = FirebaseService.get_all_sessions(coach_id=coach_id)
+            all_sessions = FirebaseService.get_all_sessions(org_id, coach_id=coach_id)
             sessions = [s for s in all_sessions if s.get('date') == today_str]
             logger.info("Found %d session(s) for %s today", len(sessions), coach_name)
 
@@ -816,7 +827,7 @@ Remember: You're helping coaches develop their skills and help their players imp
             allowed_radius = Config.GEOLOCATION_RADIUS_METERS
 
             if location_id:
-                loc_record = FirebaseService.get_location(location_id)
+                loc_record = FirebaseService.get_location(location_id, org_id)
                 if loc_record:
                     lat = loc_record.get('latitude')
                     lng = loc_record.get('longitude')
@@ -906,9 +917,10 @@ Remember: You're helping coaches develop their skills and help their players imp
         """Mark today's active session as completed."""
         from firebase_admin import firestore as _firestore
         coach_id = coach.get('id')
+        org_id = coach.get('org_id')
         today_str = date.today().strftime('%Y-%m-%d')
 
-        all_coach_sessions = FirebaseService.get_all_sessions(coach_id=coach_id)
+        all_coach_sessions = FirebaseService.get_all_sessions(org_id, coach_id=coach_id)
         sessions = [s for s in all_coach_sessions if s.get('date') == today_str]
 
         if not sessions:
@@ -957,7 +969,8 @@ Remember: You're helping coaches develop their skills and help their players imp
     def handle_players_command(cls, coach):
         """Return a formatted list of the coach's players grouped by team."""
         coach_id = coach.get('id')
-        all_teams = FirebaseService.get_all_teams()
+        org_id = coach.get('org_id')
+        all_teams = FirebaseService.get_all_teams(org_id)
         coach_teams = [t for t in all_teams if coach_id in (t.get('coach_ids') or [])]
 
         if not coach_teams:
@@ -973,7 +986,7 @@ Remember: You're helping coaches develop their skills and help their players imp
                 header += f" ({age_group})"
             lines.append(header)
 
-            players = FirebaseService.get_all_players(team_id=team.get('id'))
+            players = FirebaseService.get_all_players(org_id, team_id=team.get('id'))
             if not players:
                 lines.append("  (no players registered)")
             else:
@@ -1086,7 +1099,10 @@ Remember: You're helping coaches develop their skills and help their players imp
         if now - cls._coach_phone_cache_ts < cls._COACH_CACHE_TTL and cls._coach_phone_cache:
             return
         try:
-            coaches = FirebaseService.get_all_coaches()
+            # This is the phone-number-to-coach identity lookup used before
+            # we know which org an incoming message belongs to (analogous to
+            # login-by-email), so it intentionally spans every org.
+            coaches = FirebaseService.get_all_coaches(None)
             cache: dict = {}
             for coach in coaches:
                 raw = coach.get('phone_number', '')

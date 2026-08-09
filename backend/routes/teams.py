@@ -1,5 +1,5 @@
 import logging
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from services.firebase_service import FirebaseService
 from routes.auth import token_required
 
@@ -7,13 +7,31 @@ logger = logging.getLogger(__name__)
 
 teams_bp = Blueprint('teams', __name__)
 
+
+def _resolve_org_scope():
+    """Resolve the org_id to filter by for the current request.
+
+    Returns (org_id, None) on success, or (None, error_response) if the
+    caller has no org context and isn't the intentional super_admin
+    cross-org case (role == 'super_admin' with no assigned org).
+    """
+    org_id = getattr(g, 'current_user_org_id', None)
+    role = getattr(g, 'current_user_role', None)
+    if org_id is None and role != 'super_admin':
+        return None, (jsonify({'success': False, 'error': 'Organisation context missing'}), 403)
+    return org_id, None
+
+
 @teams_bp.route('', methods=['GET'])
 @token_required
 def get_teams(current_user):
     """Get all teams with optional location filter"""
     try:
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
         location_id = request.args.get('location_id')
-        teams = FirebaseService.get_all_teams(location_id=location_id)
+        teams = FirebaseService.get_all_teams(org_id, location_id=location_id)
         return jsonify({
             'success': True,
             'teams': teams
@@ -30,7 +48,10 @@ def get_teams(current_user):
 def get_team(current_user, team_id):
     """Get a specific team by ID"""
     try:
-        team = FirebaseService.get_team(team_id)
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+        team = FirebaseService.get_team(team_id, org_id)
         if not team:
             return jsonify({
                 'success': False,
@@ -66,12 +87,17 @@ def create_team(current_user):
                     'error': f'Missing or empty required field: {field}'
                 }), 400
 
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Create team
         team = FirebaseService.create_team({
             'name': data['name'],
             'age_group': data['age_group'],
             'location_id': data.get('location_id', ''),
-            'coach_ids': data.get('coach_ids', [])
+            'coach_ids': data.get('coach_ids', []),
+            'org_id': org_id,
         })
 
         return jsonify({
@@ -95,8 +121,12 @@ def update_team(current_user, team_id):
         if not data:
             return jsonify({'success': False, 'error': 'Request body is required'}), 400
 
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Check if team exists
-        team = FirebaseService.get_team(team_id)
+        team = FirebaseService.get_team(team_id, org_id)
         if not team:
             return jsonify({
                 'success': False,
@@ -136,8 +166,12 @@ def update_team(current_user, team_id):
 def delete_team(current_user, team_id):
     """Delete a team"""
     try:
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Check if team exists
-        team = FirebaseService.get_team(team_id)
+        team = FirebaseService.get_team(team_id, org_id)
         if not team:
             return jsonify({
                 'success': False,
