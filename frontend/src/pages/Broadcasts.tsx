@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { Send, MessageSquare, Mail, Users, ChevronDown, X, Loader2, FileText } from "lucide-react";
+import { useTerm } from "@/contexts/TerminologyContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -27,6 +28,8 @@ interface Recipient {
 }
 
 export default function Broadcasts() {
+  const coachSingular = useTerm("coach_singular");
+  const coachPlural = useTerm("coach_plural");
   const { toast } = useToast();
   const [channel, setChannel] = useState<"whatsapp" | "email">("whatsapp");
   const [subject, setSubject] = useState("");
@@ -222,7 +225,7 @@ export default function Broadcasts() {
         <div className="page-header">
           <div>
             <h1 className="page-title">Broadcasts</h1>
-            <p className="page-subtitle">Send announcements to coaches via WhatsApp or Email</p>
+            <p className="page-subtitle">Send announcements to {coachPlural.toLowerCase()} via WhatsApp or Email</p>
           </div>
         </div>
 
@@ -261,14 +264,14 @@ export default function Broadcasts() {
             {loading ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Loading coaches...
+                Loading {coachPlural.toLowerCase()}...
               </div>
             ) : (
               <>
                 <div className="flex flex-wrap gap-2 mb-2">
                   {allSelected && (
                     <Badge variant="secondary" className="gap-1 pr-1">
-                      All Coaches ({recipients.length})
+                      All {coachPlural} ({recipients.length})
                       <button onClick={() => { setAllSelected(false); setSelectedRecipients([]); }} className="ml-1 rounded-full hover:bg-muted p-0.5">
                         <X className="w-3 h-3" />
                       </button>
@@ -300,7 +303,7 @@ export default function Broadcasts() {
                   <SelectContent>
                     <SelectItem value="all">
                       <span className="flex items-center gap-2">
-                        <Users className="w-4 h-4" /> Select All Coaches
+                        <Users className="w-4 h-4" /> Select All {coachPlural}
                       </span>
                     </SelectItem>
                     {recipients.map(r => (
@@ -383,7 +386,7 @@ export default function Broadcasts() {
                     </div>
                   )}
                   <p className="text-xs text-muted-foreground mt-2">
-                    {"{{1}}"} = coach name (auto-filled){templatePreview.varCount > 1 && <>{" · {{2}}"} = your message below</>}
+                    {"{{1}}"} = {coachSingular.toLowerCase()} name (auto-filled){templatePreview.varCount > 1 && <>{" · {{2}}"} = your message below</>}
                   </p>
                 </div>
               )}

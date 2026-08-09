@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { playersAPI, teamsAPI, sessionsAPI, coachesAPI, locationsAPI } from "@/services/api";
+import { useTerm } from "@/contexts/TerminologyContext";
 
 const PLAYER_COLORS = [
   "bg-success", "bg-warning", "bg-info", "bg-primary",
@@ -43,6 +44,15 @@ const PLAYER_COLORS = [
 ];
 
 export default function PlayerDetail() {
+  const playerSingular = useTerm("player_singular");
+  const playerPlural = useTerm("player_plural");
+  const teamPlural = useTerm("team_plural");
+  const coachSingular = useTerm("coach_singular");
+  const coachPlural = useTerm("coach_plural");
+  const locationSingular = useTerm("location_singular");
+  const locationPlural = useTerm("location_plural");
+  const sessionSingular = useTerm("session_singular");
+  const sessionPlural = useTerm("session_plural");
   const { id } = useParams();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -109,7 +119,7 @@ export default function PlayerDetail() {
         setSelectedTeams(p.team_ids || []);
       } catch (err) {
         console.error("Failed to fetch player detail:", err);
-        setFetchError("Failed to load player. Please check your connection and try again.");
+        setFetchError(`Failed to load ${playerSingular.toLowerCase()}. Please check your connection and try again.`);
       } finally {
         setLoading(false);
       }
@@ -169,7 +179,7 @@ export default function PlayerDetail() {
       setIsEditing(false);
     } catch (err: any) {
       console.error("Failed to save player:", err);
-      setSaveError(err.message || "Failed to save player");
+      setSaveError(err.message || `Failed to save ${playerSingular.toLowerCase()}`);
     } finally {
       setSaving(false);
     }
@@ -223,7 +233,7 @@ export default function PlayerDetail() {
       await playersAPI.delete(id);
       navigate("/players");
     } catch (err: any) {
-      setSaveError(err.message || "Failed to delete player");
+      setSaveError(err.message || `Failed to delete ${playerSingular.toLowerCase()}`);
       setDeleteConfirmOpen(false);
     } finally {
       setDeleting(false);
@@ -235,7 +245,7 @@ export default function PlayerDetail() {
       <MainLayout>
         <div className="flex items-center justify-center py-24">
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-          <span className="ml-2 text-muted-foreground">Loading player...</span>
+          <span className="ml-2 text-muted-foreground">Loading {playerSingular.toLowerCase()}...</span>
         </div>
       </MainLayout>
     );
@@ -245,9 +255,9 @@ export default function PlayerDetail() {
     return (
       <MainLayout>
         <div className="text-center py-24">
-          <p className="text-muted-foreground">{fetchError || "Player not found"}</p>
+          <p className="text-muted-foreground">{fetchError || `${playerSingular} not found`}</p>
           <Button variant="outline" className="mt-4" onClick={() => navigate("/players")}>
-            Back to Players
+            Back to {playerPlural}
           </Button>
         </div>
       </MainLayout>
@@ -332,8 +342,8 @@ export default function PlayerDetail() {
             <ArrowLeft className="w-5 h-5" />
           </Button>
           <div className="flex-1">
-            <h1 className="page-title">{fullName || "Player"}</h1>
-            <p className="page-subtitle">Player Details</p>
+            <h1 className="page-title">{fullName || playerSingular}</h1>
+            <p className="page-subtitle">{playerSingular} Details</p>
           </div>
           {isEditing ? (
             <div className="flex items-center gap-2">
@@ -356,7 +366,7 @@ export default function PlayerDetail() {
           ) : (
             <Button className="gap-2" onClick={() => setIsEditing(true)}>
               <Edit className="w-4 h-4" />
-              Edit Player
+              Edit {playerSingular}
             </Button>
           )}
         </div>
@@ -437,7 +447,7 @@ export default function PlayerDetail() {
                     )}
                     <div>
                       <h2 className="text-xl font-semibold text-foreground">{fullName}</h2>
-                      <span className="badge-student">Player</span>
+                      <span className="badge-student">{playerSingular}</span>
                     </div>
                   </div>
 
@@ -478,7 +488,7 @@ export default function PlayerDetail() {
 
             {/* Teams */}
             <div className="bg-card rounded-xl border border-border p-5 shadow-card">
-              <h3 className="font-semibold text-foreground mb-3">Teams</h3>
+              <h3 className="font-semibold text-foreground mb-3">{teamPlural}</h3>
               {isEditing ? (
                 <div className="space-y-2">
                   {allTeams.map((team) => (
@@ -513,7 +523,7 @@ export default function PlayerDetail() {
                       <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary">{team.age_group || ""}</span>
                     </div>
                   )) : (
-                    <p className="text-sm text-muted-foreground">No teams assigned</p>
+                    <p className="text-sm text-muted-foreground">No {teamPlural.toLowerCase()} assigned</p>
                   )}
                 </div>
               )}
@@ -570,7 +580,7 @@ export default function PlayerDetail() {
 
             {/* Locations */}
             <div className="bg-card rounded-xl border border-border p-5 shadow-card">
-              <h3 className="font-semibold text-foreground mb-3">Locations Played At</h3>
+              <h3 className="font-semibold text-foreground mb-3">{locationPlural} Played At</h3>
               <div className="space-y-3">
                 {playerLocations.length > 0 ? playerLocations.map((location, index) => (
                   <div key={index} className="flex items-center justify-between">
@@ -578,17 +588,17 @@ export default function PlayerDetail() {
                       <MapPin className="w-4 h-4 text-muted-foreground" />
                       <span className="text-foreground">{location.name}</span>
                     </div>
-                    <span className="text-xs text-muted-foreground">{location.sessions} sessions</span>
+                    <span className="text-xs text-muted-foreground">{location.sessions} {location.sessions === 1 ? sessionSingular.toLowerCase() : sessionPlural.toLowerCase()}</span>
                   </div>
                 )) : (
-                  <p className="text-sm text-muted-foreground">No location data</p>
+                  <p className="text-sm text-muted-foreground">No {locationSingular.toLowerCase()} data</p>
                 )}
               </div>
             </div>
 
             {/* Coaches */}
             <div className="bg-card rounded-xl border border-border p-5 shadow-card">
-              <h3 className="font-semibold text-foreground mb-3">Coaches Trained With</h3>
+              <h3 className="font-semibold text-foreground mb-3">{coachPlural} Trained With</h3>
               <div className="space-y-3">
                 {playerCoaches.length > 0 ? playerCoaches.map((coach, index) => (
                   <div key={index} className="flex items-center justify-between">
@@ -596,10 +606,10 @@ export default function PlayerDetail() {
                       <Users className="w-4 h-4 text-muted-foreground" />
                       <span className="text-foreground">{coach.name}</span>
                     </div>
-                    <span className="text-xs text-muted-foreground">{coach.sessions} sessions</span>
+                    <span className="text-xs text-muted-foreground">{coach.sessions} {coach.sessions === 1 ? sessionSingular.toLowerCase() : sessionPlural.toLowerCase()}</span>
                   </div>
                 )) : (
-                  <p className="text-sm text-muted-foreground">No coach data</p>
+                  <p className="text-sm text-muted-foreground">No {coachSingular.toLowerCase()} data</p>
                 )}
               </div>
             </div>
@@ -619,7 +629,7 @@ export default function PlayerDetail() {
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-card rounded-xl border border-border p-4 shadow-card text-center">
                 <p className="text-3xl font-bold text-foreground">{totalSessions}</p>
-                <p className="text-sm text-muted-foreground">Total Sessions</p>
+                <p className="text-sm text-muted-foreground">Total {sessionPlural}</p>
               </div>
               <div className="bg-card rounded-xl border border-success/30 p-4 shadow-card text-center">
                 <p className="text-3xl font-bold text-success">{attendanceRate}%</p>
@@ -627,11 +637,11 @@ export default function PlayerDetail() {
               </div>
               <div className="bg-card rounded-xl border border-success/30 p-4 shadow-card text-center">
                 <p className="text-3xl font-bold text-success">{attended}</p>
-                <p className="text-sm text-muted-foreground">Sessions Attended</p>
+                <p className="text-sm text-muted-foreground">{sessionPlural} Attended</p>
               </div>
               <div className="bg-card rounded-xl border border-destructive/30 p-4 shadow-card text-center">
                 <p className="text-3xl font-bold text-destructive">{absent}</p>
-                <p className="text-sm text-muted-foreground">Sessions Absent</p>
+                <p className="text-sm text-muted-foreground">{sessionPlural} Absent</p>
               </div>
             </div>
 
@@ -702,7 +712,7 @@ export default function PlayerDetail() {
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Player?</AlertDialogTitle>
+            <AlertDialogTitle>Delete {playerSingular}?</AlertDialogTitle>
             <AlertDialogDescription>
               Are you sure you want to delete <strong>{fullName}</strong>? This action cannot be undone.
             </AlertDialogDescription>
@@ -710,7 +720,7 @@ export default function PlayerDetail() {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              {deleting ? "Deleting..." : "Delete Player"}
+              {deleting ? "Deleting..." : `Delete ${playerSingular}`}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

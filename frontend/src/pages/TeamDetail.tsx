@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { teamsAPI, playersAPI, coachesAPI, locationsAPI, sessionsAPI } from "@/services/api";
+import { useTerm } from "@/contexts/TerminologyContext";
 
 const PLAYER_COLORS = [
   "bg-success", "bg-warning", "bg-info", "bg-primary",
@@ -40,6 +41,15 @@ const TEAM_COLORS = [
 ];
 
 export default function TeamDetail() {
+  const teamSingular = useTerm("team_singular");
+  const teamPlural = useTerm("team_plural");
+  const playerSingular = useTerm("player_singular");
+  const playerPlural = useTerm("player_plural");
+  const coachSingular = useTerm("coach_singular");
+  const coachPlural = useTerm("coach_plural");
+  const sessionSingular = useTerm("session_singular");
+  const sessionPlural = useTerm("session_plural");
+  const locationSingular = useTerm("location_singular");
   const { id } = useParams();
   const navigate = useNavigate();
   const [team, setTeam] = useState<any>(null);
@@ -82,7 +92,7 @@ export default function TeamDetail() {
         });
       } catch (err) {
         console.error("Failed to fetch team detail:", err);
-        setFetchError("Failed to load team. Please check your connection and try again.");
+        setFetchError(`Failed to load ${teamSingular.toLowerCase()}. Please check your connection and try again.`);
       } finally {
         setLoading(false);
       }
@@ -112,7 +122,7 @@ export default function TeamDetail() {
       });
       setIsEditing(false);
     } catch (err: any) {
-      setSaveError(err.message || "Failed to save team");
+      setSaveError(err.message || `Failed to save ${teamSingular.toLowerCase()}`);
     } finally {
       setSaving(false);
     }
@@ -136,7 +146,7 @@ export default function TeamDetail() {
       await teamsAPI.delete(id);
       navigate("/teams");
     } catch (err: any) {
-      setSaveError(err.message || "Failed to delete team");
+      setSaveError(err.message || `Failed to delete ${teamSingular.toLowerCase()}`);
       setDeleteConfirmOpen(false);
     } finally {
       setDeleting(false);
@@ -148,7 +158,7 @@ export default function TeamDetail() {
       <MainLayout>
         <div className="flex items-center justify-center py-24">
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-          <span className="ml-2 text-muted-foreground">Loading team...</span>
+          <span className="ml-2 text-muted-foreground">Loading {teamSingular.toLowerCase()}...</span>
         </div>
       </MainLayout>
     );
@@ -158,9 +168,9 @@ export default function TeamDetail() {
     return (
       <MainLayout>
         <div className="text-center py-24">
-          <p className="text-muted-foreground">{fetchError || "Team not found"}</p>
+          <p className="text-muted-foreground">{fetchError || `${teamSingular} not found`}</p>
           <Button variant="outline" className="mt-4" onClick={() => navigate("/teams")}>
-            Back to Teams
+            Back to {teamPlural}
           </Button>
         </div>
       </MainLayout>
@@ -169,7 +179,7 @@ export default function TeamDetail() {
 
   const getLocationName = (locationId: string) => {
     const loc = locations.find((l) => l.id === locationId);
-    return loc?.name || "No location";
+    return loc?.name || `No ${locationSingular.toLowerCase()}`;
   };
 
   const getCoachName = (coachId: string) => {
@@ -252,7 +262,7 @@ export default function TeamDetail() {
           </Button>
           <div className="flex-1">
             <h1 className="page-title">{team.name}</h1>
-            <p className="page-subtitle">Team Details</p>
+            <p className="page-subtitle">{teamSingular} Details</p>
           </div>
           {isEditing ? (
             <div className="flex items-center gap-2">
@@ -274,11 +284,11 @@ export default function TeamDetail() {
             <>
               <Button variant="outline" className="gap-2" onClick={() => navigate(`/players?team=${id}`)}>
                 <UserPlus className="w-4 h-4" />
-                Add Players
+                Add {playerPlural}
               </Button>
               <Button className="gap-2" onClick={() => setIsEditing(true)}>
                 <Edit className="w-4 h-4" />
-                Edit Team
+                Edit {teamSingular}
               </Button>
             </>
           )}
@@ -292,7 +302,7 @@ export default function TeamDetail() {
               {isEditing ? (
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="teamName">Team Name</Label>
+                    <Label htmlFor="teamName">{teamSingular} Name</Label>
                     <Input
                       id="teamName"
                       value={editData.name}
@@ -311,9 +321,9 @@ export default function TeamDetail() {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Default Location</Label>
+                    <Label>Default {locationSingular}</Label>
                     <Select value={editData.locationId} onValueChange={(v) => setEditData({ ...editData, locationId: v })}>
-                      <SelectTrigger><SelectValue placeholder="Select a location" /></SelectTrigger>
+                      <SelectTrigger><SelectValue placeholder={`Select a ${locationSingular.toLowerCase()}`} /></SelectTrigger>
                       <SelectContent>
                         {locations.map((loc) => (
                           <SelectItem key={loc.id} value={loc.id}>{loc.name}</SelectItem>
@@ -343,7 +353,7 @@ export default function TeamDetail() {
                     </div>
                     <div className="flex items-center gap-3 text-muted-foreground">
                       <GraduationCap className="w-5 h-5 flex-shrink-0" />
-                      <span className="text-foreground">{teamPlayers.length} players</span>
+                      <span className="text-foreground">{teamPlayers.length} {teamPlayers.length === 1 ? playerSingular.toLowerCase() : playerPlural.toLowerCase()}</span>
                     </div>
                   </div>
                 </>
@@ -354,7 +364,7 @@ export default function TeamDetail() {
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-card rounded-xl border border-border p-4 shadow-card text-center">
                 <p className="text-3xl font-bold text-foreground">{totalSessions}</p>
-                <p className="text-sm text-muted-foreground">Total Sessions</p>
+                <p className="text-sm text-muted-foreground">Total {sessionPlural}</p>
               </div>
               <div className="bg-card rounded-xl border border-success/30 p-4 shadow-card text-center">
                 <p className="text-3xl font-bold text-success">{avgAttendance}%</p>
@@ -372,7 +382,7 @@ export default function TeamDetail() {
 
             {/* Coaches */}
             <div className="bg-card rounded-xl border border-border p-5 shadow-card">
-              <h3 className="font-semibold text-foreground mb-3">Coaches</h3>
+              <h3 className="font-semibold text-foreground mb-3">{coachPlural}</h3>
               <div className="space-y-3">
                 {teamCoaches.length > 0 ? teamCoaches.map((coach: any) => (
                   <div key={coach.id} className="flex items-center justify-between">
@@ -380,10 +390,10 @@ export default function TeamDetail() {
                       <Users className="w-4 h-4 text-muted-foreground" />
                       <span className="text-foreground">{coach.name}</span>
                     </div>
-                    <span className="text-xs text-muted-foreground">{coach.sessions} sessions</span>
+                    <span className="text-xs text-muted-foreground">{coach.sessions} {coach.sessions === 1 ? sessionSingular.toLowerCase() : sessionPlural.toLowerCase()}</span>
                   </div>
                 )) : (
-                  <p className="text-sm text-muted-foreground">No coaches assigned</p>
+                  <p className="text-sm text-muted-foreground">No {coachPlural.toLowerCase()} assigned</p>
                 )}
               </div>
             </div>
@@ -393,7 +403,7 @@ export default function TeamDetail() {
           <div className="space-y-4">
             <div className="bg-card rounded-xl border border-border p-5 shadow-card">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-foreground">Players ({mappedPlayers.length})</h3>
+                <h3 className="font-semibold text-foreground">{playerPlural} ({mappedPlayers.length})</h3>
                 <Button variant="ghost" size="sm" className="text-primary" onClick={() => navigate(`/players?team=${id}`)}>
                   Manage
                 </Button>
@@ -419,19 +429,19 @@ export default function TeamDetail() {
                   </div>
                 ))}
                 {mappedPlayers.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-4">No players in this team</p>
+                  <p className="text-sm text-muted-foreground text-center py-4">No {playerPlural.toLowerCase()} in this {teamSingular.toLowerCase()}</p>
                 )}
               </div>
               {mappedPlayers.length > 0 && (
                 <Button variant="outline" className="w-full mt-4" onClick={() => navigate(`/players?team=${id}`)}>
-                  View All Players
+                  View All {playerPlural}
                 </Button>
               )}
             </div>
 
             {/* Recent Sessions */}
             <div className="bg-card rounded-xl border border-border p-5 shadow-card">
-              <h3 className="font-semibold text-foreground mb-4">Recent Sessions</h3>
+              <h3 className="font-semibold text-foreground mb-4">Recent {sessionPlural}</h3>
               <div className="space-y-3">
                 {recentSessions.length > 0 ? recentSessions.map((session) => {
                   const attended = (session.attended_player_ids || []).length;
@@ -455,7 +465,7 @@ export default function TeamDetail() {
                           </span>
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          Coach: {getCoachName(session.coach_id)}
+                          {coachSingular}: {getCoachName(session.coach_id)}
                         </p>
                       </div>
                       <div className="text-right">
@@ -469,7 +479,7 @@ export default function TeamDetail() {
                     </div>
                   );
                 }) : (
-                  <p className="text-sm text-muted-foreground text-center py-4">No recent sessions</p>
+                  <p className="text-sm text-muted-foreground text-center py-4">No recent {sessionPlural.toLowerCase()}</p>
                 )}
               </div>
             </div>
@@ -478,7 +488,7 @@ export default function TeamDetail() {
           {/* Right column - Upcoming sessions */}
           <div className="space-y-4">
             <div className="bg-card rounded-xl border border-border p-5 shadow-card">
-              <h3 className="font-semibold text-foreground mb-4">Upcoming Sessions</h3>
+              <h3 className="font-semibold text-foreground mb-4">Upcoming {sessionPlural}</h3>
               <div className="space-y-3">
                 {upcomingSessions.length > 0 ? upcomingSessions.map((session) => {
                   const sessionDate = session.date || session.session_date;
@@ -519,11 +529,11 @@ export default function TeamDetail() {
                     </div>
                   );
                 }) : (
-                  <p className="text-sm text-muted-foreground text-center py-4">No upcoming sessions</p>
+                  <p className="text-sm text-muted-foreground text-center py-4">No upcoming {sessionPlural.toLowerCase()}</p>
                 )}
               </div>
               <Button variant="outline" className="w-full mt-4" onClick={() => navigate(`/`)}>
-                View Team Schedule
+                View {teamSingular} Schedule
               </Button>
             </div>
           </div>
@@ -533,15 +543,15 @@ export default function TeamDetail() {
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Team?</AlertDialogTitle>
+            <AlertDialogTitle>Delete {teamSingular}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete <strong>{team.name}</strong>? This action cannot be undone. Players assigned to this team will not be deleted.
+              Are you sure you want to delete <strong>{team.name}</strong>? This action cannot be undone. {playerPlural} assigned to this {teamSingular.toLowerCase()} will not be deleted.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              {deleting ? "Deleting..." : "Delete Team"}
+              {deleting ? "Deleting..." : `Delete ${teamSingular}`}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -33,6 +33,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { RoleGuard } from "@/components/ui/RoleGuard";
 import { adminsAPI, authAPI } from "@/services/api";
+import { useTerm } from "@/contexts/TerminologyContext";
 
 const ROLE_LABELS: Record<string, string> = {
   super_admin: "Super Admin",
@@ -62,6 +63,8 @@ function isActive(a: AdminRow): boolean {
 }
 
 export default function UserManagement() {
+  const coachSingular = useTerm("coach_singular");
+  const locationSingular = useTerm("location_singular");
   const { toast } = useToast();
   const { user } = useAuth();
   const isSuperAdmin = user?.role === "super_admin";
@@ -163,7 +166,7 @@ export default function UserManagement() {
         {/* Location filtering isn't wired yet — location admins see all org users for now. */}
         {isLocationAdmin && (
           <div className="rounded-md bg-muted px-4 py-2.5 text-sm text-muted-foreground">
-            Location filtering coming soon
+            {locationSingular} filtering coming soon
           </div>
         )}
 
@@ -246,7 +249,7 @@ export default function UserManagement() {
                 </SelectTrigger>
                 <SelectContent>
                   {isSuperAdmin && <SelectItem value="location_admin">Location Admin</SelectItem>}
-                  <SelectItem value="coach">Coach</SelectItem>
+                  <SelectItem value="coach">{coachSingular}</SelectItem>
                 </SelectContent>
               </Select>
             </div>

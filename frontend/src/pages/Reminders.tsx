@@ -9,6 +9,7 @@ import { Bell, Clock, CheckCircle2, MessageSquare, ClipboardCheck, Users, Plus, 
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { remindersAPI, adminAPI } from "@/services/api";
+import { useTerm } from "@/contexts/TerminologyContext";
 
 interface ReminderConfig {
   id: string;
@@ -44,6 +45,10 @@ const timingLabels: Record<string, string> = {
 };
 
 export default function Reminders() {
+  const coachSingular = useTerm("coach_singular");
+  const coachPlural = useTerm("coach_plural");
+  const sessionSingular = useTerm("session_singular");
+  const sessionPlural = useTerm("session_plural");
   const { toast } = useToast();
   const [reminders, setReminders] = useState<ReminderConfig[]>([]);
   const [isAddingNew, setIsAddingNew] = useState(false);
@@ -167,9 +172,9 @@ export default function Reminders() {
 
   const addReminder = async () => {
     const descriptions: Record<string, string> = {
-      "check-in": "Remind coaches to check in before their session",
-      "roll-call": "Prompt coaches to prepare for attendance",
-      "feedback": "Request session feedback from coaches",
+      "check-in": `Remind ${coachPlural.toLowerCase()} to check in before their ${sessionSingular.toLowerCase()}`,
+      "roll-call": `Prompt ${coachPlural.toLowerCase()} to prepare for attendance`,
+      "feedback": `Request ${sessionSingular.toLowerCase()} feedback from ${coachPlural.toLowerCase()}`,
     };
 
     setCreating(true);
@@ -215,9 +220,9 @@ export default function Reminders() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Coach Reminders</h1>
+            <h1 className="text-2xl font-bold text-foreground">{coachSingular} Reminders</h1>
             <p className="text-muted-foreground">
-              Set up automated reminders for coaches before and after sessions
+              Set up automated reminders for {coachPlural.toLowerCase()} before and after {sessionPlural.toLowerCase()}
             </p>
           </div>
           <Button onClick={() => setIsAddingNew(true)} className="gap-2">
@@ -234,7 +239,7 @@ export default function Reminders() {
                 <div>
                   <CardTitle className="text-base">Automated Reminder Job</CardTitle>
                   <CardDescription>
-                    Runs every minute. Sends WhatsApp check-in links {schedulerStatus.reminder_minutes_before ?? 30} minutes before each session.
+                    Runs every minute. Sends WhatsApp check-in links {schedulerStatus.reminder_minutes_before ?? 30} minutes before each {sessionSingular.toLowerCase()}.
                   </CardDescription>
                 </div>
                 <Button variant="outline" size="sm" onClick={triggerRemindersNow} disabled={triggering} className="gap-2">
@@ -400,7 +405,7 @@ export default function Reminders() {
               Configured Reminders
             </CardTitle>
             <CardDescription>
-              Manage automated notifications sent to coaches
+              Manage automated notifications sent to {coachPlural.toLowerCase()}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -480,9 +485,9 @@ export default function Reminders() {
                 <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
                   <span className="text-lg font-bold text-primary">1</span>
                 </div>
-                <h4 className="font-medium">Session Scheduled</h4>
+                <h4 className="font-medium">{sessionSingular} Scheduled</h4>
                 <p className="text-sm text-muted-foreground">
-                  When a coaching session is created, reminders are automatically queued
+                  When a {sessionSingular.toLowerCase()} is created, reminders are automatically queued
                 </p>
               </div>
               <div className="text-center space-y-2">
@@ -491,16 +496,16 @@ export default function Reminders() {
                 </div>
                 <h4 className="font-medium">Timed Delivery</h4>
                 <p className="text-sm text-muted-foreground">
-                  Notifications are sent at the configured time before or after sessions
+                  Notifications are sent at the configured time before or after {sessionPlural.toLowerCase()}
                 </p>
               </div>
               <div className="text-center space-y-2">
                 <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
                   <span className="text-lg font-bold text-primary">3</span>
                 </div>
-                <h4 className="font-medium">Coach Action</h4>
+                <h4 className="font-medium">{coachSingular} Action</h4>
                 <p className="text-sm text-muted-foreground">
-                  Coaches receive prompts to check in, take attendance, or provide feedback
+                  {coachPlural} receive prompts to check in, take attendance, or provide feedback
                 </p>
               </div>
             </div>

@@ -27,8 +27,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { coachesAPI, uploadsAPI, sessionsAPI, locationsAPI } from "@/services/api";
+import { useTerm } from "@/contexts/TerminologyContext";
 
 export default function CoachDetail() {
+  const coachSingular = useTerm("coach_singular");
+  const coachPlural = useTerm("coach_plural");
+  const locationSingular = useTerm("location_singular");
+  const locationPlural = useTerm("location_plural");
+  const sessionPlural = useTerm("session_plural");
   const { id } = useParams();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -98,7 +104,7 @@ export default function CoachDetail() {
         setAllSessions(sessionsRes.sessions || []);
         setAllLocations(locationsRes.locations || []);
       } catch (err: any) {
-        setError(err.message || "Failed to load coach");
+        setError(err.message || `Failed to load ${coachSingular.toLowerCase()}`);
       } finally {
         setLoading(false);
       }
@@ -149,7 +155,7 @@ export default function CoachDetail() {
       id: s.id,
       date: s.date || s.session_date,
       time: s.start_time ? s.start_time.slice(0, 5) : "",
-      location: locationMap[s.location_id] || s.address || "No location",
+      location: locationMap[s.location_id] || s.address || `No ${locationSingular.toLowerCase()}`,
     }));
 
   // Recent check-ins (past sessions with a status)
@@ -164,7 +170,7 @@ export default function CoachDetail() {
       return {
         id: s.id,
         date: s.date || s.session_date,
-        location: locationMap[s.location_id] || s.address || "No location",
+        location: locationMap[s.location_id] || s.address || `No ${locationSingular.toLowerCase()}`,
         status: displayStatus,
         time: s.start_time ? s.start_time.slice(0, 5) : "",
       };
@@ -360,13 +366,13 @@ export default function CoachDetail() {
               <ArrowLeft className="w-5 h-5" />
             </Button>
             <div className="flex-1">
-              <h1 className="page-title">Coach Not Found</h1>
+              <h1 className="page-title">{coachSingular} Not Found</h1>
             </div>
           </div>
           <div className="text-center py-12">
             <p className="text-destructive mb-4">{error}</p>
             <Button variant="outline" onClick={() => navigate("/coaches")}>
-              Back to Coaches
+              Back to {coachPlural}
             </Button>
           </div>
         </div>
@@ -383,8 +389,8 @@ export default function CoachDetail() {
             <ArrowLeft className="w-5 h-5" />
           </Button>
           <div className="flex-1">
-            <h1 className="page-title">{fullName || "Coach"}</h1>
-            <p className="page-subtitle">Coach Details</p>
+            <h1 className="page-title">{fullName || coachSingular}</h1>
+            <p className="page-subtitle">{coachSingular} Details</p>
           </div>
           {isEditing ? (
             <div className="flex gap-2">
@@ -415,7 +421,7 @@ export default function CoachDetail() {
               </Button>
               <Button className="gap-2" onClick={() => setIsEditing(true)}>
                 <Edit className="w-4 h-4" />
-                Edit Coach
+                Edit {coachSingular}
               </Button>
             </>
           )}
@@ -494,7 +500,7 @@ export default function CoachDetail() {
                     )}
                     <div>
                       <h2 className="text-xl font-semibold text-foreground">{fullName}</h2>
-                      <span className="badge-coach">Coach</span>
+                      <span className="badge-coach">{coachSingular}</span>
                     </div>
                   </div>
 
@@ -563,7 +569,7 @@ export default function CoachDetail() {
 
             {/* Locations */}
             <div className="bg-card rounded-xl border border-border p-5 shadow-card">
-              <h3 className="font-semibold text-foreground mb-3">Locations</h3>
+              <h3 className="font-semibold text-foreground mb-3">{locationPlural}</h3>
               <div className="space-y-2">
                 {locations.length > 0 ? (
                   locations.map((location: string, index: number) => (
@@ -573,7 +579,7 @@ export default function CoachDetail() {
                     </div>
                   ))
                 ) : (
-                  <p className="text-sm text-muted-foreground">No locations assigned</p>
+                  <p className="text-sm text-muted-foreground">No {locationPlural.toLowerCase()} assigned</p>
                 )}
               </div>
             </div>
@@ -653,7 +659,7 @@ export default function CoachDetail() {
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-card rounded-xl border border-border p-4 shadow-card text-center">
                 <p className="text-3xl font-bold text-foreground">{totalSessions}</p>
-                <p className="text-sm text-muted-foreground">Total Sessions</p>
+                <p className="text-sm text-muted-foreground">Total {sessionPlural}</p>
               </div>
               <div className="bg-card rounded-xl border border-success/30 p-4 shadow-card text-center">
                 <p className="text-3xl font-bold text-success">{attendanceRate}%</p>
@@ -665,7 +671,7 @@ export default function CoachDetail() {
               </div>
               <div className="bg-card rounded-xl border border-destructive/30 p-4 shadow-card text-center">
                 <p className="text-3xl font-bold text-destructive">{missed}</p>
-                <p className="text-sm text-muted-foreground">Missed Sessions</p>
+                <p className="text-sm text-muted-foreground">Missed {sessionPlural}</p>
               </div>
             </div>
 
@@ -738,7 +744,7 @@ export default function CoachDetail() {
               ) : (
                 <div className="text-center py-8">
                   <Calendar className="w-10 h-10 text-muted-foreground/30 mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground">No upcoming sessions</p>
+                  <p className="text-sm text-muted-foreground">No upcoming {sessionPlural.toLowerCase()}</p>
                 </div>
               )}
             </div>
