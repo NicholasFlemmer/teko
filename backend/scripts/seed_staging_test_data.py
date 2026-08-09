@@ -48,12 +48,14 @@ ORGS = [
         'org_id': 'test-org-a',
         'org_name': 'Test Org A',
         'label': 'Org A',
+        'type': 'sports',
         'phones': ('+10000000001', '+10000000003'),
     },
     {
         'org_id': 'test-org-b',
         'org_name': 'Test Org B',
         'label': 'Org B',
+        'type': 'ngo',
         'phones': ('+10000000002', '+10000000004'),
     },
 ]
@@ -118,7 +120,7 @@ def _seed_org(db, org_cfg):
     org_ref.set({
         'name': org_cfg['org_name'],
         'slug': org_id,
-        'type': 'test',
+        'type': org_cfg['type'],
         'is_active': True,
         'created_at': now,
     })
