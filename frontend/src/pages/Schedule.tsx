@@ -78,6 +78,13 @@ type ViewMode = "month" | "week" | "day";
 
 export default function Schedule() {
   const sessionPlural = useTerm("session_plural");
+  const sessionSingular = useTerm("session_singular");
+  const coachSingular = useTerm("coach_singular");
+  const coachPlural = useTerm("coach_plural");
+  const teamSingular = useTerm("team_singular");
+  const teamPlural = useTerm("team_plural");
+  const locationSingular = useTerm("location_singular");
+  const locationPlural = useTerm("location_plural");
   const { toast } = useToast();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<ViewMode>("month");
@@ -128,14 +135,14 @@ export default function Schedule() {
       ? raw.coach_ids
       : raw.coach_id ? [raw.coach_id] : [];
     const coachNames = coachIds
-      .map((id: string) => coachMap[id] || "Unknown Coach")
+      .map((id: string) => coachMap[id] || `Unknown ${coachSingular}`)
       .join(", ") || "Unassigned";
 
     const teamIds: string[] = raw.team_ids && raw.team_ids.length > 0
       ? raw.team_ids
       : raw.team_id ? [raw.team_id] : [];
     const teamNames = teamIds.length > 0
-      ? teamIds.map((id: string) => teamMap[id] || "Unknown Team").join(", ")
+      ? teamIds.map((id: string) => teamMap[id] || `Unknown ${teamSingular}`).join(", ")
       : "Unassigned";
 
     return {
@@ -145,7 +152,7 @@ export default function Schedule() {
       coachIds,
       team: teamNames,
       teamIds,
-      location: locationMap[raw.location_id] || raw.address || (raw.location_id ? "Unknown Location" : "No Location"),
+      location: locationMap[raw.location_id] || raw.address || (raw.location_id ? `Unknown ${locationSingular}` : `No ${locationSingular}`),
       time: raw.start_time ? raw.start_time.slice(0, 5) : "",
       endTime: raw.end_time ? raw.end_time.slice(0, 5) : undefined,
       type: raw.type || "practice",
@@ -171,12 +178,12 @@ export default function Schedule() {
           teamsAPI.getAll(),
           locationsAPI.getAll(),
         ]);
-        if (coachRes.coaches) setCoachOptions(coachRes.coaches.map((c: any) => ({ id: c.id, name: c.name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || 'Unknown Coach' })));
+        if (coachRes.coaches) setCoachOptions(coachRes.coaches.map((c: any) => ({ id: c.id, name: c.name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || `Unknown ${coachSingular}` })));
         if (teamRes.teams) setTeamOptions(teamRes.teams.map((t: any) => ({ id: t.id, name: t.name })));
         if (locationRes.locations) setLocationOptions(locationRes.locations.map((l: any) => ({ id: l.id, name: l.name, address: l.address })));
       } catch (err) {
         console.error("Failed to load reference data:", err);
-        toast({ title: "Error", description: "Failed to load coaches, teams, or locations.", variant: "destructive" });
+        toast({ title: "Error", description: `Failed to load ${coachPlural.toLowerCase()}, ${teamPlural.toLowerCase()}, or ${locationPlural.toLowerCase()}.`, variant: "destructive" });
       }
     };
     fetchReferenceData();
@@ -192,7 +199,7 @@ export default function Schedule() {
       }
     } catch (err) {
       console.error("Failed to load sessions:", err);
-      toast({ title: "Error", description: "Failed to load sessions.", variant: "destructive" });
+      toast({ title: "Error", description: `Failed to load ${sessionPlural.toLowerCase()}.`, variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -281,13 +288,13 @@ export default function Schedule() {
   const handleDeleteSession = async (sessionId: number, scope?: 'single' | 'future' | 'all') => {
     try {
       await sessionsAPI.delete(sessionId.toString(), scope);
-      toast({ title: "Session deleted", description: scope && scope !== 'single' ? `Recurring sessions deleted (${scope}).` : "The session has been removed." });
+      toast({ title: `${sessionSingular} deleted`, description: scope && scope !== 'single' ? `Recurring ${sessionPlural.toLowerCase()} deleted (${scope}).` : `The ${sessionSingular.toLowerCase()} has been removed.` });
       setIsDetailModalOpen(false);
       setSelectedSession(null);
       fetchSessions();
     } catch (err) {
       console.error("Failed to delete session:", err);
-      toast({ title: "Error", description: "Failed to delete session.", variant: "destructive" });
+      toast({ title: "Error", description: `Failed to delete ${sessionSingular.toLowerCase()}.`, variant: "destructive" });
     }
   };
 
@@ -332,7 +339,7 @@ export default function Schedule() {
           </div>
           <Button onClick={() => setIsCreateModalOpen(true)} className="gap-2">
             <Plus className="w-4 h-4" />
-            New Session
+            New {sessionSingular}
           </Button>
         </div>
 
@@ -349,10 +356,10 @@ export default function Schedule() {
         <div className="flex flex-wrap items-center gap-3">
           <Select value={filterCoach} onValueChange={setFilterCoach}>
             <SelectTrigger className="w-[160px] bg-card">
-              <SelectValue placeholder="All Coaches" />
+              <SelectValue placeholder={`All ${coachPlural}`} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Coaches</SelectItem>
+              <SelectItem value="all">All {coachPlural}</SelectItem>
               {coaches.map((c) => (
                 <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
               ))}
@@ -361,10 +368,10 @@ export default function Schedule() {
 
           <Select value={filterType} onValueChange={setFilterType}>
             <SelectTrigger className="w-[170px] bg-card">
-              <SelectValue placeholder="All Session Types" />
+              <SelectValue placeholder={`All ${sessionSingular} Types`} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Session Types</SelectItem>
+              <SelectItem value="all">All {sessionSingular} Types</SelectItem>
               {types.map((t) => (
                 <SelectItem key={t} value={t} className="capitalize">{t.charAt(0).toUpperCase() + t.slice(1)}</SelectItem>
               ))}
@@ -373,10 +380,10 @@ export default function Schedule() {
 
           <Select value={filterTeam} onValueChange={setFilterTeam}>
             <SelectTrigger className="w-[180px] bg-card">
-              <SelectValue placeholder="All Teams" />
+              <SelectValue placeholder={`All ${teamPlural}`} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Teams</SelectItem>
+              <SelectItem value="all">All {teamPlural}</SelectItem>
               {teams.map((t) => (
                 <SelectItem key={t.id} value={t.id.toString()}>{t.name}</SelectItem>
               ))}
@@ -385,10 +392,10 @@ export default function Schedule() {
 
           <Select value={filterLocation} onValueChange={setFilterLocation}>
             <SelectTrigger className="w-[170px] bg-card">
-              <SelectValue placeholder="All Locations" />
+              <SelectValue placeholder={`All ${locationPlural}`} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Locations</SelectItem>
+              <SelectItem value="all">All {locationPlural}</SelectItem>
               {locations.map((l) => (
                 <SelectItem key={l} value={l}>{l}</SelectItem>
               ))}
@@ -407,7 +414,7 @@ export default function Schedule() {
         {loading ? (
           <div className="flex items-center justify-center py-24">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            <span className="ml-3 text-muted-foreground">Loading sessions...</span>
+            <span className="ml-3 text-muted-foreground">Loading {sessionPlural.toLowerCase()}...</span>
           </div>
         ) : (
         /* Main content area */
@@ -418,12 +425,12 @@ export default function Schedule() {
               /* ---- LIST VIEW when filtering ---- */
               <div>
                 <h2 className="text-lg font-semibold text-foreground mb-4">
-                  Filtered Sessions ({filteredSessions.length})
+                  Filtered {sessionPlural} ({filteredSessions.length})
                 </h2>
                 {filteredSessions.length === 0 ? (
                   <div className="text-center py-12">
                     <CalendarIcon className="w-10 h-10 text-muted-foreground/30 mx-auto mb-2" />
-                    <p className="text-sm text-muted-foreground">No sessions match the selected filters</p>
+                    <p className="text-sm text-muted-foreground">No {sessionPlural.toLowerCase()} match the selected filters</p>
                   </div>
                 ) : (
                   <div className="space-y-6">
@@ -457,7 +464,7 @@ export default function Schedule() {
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2">
                                   <p className="text-sm font-medium text-foreground truncate">{session.team}</p>
-                                  {session.recurrence_group_id && <Repeat className="w-3 h-3 text-muted-foreground shrink-0" title="Recurring session" />}
+                                  {session.recurrence_group_id && <Repeat className="w-3 h-3 text-muted-foreground shrink-0" title={`Recurring ${sessionSingular.toLowerCase()}`} />}
                                   <span className={cn(
                                     "px-2 py-0.5 rounded-full text-xs font-medium capitalize",
                                     session.type === "match"
@@ -610,7 +617,7 @@ export default function Schedule() {
                               {format(day, "EEEE, MMM d")}
                             </h4>
                             {daySessions.length === 0 ? (
-                              <p className="text-xs text-muted-foreground">No sessions</p>
+                              <p className="text-xs text-muted-foreground">No {sessionPlural.toLowerCase()}</p>
                             ) : (
                               <div className="space-y-1.5">
                                 {daySessions.map((session) => (
@@ -627,7 +634,7 @@ export default function Schedule() {
                                     <div className="flex-1 min-w-0">
                                       <div className="flex items-center gap-1.5">
                                         <p className="text-sm text-foreground truncate">{session.team}</p>
-                                        {session.recurrence_group_id && <Repeat className="w-3 h-3 text-muted-foreground shrink-0" title="Recurring session" />}
+                                        {session.recurrence_group_id && <Repeat className="w-3 h-3 text-muted-foreground shrink-0" title={`Recurring ${sessionSingular.toLowerCase()}`} />}
                                       </div>
                                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                         <span className="flex items-center gap-1"><User className="w-3 h-3" />{session.coach}</span>
@@ -653,7 +660,7 @@ export default function Schedule() {
                       {daySessions.length === 0 ? (
                         <div className="text-center py-12">
                           <CalendarIcon className="w-10 h-10 text-muted-foreground/30 mx-auto mb-2" />
-                          <p className="text-sm text-muted-foreground">No sessions on this day</p>
+                          <p className="text-sm text-muted-foreground">No {sessionPlural.toLowerCase()} on this day</p>
                         </div>
                       ) : (
                         <div className="space-y-2">
@@ -674,7 +681,7 @@ export default function Schedule() {
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2">
                                   <p className="text-sm font-medium text-foreground">{session.team}</p>
-                                  {session.recurrence_group_id && <Repeat className="w-3 h-3 text-muted-foreground shrink-0" title="Recurring session" />}
+                                  {session.recurrence_group_id && <Repeat className="w-3 h-3 text-muted-foreground shrink-0" title={`Recurring ${sessionSingular.toLowerCase()}`} />}
                                   <span className={cn(
                                     "px-2 py-0.5 rounded-full text-xs font-medium capitalize",
                                     session.type === "match"
@@ -728,7 +735,7 @@ export default function Schedule() {
               ) : (
                 <div className="text-center py-8">
                   <CalendarIcon className="w-10 h-10 text-muted-foreground/30 mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground">No upcoming sessions</p>
+                  <p className="text-sm text-muted-foreground">No upcoming {sessionPlural.toLowerCase()}</p>
                 </div>
               )}
             </div>

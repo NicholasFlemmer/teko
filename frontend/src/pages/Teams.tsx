@@ -15,6 +15,10 @@ const TEAM_COLORS = [
 
 export default function Teams() {
   const teamPlural = useTerm("team_plural");
+  const teamSingular = useTerm("team_singular");
+  const locationSingular = useTerm("location_singular");
+  const playerPlural = useTerm("player_plural");
+  const coachPlural = useTerm("coach_plural");
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -41,7 +45,7 @@ export default function Teams() {
       setCoaches(coachesRes.coaches || []);
     } catch (err: any) {
       console.error("Failed to fetch teams data:", err);
-      setError(err.message || "Failed to load teams. Please try again.");
+      setError(err.message || `Failed to load ${teamPlural.toLowerCase()}. Please try again.`);
     } finally {
       setLoading(false);
     }
@@ -53,7 +57,7 @@ export default function Teams() {
 
   const getLocationName = (locationId: string) => {
     const loc = locations.find((l) => l.id === locationId);
-    return loc?.name || "No location";
+    return loc?.name || `No ${locationSingular.toLowerCase()}`;
   };
 
   const getCoachNames = (coachIds: string[] = []) => {
@@ -106,14 +110,14 @@ export default function Teams() {
           </div>
           <Button className="gap-2" onClick={() => setIsAddModalOpen(true)}>
             <Plus className="w-4 h-4" />
-            Add Team
+            Add {teamSingular}
           </Button>
         </div>
 
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
-            placeholder="Search teams by name, age group, or location..."
+            placeholder={`Search ${teamPlural.toLowerCase()} by name, age group, or location...`}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10 bg-card"
@@ -123,7 +127,7 @@ export default function Teams() {
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-            <span className="ml-2 text-muted-foreground">Loading teams...</span>
+            <span className="ml-2 text-muted-foreground">Loading {teamPlural.toLowerCase()}...</span>
           </div>
         ) : error ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -155,11 +159,11 @@ export default function Teams() {
                   </div>
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <GraduationCap className="w-4 h-4 flex-shrink-0" />
-                    <span>{team.playerCount} players</span>
+                    <span>{team.playerCount} {playerPlural.toLowerCase()}</span>
                   </div>
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Users className="w-4 h-4 flex-shrink-0" />
-                    <span>{team.coaches.length > 0 ? team.coaches.join(", ") : "No coaches"}</span>
+                    <span>{team.coaches.length > 0 ? team.coaches.join(", ") : `No ${coachPlural.toLowerCase()}`}</span>
                   </div>
                 </div>
 
@@ -173,7 +177,7 @@ export default function Teams() {
 
         {!loading && filteredTeams.length === 0 && (
           <div className="text-center py-12">
-            <p className="text-muted-foreground">No teams found</p>
+            <p className="text-muted-foreground">No {teamPlural.toLowerCase()} found</p>
           </div>
         )}
       </div>

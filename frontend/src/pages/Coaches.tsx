@@ -41,6 +41,7 @@ interface CoachDisplay {
 
 export default function Coaches() {
   const coachPlural = useTerm("coach_plural");
+  const coachSingular = useTerm("coach_singular");
   const navigate = useNavigate();
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
@@ -74,7 +75,7 @@ export default function Coaches() {
         setCoaches(mapped);
       }
     } catch (err: any) {
-      setError(err.message || "Failed to load coaches");
+      setError(err.message || `Failed to load ${coachPlural.toLowerCase()}`);
     } finally {
       setLoading(false);
     }
@@ -100,7 +101,7 @@ export default function Coaches() {
       await fetchCoaches();
     } catch (err: any) {
       console.error("Failed to delete coach:", err);
-      toast({ title: "Delete failed", description: err.message || "Failed to delete coach.", variant: "destructive" });
+      toast({ title: "Delete failed", description: err.message || `Failed to delete ${coachSingular.toLowerCase()}.`, variant: "destructive" });
     } finally {
       setDeleting(false);
     }
@@ -123,7 +124,7 @@ export default function Coaches() {
           </div>
           <Button onClick={() => setIsAddModalOpen(true)} className="gap-2">
             <Plus className="w-4 h-4" />
-            Add Coach
+            Add {coachSingular}
           </Button>
         </div>
 
@@ -131,7 +132,7 @@ export default function Coaches() {
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
-            placeholder="Search coaches by name, email, or phone..."
+            placeholder={`Search ${coachPlural.toLowerCase()} by name, email, or phone...`}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10 bg-card"
@@ -183,7 +184,7 @@ export default function Coaches() {
                   {/* Info */}
                   <div className="flex-1 min-w-0">
                     <h3 className="font-semibold text-foreground">{coach.name}</h3>
-                    <span className="badge-coach mt-1 inline-block">Coach</span>
+                    <span className="badge-coach mt-1 inline-block">{coachSingular}</span>
 
                     <div className="mt-4 space-y-2">
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -219,7 +220,7 @@ export default function Coaches() {
 
         {!loading && !error && filteredCoaches.length === 0 && (
           <div className="text-center py-12">
-            <p className="text-muted-foreground">No coaches found</p>
+            <p className="text-muted-foreground">No {coachPlural.toLowerCase()} found</p>
           </div>
         )}
       </div>
@@ -233,9 +234,9 @@ export default function Coaches() {
       <AlertDialog open={deleteCoachId !== null} onOpenChange={() => setDeleteCoachId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Coach?</AlertDialogTitle>
+            <AlertDialogTitle>Delete {coachSingular}?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will remove the coach from your team. This action cannot be undone.
+              This will remove the {coachSingular.toLowerCase()} from your team. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
