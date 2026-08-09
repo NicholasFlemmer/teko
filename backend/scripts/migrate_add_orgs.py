@@ -32,6 +32,7 @@ COLLECTIONS = [
     'sessions',
     'broadcasts',
     'content',
+    'content_urls',
     'reminders',
     'admin_users',
 ]
