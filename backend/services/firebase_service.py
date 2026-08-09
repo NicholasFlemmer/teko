@@ -929,7 +929,10 @@ class FirebaseService:
     def create_organisation(cls, data):
         """Create a new organisation document.
 
-        Fields: name, slug, type, terminology, is_active, created_at
+        Fields: name, slug, type, terminology, ai_persona_prompt, is_active,
+        created_at. ai_persona_prompt is optional — when empty/absent, the
+        AI system prompt falls back to the default for the org's type (see
+        ConversationService.get_ai_persona_prompt).
         """
         db = cls.get_db()
         data['created_at'] = firestore.SERVER_TIMESTAMP

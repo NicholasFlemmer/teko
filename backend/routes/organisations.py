@@ -61,7 +61,7 @@ def get_organisation(current_user, org_id):
 @organisations_bp.route('/<org_id>', methods=['PUT'])
 @token_required
 def update_organisation(current_user, org_id):
-    """Update an organisation's name, type and/or terminology."""
+    """Update an organisation's name, type, terminology and/or ai_persona_prompt."""
     try:
         data = request.get_json()
         if not data:
@@ -75,7 +75,7 @@ def update_organisation(current_user, org_id):
             }), 404
 
         update_data = {}
-        allowed_fields = ['name', 'type', 'terminology']
+        allowed_fields = ['name', 'type', 'terminology', 'ai_persona_prompt']
         for field in allowed_fields:
             if field in data:
                 update_data[field] = data[field]

@@ -19,6 +19,9 @@ export interface Organisation {
   slug: string;
   type: OrganisationType;
   terminology: Terminology;
+  // Optional override for the AI system prompt. When empty/unset, the
+  // backend falls back to a default prompt for the org's type.
+  ai_persona_prompt?: string;
   created_at?: any;
   is_active: boolean;
 }
