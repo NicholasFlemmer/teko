@@ -11,6 +11,7 @@ import { useRefreshTerminology } from "@/contexts/TerminologyContext";
 import { organisationsAPI } from "@/services/api";
 import {
   DEFAULT_TERMINOLOGY,
+  getDefaultTerminology,
   type Organisation,
   type OrganisationType,
   type Terminology,
@@ -59,7 +60,12 @@ export default function OrgSettings() {
           organisationsAPI.getTerminology(orgId),
         ]);
         setOrg(orgRes.organisation);
-        setTerminology({ ...DEFAULT_TERMINOLOGY, ...termRes.terminology });
+        // Saved terminology takes priority; any missing key falls back to
+        // this org's type-based default rather than the sports default.
+        setTerminology({
+          ...getDefaultTerminology(orgRes.organisation.type),
+          ...termRes.terminology,
+        });
       } catch (err) {
         toast({
           title: "Failed to load settings",

@@ -885,18 +885,63 @@ class FirebaseService:
     # =========================================================================
     # Organisation operations (collection: 'organisations')
     # =========================================================================
-    DEFAULT_TERMINOLOGY = {
-        "coach_singular": "Coach",
-        "coach_plural": "Coaches",
-        "player_singular": "Player",
-        "player_plural": "Players",
-        "team_singular": "Team",
-        "team_plural": "Teams",
-        "session_singular": "Session",
-        "session_plural": "Sessions",
-        "location_singular": "Location",
-        "location_plural": "Locations",
+    # Default terminology per org type, mirrors DEFAULT_TERMINOLOGY_BY_TYPE on
+    # the frontend (frontend/src/types/Organisation.ts) and the
+    # DEFAULT_AI_PERSONA_PROMPTS pattern in ConversationService — each org
+    # type gets labels that don't read as sports-specific.
+    DEFAULT_TERMINOLOGY_BY_TYPE = {
+        "sports": {
+            "coach_singular": "Coach",
+            "coach_plural": "Coaches",
+            "player_singular": "Player",
+            "player_plural": "Players",
+            "team_singular": "Team",
+            "team_plural": "Teams",
+            "session_singular": "Session",
+            "session_plural": "Sessions",
+            "location_singular": "Location",
+            "location_plural": "Locations",
+        },
+        "ngo": {
+            "coach_singular": "Facilitator",
+            "coach_plural": "Facilitators",
+            "player_singular": "Participant",
+            "player_plural": "Participants",
+            "team_singular": "Group",
+            "team_plural": "Groups",
+            "session_singular": "Session",
+            "session_plural": "Sessions",
+            "location_singular": "Venue",
+            "location_plural": "Venues",
+        },
+        "events": {
+            "coach_singular": "Coach",
+            "coach_plural": "Coaches",
+            "player_singular": "Attendee",
+            "player_plural": "Attendees",
+            "team_singular": "Team",
+            "team_plural": "Teams",
+            "session_singular": "Session",
+            "session_plural": "Sessions",
+            "location_singular": "Venue",
+            "location_plural": "Venues",
+        },
+        "corporate": {
+            "coach_singular": "Facilitator",
+            "coach_plural": "Facilitators",
+            "player_singular": "Participant",
+            "player_plural": "Participants",
+            "team_singular": "Team",
+            "team_plural": "Teams",
+            "session_singular": "Session",
+            "session_plural": "Sessions",
+            "location_singular": "Venue",
+            "location_plural": "Venues",
+        },
     }
+
+    # Final catch-all fallback for a missing/unrecognized org type.
+    DEFAULT_TERMINOLOGY = DEFAULT_TERMINOLOGY_BY_TYPE["sports"]
 
     @classmethod
     def get_organisation(cls, org_id):
@@ -950,15 +995,20 @@ class FirebaseService:
 
     @classmethod
     def get_org_terminology(cls, org_id):
-        """Get just the terminology for an org, falling back to defaults.
+        """Get the terminology for an org, falling back to defaults.
 
-        Any missing keys are filled from DEFAULT_TERMINOLOGY so callers always
-        receive the full set of 10 labels.
+        Priority: saved org terminology > default for the org's type >
+        the sports default as a final catch-all (org missing or type
+        unrecognized). Any key missing from the saved terminology is filled
+        from the applicable default so callers always receive the full set
+        of 10 labels.
         """
         org = cls.get_organisation(org_id)
+        org_type = org.get('type') if org else None
+        type_default = cls.DEFAULT_TERMINOLOGY_BY_TYPE.get(org_type, cls.DEFAULT_TERMINOLOGY)
         if org and org.get('terminology'):
-            return {**cls.DEFAULT_TERMINOLOGY, **org['terminology']}
-        return dict(cls.DEFAULT_TERMINOLOGY)
+            return {**type_default, **org['terminology']}
+        return dict(type_default)
 
     # =========================================================================
     # Settings operations (single document 'app_settings')

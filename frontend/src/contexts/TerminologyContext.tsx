@@ -20,7 +20,12 @@ const TerminologyContext = createContext<TerminologyContextType | null>(null);
 
 export function TerminologyProvider({ children }: { children: ReactNode }) {
   // Default English labels are shown immediately so there is no flash of empty
-  // text while the real terminology loads.
+  // text while the real terminology loads. The org's type isn't known yet at
+  // this point (it's not in the JWT), so this — and the fetch-failure case
+  // below — use the sports catch-all rather than a type-based default. The
+  // normal (successful fetch) path is unaffected: the backend's
+  // get_org_terminology already resolves the org's type-based default and
+  // returns a complete terminology object, which fully overrides this.
   const [terminology, setTerminology] = useState<Terminology>(DEFAULT_TERMINOLOGY);
   const [isLoading, setIsLoading] = useState(true);
   const { user } = useAuth();
@@ -35,7 +40,8 @@ export function TerminologyProvider({ children }: { children: ReactNode }) {
     }
     try {
       const res = await organisationsAPI.getTerminology(orgId);
-      // Merge over defaults so any missing key still resolves to a label.
+      // res.terminology is already complete (backend fills any gap with the
+      // org's type-based default) — this spread just guards missing keys.
       setTerminology({ ...DEFAULT_TERMINOLOGY, ...res.terminology });
     } catch {
       // Keep whatever we have (defaults) if the fetch fails.
