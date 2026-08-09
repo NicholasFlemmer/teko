@@ -162,12 +162,19 @@ export default function Broadcasts() {
     }
   };
 
+  // Mirrors the "custom message fields" render condition below (subject +
+  // message inputs only ever get shown, and thus fillable, in these cases):
+  // email always uses them (no template mode); WhatsApp uses them either
+  // when the user has switched to custom mode, or when there are no
+  // templates to choose from in the first place (messageMode can never
+  // leave its default "template" value then, since the toggle that would
+  // change it is template-gated too).
   const canSend = activeRecipients.length > 0 && !sending && (
-    messageMode === "template"
-      ? !!selectedTemplate
-      : channel === "email"
-        ? subject.trim() && message.trim()  // Email requires both subject and message
-        : message.trim()                    // WhatsApp only requires message
+    channel === "email"
+      ? subject.trim() && message.trim()        // Email requires both subject and message
+      : templates.length > 0 && messageMode === "template"
+        ? !!selectedTemplate                    // WhatsApp template mode requires a selected template
+        : message.trim()                        // WhatsApp custom mode (or no templates loaded) requires a message
   );
 
   const handleSend = async () => {
