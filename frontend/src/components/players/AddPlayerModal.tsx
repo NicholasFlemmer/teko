@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { GraduationCap, X, Loader2 } from "lucide-react";
+import { useTerm } from "@/contexts/TerminologyContext";
 import {
   Dialog,
   DialogContent,
@@ -21,6 +22,8 @@ interface AddPlayerModalProps {
 }
 
 export function AddPlayerModal({ open, onOpenChange, onPlayerAdded }: AddPlayerModalProps) {
+  const playerSingular = useTerm("player_singular");
+  const teamPlural = useTerm("team_plural");
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
@@ -89,7 +92,7 @@ export function AddPlayerModal({ open, onOpenChange, onPlayerAdded }: AddPlayerM
       onPlayerAdded?.();
     } catch (err: any) {
       console.error("Failed to create player:", err);
-      setError(err.message || "Failed to create player");
+      setError(err.message || `Failed to create ${playerSingular.toLowerCase()}`);
     } finally {
       setSubmitting(false);
     }
@@ -107,9 +110,9 @@ export function AddPlayerModal({ open, onOpenChange, onPlayerAdded }: AddPlayerM
               <GraduationCap className="w-5 h-5 text-success" />
             </div>
             <div>
-              <DialogTitle className="text-xl">Add New Player</DialogTitle>
+              <DialogTitle className="text-xl">Add New {playerSingular}</DialogTitle>
               <p className="text-sm text-muted-foreground mt-0.5">
-                Register a new player in the program
+                Register a new {playerSingular.toLowerCase()} in the program
               </p>
             </div>
           </div>
@@ -122,7 +125,7 @@ export function AddPlayerModal({ open, onOpenChange, onPlayerAdded }: AddPlayerM
             )}
             {/* Team Selection */}
             <div className="space-y-2">
-              <Label>Assign to Teams</Label>
+              <Label>Assign to {teamPlural}</Label>
               <div className="border border-border rounded-lg p-3 space-y-2 max-h-32 overflow-y-auto">
                 {teams.map((team) => (
                   <div key={team.id} className="flex items-center gap-2">
@@ -141,7 +144,7 @@ export function AddPlayerModal({ open, onOpenChange, onPlayerAdded }: AddPlayerM
                   </div>
                 ))}
                 {teams.length === 0 && (
-                  <p className="text-sm text-muted-foreground">No teams available</p>
+                  <p className="text-sm text-muted-foreground">No {teamPlural.toLowerCase()} available</p>
                 )}
               </div>
               {selectedTeams.length > 0 && (
@@ -274,7 +277,7 @@ export function AddPlayerModal({ open, onOpenChange, onPlayerAdded }: AddPlayerM
                     Adding...
                   </>
                 ) : (
-                  "Add Player"
+                  `Add ${playerSingular}`
                 )}
               </Button>
               <Button

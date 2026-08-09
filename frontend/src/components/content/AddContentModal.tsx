@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Upload, FileText, FileSpreadsheet, File, Type, Loader2 } from "lucide-react";
+import { useTerm } from "@/contexts/TerminologyContext";
 import {
   Dialog,
   DialogContent,
@@ -39,6 +40,8 @@ const contentTypes = [
 ];
 
 export function AddContentModal({ open, onOpenChange, onAdd }: AddContentModalProps) {
+  const coachSingular = useTerm("coach_singular");
+  const coachPlural = useTerm("coach_plural");
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
@@ -124,7 +127,7 @@ export function AddContentModal({ open, onOpenChange, onAdd }: AddContentModalPr
             <div>
               <DialogTitle className="text-xl">Upload Content</DialogTitle>
               <p className="text-sm text-muted-foreground mt-0.5">
-                Add learning material for coaches
+                Add learning material for {coachPlural.toLowerCase()}
               </p>
             </div>
           </div>
@@ -226,7 +229,7 @@ export function AddContentModal({ open, onOpenChange, onAdd }: AddContentModalPr
           )}
 
           <p className="text-xs text-muted-foreground">
-            This content will be available to the WhatsApp coaching assistant
+            This content will be available to the WhatsApp {coachSingular.toLowerCase()} assistant
           </p>
 
           <div className="flex gap-3 pt-4">

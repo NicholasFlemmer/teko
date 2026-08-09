@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Pencil, Loader2, Repeat } from "lucide-react";
+import { useTerm } from "@/contexts/TerminologyContext";
 import {
   Dialog,
   DialogContent,
@@ -62,6 +63,13 @@ interface EditSessionModalProps {
 }
 
 export function EditSessionModal({ open, onOpenChange, session, coaches, teams, locations, onSuccess }: EditSessionModalProps) {
+  const sessionSingular = useTerm("session_singular");
+  const sessionPlural = useTerm("session_plural");
+  const coachSingular = useTerm("coach_singular");
+  const coachPlural = useTerm("coach_plural");
+  const teamSingular = useTerm("team_singular");
+  const teamPlural = useTerm("team_plural");
+  const locationSingular = useTerm("location_singular");
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
   const [editScope, setEditScope] = useState<'single' | 'future' | 'all'>('single');
@@ -130,13 +138,13 @@ export function EditSessionModal({ open, onOpenChange, session, coaches, teams, 
       await sessionsAPI.update(session.id, payload, scope);
 
       const desc = scope !== 'single'
-        ? `Recurring sessions updated (${scope}).`
-        : "Session updated successfully.";
-      toast({ title: "Session updated", description: desc });
+        ? `Recurring ${sessionPlural.toLowerCase()} updated (${scope}).`
+        : `${sessionSingular} updated successfully.`;
+      toast({ title: `${sessionSingular} updated`, description: desc });
       onOpenChange(false);
       onSuccess();
     } catch (err: any) {
-      toast({ title: "Error", description: err.message || "Failed to update session.", variant: "destructive" });
+      toast({ title: "Error", description: err.message || `Failed to update ${sessionSingular.toLowerCase()}.`, variant: "destructive" });
     } finally {
       setSubmitting(false);
     }
@@ -153,9 +161,9 @@ export function EditSessionModal({ open, onOpenChange, session, coaches, teams, 
               <Pencil className="w-5 h-5 text-primary" />
             </div>
             <div>
-              <DialogTitle className="text-xl">Edit Session</DialogTitle>
+              <DialogTitle className="text-xl">Edit {sessionSingular}</DialogTitle>
               <p className="text-sm text-muted-foreground mt-0.5">
-                Modify session details
+                Modify {sessionSingular.toLowerCase()} details
               </p>
             </div>
           </div>
@@ -167,7 +175,7 @@ export function EditSessionModal({ open, onOpenChange, session, coaches, teams, 
             <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
               <div className="flex items-center gap-2 text-sm font-medium">
                 <Repeat className="w-4 h-4 text-muted-foreground" />
-                <span>Recurring session — apply changes to:</span>
+                <span>Recurring {sessionSingular.toLowerCase()} — apply changes to:</span>
               </div>
               <div className="space-y-1 pl-6">
                 {(["single", "future", "all"] as const).map((scope) => (
@@ -179,9 +187,9 @@ export function EditSessionModal({ open, onOpenChange, session, coaches, teams, 
                       onChange={() => setEditScope(scope)}
                       className="rounded-full"
                     />
-                    {scope === "single" && "Only this session"}
-                    {scope === "future" && "This and all future sessions"}
-                    {scope === "all" && "All sessions in this series"}
+                    {scope === "single" && `Only this ${sessionSingular.toLowerCase()}`}
+                    {scope === "future" && `This and all future ${sessionPlural.toLowerCase()}`}
+                    {scope === "all" && `All ${sessionPlural.toLowerCase()} in this series`}
                   </label>
                 ))}
               </div>
@@ -190,7 +198,7 @@ export function EditSessionModal({ open, onOpenChange, session, coaches, teams, 
 
           {/* Teams (multi) */}
           <div className="space-y-2">
-            <Label>Team(s)</Label>
+            <Label>{teamPlural}</Label>
             <div className="border border-border rounded-md p-2 max-h-[140px] overflow-y-auto space-y-1">
               {teams.map((team) => {
                 const isSelected = formData.teams.includes(team.id.toString());
@@ -218,19 +226,19 @@ export function EditSessionModal({ open, onOpenChange, session, coaches, teams, 
                 );
               })}
               {teams.length === 0 && (
-                <p className="text-xs text-muted-foreground px-2 py-1">No teams available</p>
+                <p className="text-xs text-muted-foreground px-2 py-1">No {teamPlural.toLowerCase()} available</p>
               )}
             </div>
             {formData.teams.length > 0 && (
               <p className="text-xs text-muted-foreground">
-                {formData.teams.length} team{formData.teams.length > 1 ? "s" : ""} selected
+                {formData.teams.length} {formData.teams.length === 1 ? teamSingular.toLowerCase() : teamPlural.toLowerCase()} selected
               </p>
             )}
           </div>
 
           {/* Session Type */}
           <div className="space-y-2">
-            <Label>Session Type</Label>
+            <Label>{sessionSingular} Type</Label>
             <div className="flex gap-2">
               {[
                 { id: "practice", name: "Practice" },
@@ -254,7 +262,7 @@ export function EditSessionModal({ open, onOpenChange, session, coaches, teams, 
 
           {/* Coaches */}
           <div className="space-y-2">
-            <Label>Coach(es)</Label>
+            <Label>{coachPlural}</Label>
             <div className="border border-border rounded-md p-2 max-h-[140px] overflow-y-auto space-y-1">
               {coaches.map((coach) => {
                 const isSelected = formData.coaches.includes(coach.id.toString());
@@ -282,25 +290,25 @@ export function EditSessionModal({ open, onOpenChange, session, coaches, teams, 
                 );
               })}
               {coaches.length === 0 && (
-                <p className="text-xs text-muted-foreground px-2 py-1">No coaches available</p>
+                <p className="text-xs text-muted-foreground px-2 py-1">No {coachPlural.toLowerCase()} available</p>
               )}
             </div>
             {formData.coaches.length > 0 && (
               <p className="text-xs text-muted-foreground">
-                {formData.coaches.length} coach{formData.coaches.length > 1 ? "es" : ""} selected
+                {formData.coaches.length} {formData.coaches.length === 1 ? coachSingular.toLowerCase() : coachPlural.toLowerCase()} selected
               </p>
             )}
           </div>
 
           {/* Location */}
           <div className="space-y-2">
-            <Label>Location</Label>
+            <Label>{locationSingular}</Label>
             <Select
               value={formData.location}
               onValueChange={(value) => setFormData(prev => ({ ...prev, location: value }))}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select a location" />
+                <SelectValue placeholder={`Select a ${locationSingular.toLowerCase()}`} />
               </SelectTrigger>
               <SelectContent>
                 {locations.map((location) => (
@@ -346,7 +354,7 @@ export function EditSessionModal({ open, onOpenChange, session, coaches, teams, 
           <div className="space-y-2">
             <Label>Notes (Optional)</Label>
             <Textarea
-              placeholder="Any additional notes for this session..."
+              placeholder={`Any additional notes for this ${sessionSingular.toLowerCase()}...`}
               value={formData.notes}
               onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
               rows={2}

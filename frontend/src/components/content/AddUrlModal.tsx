@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, Loader2 } from "lucide-react";
+import { useTerm } from "@/contexts/TerminologyContext";
 import {
   Dialog,
   DialogContent,
@@ -30,6 +31,8 @@ interface AddUrlModalProps {
 }
 
 export function AddUrlModal({ open, onOpenChange, onAdd, editItem, onSave }: AddUrlModalProps) {
+  const coachSingular = useTerm("coach_singular");
+  const coachPlural = useTerm("coach_plural");
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
@@ -94,7 +97,7 @@ export function AddUrlModal({ open, onOpenChange, onAdd, editItem, onSave }: Add
             <div>
               <DialogTitle className="text-xl">{editItem ? "Edit URL" : "Add URL"}</DialogTitle>
               <p className="text-sm text-muted-foreground mt-0.5">
-                Add a URL the AI assistant can share with coaches
+                Add a URL the AI assistant can share with {coachPlural.toLowerCase()}
               </p>
             </div>
           </div>
@@ -139,13 +142,13 @@ export function AddUrlModal({ open, onOpenChange, onAdd, editItem, onSave }: Add
             <Label htmlFor="url-instructions">AI Instructions</Label>
             <Textarea
               id="url-instructions"
-              placeholder="When should the AI share this URL? e.g. 'Share when a coach asks about first aid procedures'"
+              placeholder={`When should the AI share this URL? e.g. 'Share when a ${coachSingular.toLowerCase()} asks about first aid procedures'`}
               value={formData.instructions}
               onChange={(e) => setFormData({ ...formData, instructions: e.target.value })}
               rows={3}
             />
             <p className="text-xs text-muted-foreground">
-              Tell the AI when and how to share this URL with coaches
+              Tell the AI when and how to share this URL with {coachPlural.toLowerCase()}
             </p>
           </div>
 

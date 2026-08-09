@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { MapPin, User, Calendar, Clock, FileText, Shield, Trash2, Loader2, Bell, Repeat, Pencil, XCircle, CheckCircle2, Timer, Camera } from "lucide-react";
 import { sessionsAPI, uploadsAPI } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
+import { useTerm } from "@/contexts/TerminologyContext";
 
 interface SessionPhoto {
   id: string;
@@ -91,6 +92,11 @@ const statusBadgeClass: Record<string, string> = {
 };
 
 export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEdit, onStatusChange }: SessionDetailModalProps) {
+  const sessionSingular = useTerm("session_singular");
+  const sessionPlural = useTerm("session_plural");
+  const teamSingular = useTerm("team_singular");
+  const coachSingular = useTerm("coach_singular");
+  const locationSingular = useTerm("location_singular");
   const { toast } = useToast();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
@@ -170,12 +176,12 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
     setCancelling(true);
     try {
       await sessionsAPI.cancel(session.id.toString(), cancelReason);
-      toast({ title: "Session cancelled", description: `Session on ${session.date} has been cancelled.` });
+      toast({ title: `${sessionSingular} cancelled`, description: `${sessionSingular} on ${session.date} has been cancelled.` });
       setShowCancelConfirm(false);
       onStatusChange?.();
       onOpenChange(false);
     } catch (err: any) {
-      toast({ title: "Cancel failed", description: err.message || "Failed to cancel session.", variant: "destructive" });
+      toast({ title: "Cancel failed", description: err.message || `Failed to cancel ${sessionSingular.toLowerCase()}.`, variant: "destructive" });
     } finally {
       setCancelling(false);
     }
@@ -206,7 +212,7 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-3">
-              <span>Session Details</span>
+              <span>{sessionSingular} Details</span>
               <Badge
                 variant="outline"
                 className={
@@ -225,7 +231,7 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
             <div className="flex items-start gap-3">
               <Shield className="w-5 h-5 text-muted-foreground mt-0.5" />
               <div>
-                <p className="text-sm text-muted-foreground">Team</p>
+                <p className="text-sm text-muted-foreground">{teamSingular}</p>
                 <p className="font-medium text-foreground">{session.team}</p>
               </div>
             </div>
@@ -234,7 +240,7 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
             <div className="flex items-start gap-3">
               <User className="w-5 h-5 text-muted-foreground mt-0.5" />
               <div>
-                <p className="text-sm text-muted-foreground">Coach</p>
+                <p className="text-sm text-muted-foreground">{coachSingular}</p>
                 <p className="font-medium text-foreground">{session.coach}</p>
               </div>
             </div>
@@ -243,7 +249,7 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
             <div className="flex items-start gap-3">
               <MapPin className="w-5 h-5 text-muted-foreground mt-0.5" />
               <div>
-                <p className="text-sm text-muted-foreground">Location</p>
+                <p className="text-sm text-muted-foreground">{locationSingular}</p>
                 <p className="font-medium text-foreground">{session.location}</p>
               </div>
             </div>
@@ -373,7 +379,7 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
                       <a href={p.url} target="_blank" rel="noreferrer">
                         <img
                           src={p.url}
-                          alt="Session"
+                          alt={sessionSingular}
                           className="aspect-square w-full rounded-md object-cover border border-border"
                         />
                       </a>
@@ -401,7 +407,7 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
                   onClick={() => onEdit(session)}
                 >
                   <Pencil className="w-4 h-4" />
-                  Edit Session
+                  Edit {sessionSingular}
                 </Button>
               )}
               <Button
@@ -422,7 +428,7 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
                   onClick={() => setShowCancelConfirm(true)}
                 >
                   <XCircle className="w-4 h-4" />
-                  Cancel Session
+                  Cancel {sessionSingular}
                 </Button>
               )}
               {onDelete && (
@@ -433,7 +439,7 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
                   onClick={() => setShowDeleteConfirm(true)}
                 >
                   <Trash2 className="w-4 h-4" />
-                  Delete Session
+                  Delete {sessionSingular}
                 </Button>
               )}
             </div>
@@ -445,9 +451,9 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
       <AlertDialog open={showCancelConfirm} onOpenChange={setShowCancelConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Cancel Session?</AlertDialogTitle>
+            <AlertDialogTitle>Cancel {sessionSingular}?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will mark the session for {session.team} on {session.date} as cancelled.
+              This will mark the {sessionSingular.toLowerCase()} for {session.team} on {session.date} as cancelled.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="py-2">
@@ -468,7 +474,7 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
               className="bg-orange-600 text-white hover:bg-orange-700"
             >
               {cancelling && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-              {cancelling ? "Cancelling..." : "Cancel Session"}
+              {cancelling ? "Cancelling..." : `Cancel ${sessionSingular}`}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -478,15 +484,15 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Session?</AlertDialogTitle>
+            <AlertDialogTitle>Delete {sessionSingular}?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete the session for {session.team} on {session.date} at {session.time}. This action cannot be undone.
+              This will permanently delete the {sessionSingular.toLowerCase()} for {session.team} on {session.date} at {session.time}. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
           {session.recurrence_group_id && (
             <div className="space-y-2 py-2">
-              <p className="text-sm font-medium">This is a recurring session. Delete:</p>
+              <p className="text-sm font-medium">This is a recurring {sessionSingular.toLowerCase()}. Delete:</p>
               <div className="space-y-1">
                 {(["single", "future", "all"] as const).map((scope) => (
                   <label key={scope} className="flex items-center gap-2 text-sm cursor-pointer">
@@ -497,9 +503,9 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
                       onChange={() => setDeleteScope(scope)}
                       className="rounded-full"
                     />
-                    {scope === "single" && "Only this session"}
-                    {scope === "future" && "This and all future sessions"}
-                    {scope === "all" && "All sessions in this series"}
+                    {scope === "single" && `Only this ${sessionSingular.toLowerCase()}`}
+                    {scope === "future" && `This and all future ${sessionPlural.toLowerCase()}`}
+                    {scope === "all" && `All ${sessionPlural.toLowerCase()} in this series`}
                   </label>
                 ))}
               </div>

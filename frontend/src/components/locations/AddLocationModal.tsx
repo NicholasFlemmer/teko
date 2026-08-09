@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { MapPin, Loader2 } from "lucide-react";
+import { useTerm } from "@/contexts/TerminologyContext";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +21,8 @@ interface AddLocationModalProps {
 }
 
 export function AddLocationModal({ open, onOpenChange, onLocationAdded }: AddLocationModalProps) {
+  const locationSingular = useTerm("location_singular");
+  const sessionPlural = useTerm("session_plural");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -65,7 +68,7 @@ export function AddLocationModal({ open, onOpenChange, onLocationAdded }: AddLoc
       onLocationAdded?.();
     } catch (err: any) {
       console.error("Failed to create location:", err);
-      setError(err.message || "Failed to create location");
+      setError(err.message || `Failed to create ${locationSingular.toLowerCase()}`);
     } finally {
       setSubmitting(false);
     }
@@ -80,9 +83,9 @@ export function AddLocationModal({ open, onOpenChange, onLocationAdded }: AddLoc
               <MapPin className="w-5 h-5 text-info" />
             </div>
             <div>
-              <DialogTitle className="text-xl">Add New Location</DialogTitle>
+              <DialogTitle className="text-xl">Add New {locationSingular}</DialogTitle>
               <p className="text-sm text-muted-foreground mt-0.5">
-                Add a venue for coaching sessions
+                Add a venue for coaching {sessionPlural.toLowerCase()}
               </p>
             </div>
           </div>
@@ -93,7 +96,7 @@ export function AddLocationModal({ open, onOpenChange, onLocationAdded }: AddLoc
             <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg">{error}</div>
           )}
           <div className="space-y-2">
-            <Label htmlFor="name">Location Name</Label>
+            <Label htmlFor="name">{locationSingular} Name</Label>
             <Input
               id="name"
               placeholder="e.g. Main Hall"
@@ -135,7 +138,7 @@ export function AddLocationModal({ open, onOpenChange, onLocationAdded }: AddLoc
               <Label>Map Preview</Label>
               <div className="rounded-lg border border-border overflow-hidden">
                 <iframe
-                  title="Location Preview"
+                  title={`${locationSingular} Preview`}
                   width="100%"
                   height="200"
                   style={{ border: 0 }}
@@ -168,7 +171,7 @@ export function AddLocationModal({ open, onOpenChange, onLocationAdded }: AddLoc
                   Adding...
                 </>
               ) : (
-                "Add Location"
+                `Add ${locationSingular}`
               )}
             </Button>
             <Button
