@@ -165,7 +165,7 @@ export default function CheckIn() {
     <div className="flex min-h-screen items-center justify-center bg-muted/40 px-4 py-8">
       <div className="w-full max-w-sm space-y-6">
         <div className="text-center space-y-2">
-          <img src="/teko-logo.jpeg" alt="Teko" className="h-16 w-auto mx-auto object-contain" />
+          <img src="/favicon.svg" alt="Teko" className="h-16 w-16 mx-auto object-contain" />
           <p className="text-sm text-muted-foreground">Coach Check-in</p>
         </div>
 
