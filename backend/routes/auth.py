@@ -409,10 +409,11 @@ def verify_token(current_user):
 @auth_bp.route('/refresh', methods=['POST'])
 @token_required
 def refresh_token(current_user):
-    """Refresh JWT token, preserving the user's current role."""
+    """Refresh JWT token, preserving the user's current role and org_id."""
     token = jwt.encode({
         'username': current_user,
         'role': getattr(g, 'current_user_role', 'admin'),
+        'org_id': getattr(g, 'current_user_org_id', None),
         'exp': datetime.now(timezone.utc) + timedelta(hours=Config.JWT_EXPIRY_HOURS)
     }, Config.SECRET_KEY, algorithm="HS256")
 

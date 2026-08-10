@@ -26,6 +26,8 @@ const PLAYER_COLORS = [
 
 export default function Players() {
   const playerPlural = useTerm("player_plural");
+  const playerSingular = useTerm("player_singular");
+  const teamPlural = useTerm("team_plural");
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -48,7 +50,7 @@ export default function Players() {
       setTeams(teamsRes.teams || []);
     } catch (err: any) {
       console.error("Failed to fetch players:", err);
-      setError(err.message || "Failed to load players. Please try again.");
+      setError(err.message || `Failed to load ${playerPlural.toLowerCase()}. Please try again.`);
     } finally {
       setLoading(false);
     }
@@ -112,7 +114,7 @@ export default function Players() {
             </Button>
             <Button className="gap-2" onClick={() => setIsAddModalOpen(true)}>
               <Plus className="w-4 h-4" />
-              Add Player
+              Add {playerSingular}
             </Button>
           </div>
         </div>
@@ -121,7 +123,7 @@ export default function Players() {
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
-              placeholder="Search players by name or team..."
+              placeholder={`Search ${playerPlural.toLowerCase()} by name or team...`}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-10 bg-card"
@@ -141,7 +143,7 @@ export default function Players() {
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-            <span className="ml-2 text-muted-foreground">Loading players...</span>
+            <span className="ml-2 text-muted-foreground">Loading {playerPlural.toLowerCase()}...</span>
           </div>
         ) : error ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -153,8 +155,8 @@ export default function Players() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Player</TableHead>
-                  <TableHead>Teams</TableHead>
+                  <TableHead>{playerSingular}</TableHead>
+                  <TableHead>{teamPlural}</TableHead>
                   <TableHead>Age</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -173,11 +175,11 @@ export default function Players() {
                         </div>
                         <div>
                           <p className="font-medium">{player.name}</p>
-                          <span className="badge-student text-xs">Player</span>
+                          <span className="badge-student text-xs">{playerSingular}</span>
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{player.teams.join(", ") || "No teams"}</TableCell>
+                    <TableCell className="text-muted-foreground">{player.teams.join(", ") || `No ${teamPlural.toLowerCase()}`}</TableCell>
                     <TableCell className="text-muted-foreground">{player.ageGroup || "N/A"}</TableCell>
                     <TableCell className="text-right">
                       <Button
@@ -205,14 +207,14 @@ export default function Players() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="font-semibold text-foreground">{player.name}</h3>
-                    <span className="badge-student mt-1 inline-block">Player</span>
+                    <span className="badge-student mt-1 inline-block">{playerSingular}</span>
                   </div>
                 </div>
 
                 <div className="mt-4 space-y-2">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Users className="w-4 h-4 flex-shrink-0" />
-                    <span className="truncate">{player.teams.join(", ") || "No teams"}</span>
+                    <span className="truncate">{player.teams.join(", ") || `No ${teamPlural.toLowerCase()}`}</span>
                   </div>
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <GraduationCap className="w-4 h-4 flex-shrink-0" />
@@ -230,7 +232,7 @@ export default function Players() {
 
         {!loading && filteredPlayers.length === 0 && (
           <div className="text-center py-12">
-            <p className="text-muted-foreground">No players found</p>
+            <p className="text-muted-foreground">No {playerPlural.toLowerCase()} found</p>
           </div>
         )}
       </div>

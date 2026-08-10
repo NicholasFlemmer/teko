@@ -11,6 +11,7 @@ import { useRefreshTerminology } from "@/contexts/TerminologyContext";
 import { organisationsAPI } from "@/services/api";
 import {
   DEFAULT_TERMINOLOGY,
+  getDefaultTerminology,
   type Organisation,
   type OrganisationType,
   type Terminology,
@@ -29,11 +30,11 @@ const TERMINOLOGY_ROWS: {
   singularKey: keyof Terminology;
   pluralKey: keyof Terminology;
 }[] = [
-  { label: "Coach", singularKey: "coach_singular", pluralKey: "coach_plural" },
-  { label: "Player", singularKey: "player_singular", pluralKey: "player_plural" },
-  { label: "Team", singularKey: "team_singular", pluralKey: "team_plural" },
-  { label: "Session", singularKey: "session_singular", pluralKey: "session_plural" },
-  { label: "Location", singularKey: "location_singular", pluralKey: "location_plural" },
+  { label: "Who runs the session", singularKey: "coach_singular", pluralKey: "coach_plural" },
+  { label: "Who takes part", singularKey: "player_singular", pluralKey: "player_plural" },
+  { label: "Group of people", singularKey: "team_singular", pluralKey: "team_plural" },
+  { label: "The activity itself", singularKey: "session_singular", pluralKey: "session_plural" },
+  { label: "Where it happens", singularKey: "location_singular", pluralKey: "location_plural" },
 ];
 
 export default function OrgSettings() {
@@ -59,7 +60,12 @@ export default function OrgSettings() {
           organisationsAPI.getTerminology(orgId),
         ]);
         setOrg(orgRes.organisation);
-        setTerminology({ ...DEFAULT_TERMINOLOGY, ...termRes.terminology });
+        // Saved terminology takes priority; any missing key falls back to
+        // this org's type-based default rather than the sports default.
+        setTerminology({
+          ...getDefaultTerminology(orgRes.organisation.type),
+          ...termRes.terminology,
+        });
       } catch (err) {
         toast({
           title: "Failed to load settings",

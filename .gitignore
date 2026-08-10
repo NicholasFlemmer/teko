@@ -30,6 +30,7 @@ wheels/
 .env.local
 .env.production
 backend/.env
+backend/.env.staging
 frontend/.env
 frontend/.env.local
 frontend/.env.production

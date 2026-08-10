@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import { Users, Camera } from "lucide-react";
+import { useTerm } from "@/contexts/TerminologyContext";
 import {
   Dialog,
   DialogContent,
@@ -19,6 +20,7 @@ interface AddCoachModalProps {
 }
 
 export function AddCoachModal({ open, onOpenChange, onSuccess }: AddCoachModalProps) {
+  const coachSingular = useTerm("coach_singular");
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
@@ -78,7 +80,7 @@ export function AddCoachModal({ open, onOpenChange, onSuccess }: AddCoachModalPr
       onOpenChange(false);
       onSuccess?.();
     } catch (err: any) {
-      setError(err.message || "Failed to add coach");
+      setError(err.message || `Failed to add ${coachSingular.toLowerCase()}`);
     } finally {
       setSubmitting(false);
     }
@@ -124,9 +126,9 @@ export function AddCoachModal({ open, onOpenChange, onSuccess }: AddCoachModalPr
               <Users className="w-5 h-5 text-success" />
             </div>
             <div>
-              <DialogTitle className="text-xl">Add New Coach</DialogTitle>
+              <DialogTitle className="text-xl">Add New {coachSingular}</DialogTitle>
               <p className="text-sm text-muted-foreground mt-0.5">
-                Add a new coach to your team
+                Add a new {coachSingular.toLowerCase()} to your team
               </p>
             </div>
           </div>
@@ -264,7 +266,7 @@ export function AddCoachModal({ open, onOpenChange, onSuccess }: AddCoachModalPr
 
             <div className="flex gap-3 pt-4">
               <Button type="submit" className="flex-1" disabled={submitting || uploadingPhoto}>
-                {submitting ? "Adding..." : "Add Coach"}
+                {submitting ? "Adding..." : `Add ${coachSingular}`}
               </Button>
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
                 Cancel

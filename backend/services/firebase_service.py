@@ -83,27 +83,40 @@ class FirebaseService:
         doc_ref = db.collection('coaches').document()
         doc_ref.set(data)
         # Fetch the document back to get the actual timestamp
-        return cls.get_coach(doc_ref.id)
-    
+        return cls.get_coach(doc_ref.id, data.get('org_id'))
+
     @classmethod
-    def get_coach(cls, coach_id):
-        """Get coach by ID"""
+    def get_coach(cls, coach_id, org_id):
+        """Get coach by ID, scoped to org_id.
+
+        Returns None (treated as not found) if the coach belongs to a
+        different org. Pass org_id=None only for the intentional super_admin
+        cross-org case, or for internal callers that already verified
+        ownership.
+        """
         db = cls.get_db()
         doc = db.collection('coaches').document(coach_id).get()
-        if doc.exists:
-            return {'id': doc.id, **doc.to_dict()}
-        return None
-    
+        if not doc.exists:
+            return None
+        data = {'id': doc.id, **doc.to_dict()}
+        if org_id is not None and data.get('org_id') != org_id:
+            return None
+        return data
+
     @classmethod
-    def get_all_coaches(cls):
-        """Get all coaches"""
+    def get_all_coaches(cls, org_id):
+        """Get all coaches for an org. Pass org_id=None only for the
+        intentional super_admin cross-org case."""
         db = cls.get_db()
+        query = db.collection('coaches')
+        if org_id is not None:
+            query = query.where('org_id', '==', org_id)
         coaches = []
-        docs = db.collection('coaches').stream()
+        docs = query.stream()
         for doc in docs:
             coaches.append({'id': doc.id, **doc.to_dict()})
         return coaches
-    
+
     @classmethod
     def update_coach(cls, coach_id, data):
         """Update coach
@@ -121,7 +134,8 @@ class FirebaseService:
         db = cls.get_db()
         doc_ref = db.collection('coaches').document(coach_id)
         doc_ref.update(filtered_data)
-        return cls.get_coach(coach_id)
+        # Ownership already verified by the caller before calling update.
+        return cls.get_coach(coach_id, None)
     
     @classmethod
     def delete_coach(cls, coach_id):
@@ -140,16 +154,25 @@ class FirebaseService:
         doc_ref = db.collection('sessions').document()
         doc_ref.set(data)
         # Fetch the document back to get the actual timestamp
-        return cls.get_session(doc_ref.id)
-    
+        return cls.get_session(doc_ref.id, data.get('org_id'))
+
     @classmethod
-    def get_session(cls, session_id):
-        """Get session by ID"""
+    def get_session(cls, session_id, org_id):
+        """Get session by ID, scoped to org_id.
+
+        Returns None (treated as not found) if the session belongs to a
+        different org. Pass org_id=None only for the intentional super_admin
+        cross-org case, or for internal callers (e.g. check-in-token flows)
+        that already established authorization by another means.
+        """
         db = cls.get_db()
         doc = db.collection('sessions').document(session_id).get()
-        if doc.exists:
-            return {'id': doc.id, **doc.to_dict()}
-        return None
+        if not doc.exists:
+            return None
+        data = {'id': doc.id, **doc.to_dict()}
+        if org_id is not None and data.get('org_id') != org_id:
+            return None
+        return data
     
     @staticmethod
     def get_session_coach_ids(session):
@@ -172,10 +195,18 @@ class FirebaseService:
         return team_ids
 
     @classmethod
-    def get_all_sessions(cls, start_date=None, end_date=None, coach_id=None):
-        """Get sessions with optional filters"""
+    def get_all_sessions(cls, org_id, start_date=None, end_date=None, coach_id=None):
+        """Get sessions with optional filters, scoped to org_id.
+
+        Pass org_id=None only for the intentional super_admin cross-org case.
+        NOTE: combining the org_id equality filter with the date range below
+        may require a Firestore composite index (org_id ASC, date ASC) — if
+        so, Firestore raises FAILED_PRECONDITION with a direct console link.
+        """
         db = cls.get_db()
         query = db.collection('sessions')
+        if org_id is not None:
+            query = query.where('org_id', '==', org_id)
 
         if start_date:
             query = query.where('date', '>=', start_date)
@@ -199,7 +230,8 @@ class FirebaseService:
         db = cls.get_db()
         doc_ref = db.collection('sessions').document(session_id)
         doc_ref.update(data)
-        return cls.get_session(session_id)
+        # Ownership already verified by the caller before calling update.
+        return cls.get_session(session_id, None)
     
     @classmethod
     def delete_session(cls, session_id):
@@ -291,8 +323,9 @@ class FirebaseService:
                 'distance': check_in_data.get('distance'),
             }
 
-        # Determine session-level status
-        session = cls.get_session(session_id)
+        # Determine session-level status. Authorization here comes from the
+        # one-time check-in token, not org membership, so no org filter.
+        session = cls.get_session(session_id, None)
         all_coach_ids = cls.get_session_coach_ids(session) if session else []
 
         if len(all_coach_ids) <= 1 or not coach_id:
@@ -308,7 +341,7 @@ class FirebaseService:
 
         doc_ref = db.collection('sessions').document(session_id)
         doc_ref.update(update_data)
-        return cls.get_session(session_id)
+        return cls.get_session(session_id, None)
 
     # =========================================================================
     # Team operations
@@ -323,22 +356,34 @@ class FirebaseService:
         data['created_at'] = firestore.SERVER_TIMESTAMP
         doc_ref = db.collection('teams').document()
         doc_ref.set(data)
-        return cls.get_team(doc_ref.id)
+        return cls.get_team(doc_ref.id, data.get('org_id'))
 
     @classmethod
-    def get_team(cls, team_id):
-        """Get team by ID"""
+    def get_team(cls, team_id, org_id):
+        """Get team by ID, scoped to org_id.
+
+        Returns None (treated as not found) if the team belongs to a
+        different org. Pass org_id=None only for the intentional super_admin
+        cross-org case, or for internal callers that already verified
+        ownership.
+        """
         db = cls.get_db()
         doc = db.collection('teams').document(team_id).get()
-        if doc.exists:
-            return {'id': doc.id, **doc.to_dict()}
-        return None
+        if not doc.exists:
+            return None
+        data = {'id': doc.id, **doc.to_dict()}
+        if org_id is not None and data.get('org_id') != org_id:
+            return None
+        return data
 
     @classmethod
-    def get_all_teams(cls, location_id=None):
-        """Get all teams with optional location filter"""
+    def get_all_teams(cls, org_id, location_id=None):
+        """Get all teams for an org, with optional location filter. Pass
+        org_id=None only for the intentional super_admin cross-org case."""
         db = cls.get_db()
         query = db.collection('teams')
+        if org_id is not None:
+            query = query.where('org_id', '==', org_id)
         if location_id:
             query = query.where('location_id', '==', location_id)
         teams = []
@@ -353,7 +398,8 @@ class FirebaseService:
         db = cls.get_db()
         doc_ref = db.collection('teams').document(team_id)
         doc_ref.update(data)
-        return cls.get_team(team_id)
+        # Ownership already verified by the caller before calling update.
+        return cls.get_team(team_id, None)
 
     @classmethod
     def delete_team(cls, team_id):
@@ -385,22 +431,38 @@ class FirebaseService:
         data['created_at'] = firestore.SERVER_TIMESTAMP
         doc_ref = db.collection('players').document()
         doc_ref.set(data)
-        return cls.get_player(doc_ref.id)
+        return cls.get_player(doc_ref.id, data.get('org_id'))
 
     @classmethod
-    def get_player(cls, player_id):
-        """Get player by ID"""
+    def get_player(cls, player_id, org_id):
+        """Get player by ID, scoped to org_id.
+
+        Returns None (treated as not found) if the player belongs to a
+        different org. Pass org_id=None only for the intentional super_admin
+        cross-org case, or for internal callers that already verified
+        ownership.
+        """
         db = cls.get_db()
         doc = db.collection('players').document(player_id).get()
-        if doc.exists:
-            return {'id': doc.id, **doc.to_dict()}
-        return None
+        if not doc.exists:
+            return None
+        data = {'id': doc.id, **doc.to_dict()}
+        if org_id is not None and data.get('org_id') != org_id:
+            return None
+        return data
 
     @classmethod
-    def get_all_players(cls, team_id=None):
-        """Get all players with optional team filter"""
+    def get_all_players(cls, org_id, team_id=None):
+        """Get all players for an org, with optional team filter. Pass
+        org_id=None only for the intentional super_admin cross-org case.
+        NOTE: combining the org_id equality filter with the team_ids
+        array_contains filter may require a Firestore composite index — if
+        so, Firestore raises FAILED_PRECONDITION with a direct console link.
+        """
         db = cls.get_db()
         query = db.collection('players')
+        if org_id is not None:
+            query = query.where('org_id', '==', org_id)
         if team_id:
             query = query.where('team_ids', 'array_contains', team_id)
         players = []
@@ -415,7 +477,8 @@ class FirebaseService:
         db = cls.get_db()
         doc_ref = db.collection('players').document(player_id)
         doc_ref.update(data)
-        return cls.get_player(player_id)
+        # Ownership already verified by the caller before calling update.
+        return cls.get_player(player_id, None)
 
     @classmethod
     def delete_player(cls, player_id):
@@ -437,23 +500,37 @@ class FirebaseService:
         data['created_at'] = firestore.SERVER_TIMESTAMP
         doc_ref = db.collection('locations').document()
         doc_ref.set(data)
-        return cls.get_location(doc_ref.id)
+        return cls.get_location(doc_ref.id, data.get('org_id'))
 
     @classmethod
-    def get_location(cls, location_id):
-        """Get location by ID"""
+    def get_location(cls, location_id, org_id):
+        """Get location by ID, scoped to org_id.
+
+        Returns None (treated as not found) if the location belongs to a
+        different org. Pass org_id=None only for the intentional super_admin
+        cross-org case, or for internal callers (e.g. check-in-token flows,
+        the background scheduler) that already established authorization by
+        another means.
+        """
         db = cls.get_db()
         doc = db.collection('locations').document(location_id).get()
-        if doc.exists:
-            return {'id': doc.id, **doc.to_dict()}
-        return None
+        if not doc.exists:
+            return None
+        data = {'id': doc.id, **doc.to_dict()}
+        if org_id is not None and data.get('org_id') != org_id:
+            return None
+        return data
 
     @classmethod
-    def get_all_locations(cls):
-        """Get all locations"""
+    def get_all_locations(cls, org_id):
+        """Get all locations for an org. Pass org_id=None only for the
+        intentional super_admin cross-org case."""
         db = cls.get_db()
+        query = db.collection('locations')
+        if org_id is not None:
+            query = query.where('org_id', '==', org_id)
         locations = []
-        docs = db.collection('locations').stream()
+        docs = query.stream()
         for doc in docs:
             locations.append({'id': doc.id, **doc.to_dict()})
         return locations
@@ -464,7 +541,8 @@ class FirebaseService:
         db = cls.get_db()
         doc_ref = db.collection('locations').document(location_id)
         doc_ref.update(data)
-        return cls.get_location(location_id)
+        # Ownership already verified by the caller before calling update.
+        return cls.get_location(location_id, None)
 
     @classmethod
     def delete_location(cls, location_id):
@@ -492,11 +570,15 @@ class FirebaseService:
         return {'id': doc_ref.id, **saved}
 
     @classmethod
-    def get_all_broadcasts(cls):
-        """Get all broadcasts"""
+    def get_all_broadcasts(cls, org_id):
+        """Get all broadcasts for an org. Pass org_id=None only for the
+        intentional super_admin cross-org case."""
         db = cls.get_db()
+        query = db.collection('broadcasts')
+        if org_id is not None:
+            query = query.where('org_id', '==', org_id)
         broadcasts = []
-        docs = db.collection('broadcasts').stream()
+        docs = query.stream()
         for doc in docs:
             broadcasts.append({'id': doc.id, **doc.to_dict()})
         return broadcasts
@@ -514,23 +596,36 @@ class FirebaseService:
         data['created_at'] = firestore.SERVER_TIMESTAMP
         doc_ref = db.collection('content').document()
         doc_ref.set(data)
-        return cls.get_content(doc_ref.id)
+        return cls.get_content(doc_ref.id, data.get('org_id'))
 
     @classmethod
-    def get_content(cls, content_id):
-        """Get content by ID"""
+    def get_content(cls, content_id, org_id):
+        """Get content by ID, scoped to org_id.
+
+        Returns None (treated as not found) if the content belongs to a
+        different org. Pass org_id=None only for the intentional super_admin
+        cross-org case, or for internal callers that already verified
+        ownership.
+        """
         db = cls.get_db()
         doc = db.collection('content').document(content_id).get()
-        if doc.exists:
-            return {'id': doc.id, **doc.to_dict()}
-        return None
+        if not doc.exists:
+            return None
+        data = {'id': doc.id, **doc.to_dict()}
+        if org_id is not None and data.get('org_id') != org_id:
+            return None
+        return data
 
     @classmethod
-    def get_all_content(cls):
-        """Get all content"""
+    def get_all_content(cls, org_id):
+        """Get all content for an org. Pass org_id=None only for the
+        intentional super_admin cross-org case."""
         db = cls.get_db()
+        query = db.collection('content')
+        if org_id is not None:
+            query = query.where('org_id', '==', org_id)
         content_list = []
-        docs = db.collection('content').stream()
+        docs = query.stream()
         for doc in docs:
             content_list.append({'id': doc.id, **doc.to_dict()})
         return content_list
@@ -541,7 +636,8 @@ class FirebaseService:
         db = cls.get_db()
         doc_ref = db.collection('content').document(content_id)
         doc_ref.update(data)
-        return cls.get_content(content_id)
+        # Ownership already verified by the caller before calling update.
+        return cls.get_content(content_id, None)
 
     @classmethod
     def delete_content(cls, content_id):
@@ -563,23 +659,36 @@ class FirebaseService:
         data['created_at'] = firestore.SERVER_TIMESTAMP
         doc_ref = db.collection('content_urls').document()
         doc_ref.set(data)
-        return cls.get_url(doc_ref.id)
+        return cls.get_url(doc_ref.id, data.get('org_id'))
 
     @classmethod
-    def get_url(cls, url_id):
-        """Get content URL by ID"""
+    def get_url(cls, url_id, org_id):
+        """Get content URL by ID, scoped to org_id.
+
+        Returns None (treated as not found) if the URL belongs to a
+        different org. Pass org_id=None only for the intentional super_admin
+        cross-org case, or for internal callers that already verified
+        ownership.
+        """
         db = cls.get_db()
         doc = db.collection('content_urls').document(url_id).get()
-        if doc.exists:
-            return {'id': doc.id, **doc.to_dict()}
-        return None
+        if not doc.exists:
+            return None
+        data = {'id': doc.id, **doc.to_dict()}
+        if org_id is not None and data.get('org_id') != org_id:
+            return None
+        return data
 
     @classmethod
-    def get_all_urls(cls):
-        """Get all content URLs"""
+    def get_all_urls(cls, org_id):
+        """Get all content URLs for an org. Pass org_id=None only for the
+        intentional super_admin cross-org case."""
         db = cls.get_db()
+        query = db.collection('content_urls')
+        if org_id is not None:
+            query = query.where('org_id', '==', org_id)
         urls = []
-        docs = db.collection('content_urls').stream()
+        docs = query.stream()
         for doc in docs:
             urls.append({'id': doc.id, **doc.to_dict()})
         return urls
@@ -590,7 +699,8 @@ class FirebaseService:
         db = cls.get_db()
         doc_ref = db.collection('content_urls').document(url_id)
         doc_ref.update(data)
-        return cls.get_url(url_id)
+        # Ownership already verified by the caller before calling update.
+        return cls.get_url(url_id, None)
 
     @classmethod
     def delete_url(cls, url_id):
@@ -612,23 +722,36 @@ class FirebaseService:
         data['created_at'] = firestore.SERVER_TIMESTAMP
         doc_ref = db.collection('reminders').document()
         doc_ref.set(data)
-        return cls.get_reminder(doc_ref.id)
+        return cls.get_reminder(doc_ref.id, data.get('org_id'))
 
     @classmethod
-    def get_reminder(cls, reminder_id):
-        """Get reminder by ID"""
+    def get_reminder(cls, reminder_id, org_id):
+        """Get reminder by ID, scoped to org_id.
+
+        Returns None (treated as not found) if the reminder belongs to a
+        different org. Pass org_id=None only for the intentional super_admin
+        cross-org case, or for internal callers that already verified
+        ownership.
+        """
         db = cls.get_db()
         doc = db.collection('reminders').document(reminder_id).get()
-        if doc.exists:
-            return {'id': doc.id, **doc.to_dict()}
-        return None
+        if not doc.exists:
+            return None
+        data = {'id': doc.id, **doc.to_dict()}
+        if org_id is not None and data.get('org_id') != org_id:
+            return None
+        return data
 
     @classmethod
-    def get_all_reminders(cls):
-        """Get all reminders"""
+    def get_all_reminders(cls, org_id):
+        """Get all reminders for an org. Pass org_id=None only for the
+        intentional super_admin cross-org case."""
         db = cls.get_db()
+        query = db.collection('reminders')
+        if org_id is not None:
+            query = query.where('org_id', '==', org_id)
         reminders = []
-        docs = db.collection('reminders').stream()
+        docs = query.stream()
         for doc in docs:
             reminders.append({'id': doc.id, **doc.to_dict()})
         return reminders
@@ -639,7 +762,8 @@ class FirebaseService:
         db = cls.get_db()
         doc_ref = db.collection('reminders').document(reminder_id)
         doc_ref.update(data)
-        return cls.get_reminder(reminder_id)
+        # Ownership already verified by the caller before calling update.
+        return cls.get_reminder(reminder_id, None)
 
     @classmethod
     def delete_reminder(cls, reminder_id):
@@ -661,7 +785,7 @@ class FirebaseService:
         data['created_at'] = firestore.SERVER_TIMESTAMP
         doc_ref = db.collection('admin_users').document()
         doc_ref.set(data)
-        return cls.get_admin(doc_ref.id)
+        return cls.get_admin(doc_ref.id, data.get('org_id'))
 
     @staticmethod
     def _strip_admin_password(admin_dict):
@@ -672,13 +796,22 @@ class FirebaseService:
         return admin_dict
 
     @classmethod
-    def get_admin(cls, admin_id):
-        """Get admin user by ID (password stripped)"""
+    def get_admin(cls, admin_id, org_id):
+        """Get admin user by ID (password stripped), scoped to org_id.
+
+        Returns None (treated as not found) if the admin belongs to a
+        different org. Pass org_id=None only for the intentional super_admin
+        cross-org case, or for internal callers that already verified
+        ownership.
+        """
         db = cls.get_db()
         doc = db.collection('admin_users').document(admin_id).get()
-        if doc.exists:
-            return cls._strip_admin_password({'id': doc.id, **doc.to_dict()})
-        return None
+        if not doc.exists:
+            return None
+        data = {'id': doc.id, **doc.to_dict()}
+        if org_id is not None and data.get('org_id') != org_id:
+            return None
+        return cls._strip_admin_password(data)
 
     @classmethod
     def get_admin_by_email(cls, email, include_password=False):
@@ -706,7 +839,8 @@ class FirebaseService:
         db = cls.get_db()
         doc_ref = db.collection('admin_users').document(admin_id)
         doc_ref.update(data)
-        return cls.get_admin(admin_id)
+        # Ownership already verified by the caller before calling update.
+        return cls.get_admin(admin_id, None)
 
     @classmethod
     def delete_admin(cls, admin_id):
@@ -751,18 +885,63 @@ class FirebaseService:
     # =========================================================================
     # Organisation operations (collection: 'organisations')
     # =========================================================================
-    DEFAULT_TERMINOLOGY = {
-        "coach_singular": "Coach",
-        "coach_plural": "Coaches",
-        "player_singular": "Player",
-        "player_plural": "Players",
-        "team_singular": "Team",
-        "team_plural": "Teams",
-        "session_singular": "Session",
-        "session_plural": "Sessions",
-        "location_singular": "Location",
-        "location_plural": "Locations",
+    # Default terminology per org type, mirrors DEFAULT_TERMINOLOGY_BY_TYPE on
+    # the frontend (frontend/src/types/Organisation.ts) and the
+    # DEFAULT_AI_PERSONA_PROMPTS pattern in ConversationService — each org
+    # type gets labels that don't read as sports-specific.
+    DEFAULT_TERMINOLOGY_BY_TYPE = {
+        "sports": {
+            "coach_singular": "Coach",
+            "coach_plural": "Coaches",
+            "player_singular": "Player",
+            "player_plural": "Players",
+            "team_singular": "Team",
+            "team_plural": "Teams",
+            "session_singular": "Session",
+            "session_plural": "Sessions",
+            "location_singular": "Location",
+            "location_plural": "Locations",
+        },
+        "ngo": {
+            "coach_singular": "Facilitator",
+            "coach_plural": "Facilitators",
+            "player_singular": "Participant",
+            "player_plural": "Participants",
+            "team_singular": "Group",
+            "team_plural": "Groups",
+            "session_singular": "Session",
+            "session_plural": "Sessions",
+            "location_singular": "Venue",
+            "location_plural": "Venues",
+        },
+        "events": {
+            "coach_singular": "Coach",
+            "coach_plural": "Coaches",
+            "player_singular": "Attendee",
+            "player_plural": "Attendees",
+            "team_singular": "Team",
+            "team_plural": "Teams",
+            "session_singular": "Session",
+            "session_plural": "Sessions",
+            "location_singular": "Venue",
+            "location_plural": "Venues",
+        },
+        "corporate": {
+            "coach_singular": "Facilitator",
+            "coach_plural": "Facilitators",
+            "player_singular": "Participant",
+            "player_plural": "Participants",
+            "team_singular": "Team",
+            "team_plural": "Teams",
+            "session_singular": "Session",
+            "session_plural": "Sessions",
+            "location_singular": "Venue",
+            "location_plural": "Venues",
+        },
     }
+
+    # Final catch-all fallback for a missing/unrecognized org type.
+    DEFAULT_TERMINOLOGY = DEFAULT_TERMINOLOGY_BY_TYPE["sports"]
 
     @classmethod
     def get_organisation(cls, org_id):
@@ -795,7 +974,10 @@ class FirebaseService:
     def create_organisation(cls, data):
         """Create a new organisation document.
 
-        Fields: name, slug, type, terminology, is_active, created_at
+        Fields: name, slug, type, terminology, ai_persona_prompt, is_active,
+        created_at. ai_persona_prompt is optional — when empty/absent, the
+        AI system prompt falls back to the default for the org's type (see
+        ConversationService.get_ai_persona_prompt).
         """
         db = cls.get_db()
         data['created_at'] = firestore.SERVER_TIMESTAMP
@@ -813,15 +995,20 @@ class FirebaseService:
 
     @classmethod
     def get_org_terminology(cls, org_id):
-        """Get just the terminology for an org, falling back to defaults.
+        """Get the terminology for an org, falling back to defaults.
 
-        Any missing keys are filled from DEFAULT_TERMINOLOGY so callers always
-        receive the full set of 10 labels.
+        Priority: saved org terminology > default for the org's type >
+        the sports default as a final catch-all (org missing or type
+        unrecognized). Any key missing from the saved terminology is filled
+        from the applicable default so callers always receive the full set
+        of 10 labels.
         """
         org = cls.get_organisation(org_id)
+        org_type = org.get('type') if org else None
+        type_default = cls.DEFAULT_TERMINOLOGY_BY_TYPE.get(org_type, cls.DEFAULT_TERMINOLOGY)
         if org and org.get('terminology'):
-            return {**cls.DEFAULT_TERMINOLOGY, **org['terminology']}
-        return dict(cls.DEFAULT_TERMINOLOGY)
+            return {**type_default, **org['terminology']}
+        return dict(type_default)
 
     # =========================================================================
     # Settings operations (single document 'app_settings')
@@ -847,34 +1034,48 @@ class FirebaseService:
     # Report helpers
     # =========================================================================
     @classmethod
-    def get_sessions_by_date_range(cls, start_date, end_date):
-        """Get sessions within a date range for reports"""
+    def get_sessions_by_date_range(cls, org_id, start_date, end_date):
+        """Get sessions within a date range for reports, scoped to org_id.
+
+        Pass org_id=None only for the intentional super_admin cross-org case.
+        NOTE: combining the org_id equality filter with the date range below
+        may require a Firestore composite index (org_id ASC, date ASC) — if
+        so, Firestore raises FAILED_PRECONDITION with a direct console link.
+        This is the same shape of query as get_all_sessions' date-range
+        filter, so a single composite index should cover both.
+        """
         db = cls.get_db()
+        query = db.collection('sessions')
+        if org_id is not None:
+            query = query.where('org_id', '==', org_id)
         sessions = []
-        docs = db.collection('sessions')\
-            .where('date', '>=', start_date)\
-            .where('date', '<=', end_date)\
-            .stream()
+        docs = query.where('date', '>=', start_date).where('date', '<=', end_date).stream()
         for doc in docs:
             sessions.append({'id': doc.id, **doc.to_dict()})
         return sessions
 
     @classmethod
-    def count_players(cls):
-        """Count total players"""
+    def count_players(cls, org_id):
+        """Count total players for an org. Pass org_id=None only for the
+        intentional super_admin cross-org case."""
         db = cls.get_db()
-        docs = db.collection('players').stream()
+        query = db.collection('players')
+        if org_id is not None:
+            query = query.where('org_id', '==', org_id)
         count = 0
-        for _ in docs:
+        for _ in query.stream():
             count += 1
         return count
 
     @classmethod
-    def count_active_coaches(cls):
-        """Count active coaches"""
+    def count_active_coaches(cls, org_id):
+        """Count active coaches for an org. Pass org_id=None only for the
+        intentional super_admin cross-org case."""
         db = cls.get_db()
-        docs = db.collection('coaches').stream()
+        query = db.collection('coaches')
+        if org_id is not None:
+            query = query.where('org_id', '==', org_id)
         count = 0
-        for _ in docs:
+        for _ in query.stream():
             count += 1
         return count

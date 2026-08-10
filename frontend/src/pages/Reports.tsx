@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { useToast } from "@/hooks/use-toast";
 import { reportsAPI } from "@/services/api";
+import { useTerm } from "@/contexts/TerminologyContext";
 
 function sanitizeCSVValue(val: unknown): string {
   let str = String(val ?? "").replace(/"/g, '""');
@@ -84,6 +85,12 @@ function ProgressBar({ value, max, className = "" }: { value: number; max: numbe
 }
 
 export default function Reports() {
+  const coachSingular = useTerm("coach_singular");
+  const coachPlural = useTerm("coach_plural");
+  const locationSingular = useTerm("location_singular");
+  const sessionPlural = useTerm("session_plural");
+  const teamPlural = useTerm("team_plural");
+  const playerSingular = useTerm("player_singular");
   const { toast } = useToast();
   const [dateRange, setDateRange] = useState({ from: "", to: "" });
 
@@ -166,8 +173,8 @@ export default function Reports() {
   };
 
   const tabs = [
-    { id: "coaches" as const, label: "Coach Attendance", icon: Users, count: coachData.length },
-    { id: "locations" as const, label: "Location Attendance", icon: MapPin, count: locationData.length },
+    { id: "coaches" as const, label: `${coachSingular} Attendance`, icon: Users, count: coachData.length },
+    { id: "locations" as const, label: `${locationSingular} Attendance`, icon: MapPin, count: locationData.length },
     { id: "students" as const, label: "Student Roll Call", icon: GraduationCap, count: studentData.length },
   ];
 
@@ -184,10 +191,10 @@ export default function Reports() {
         {/* Quick Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { label: "Total Sessions", value: stats?.total_sessions ?? 0, icon: Calendar },
+            { label: `Total ${sessionPlural}`, value: stats?.total_sessions ?? 0, icon: Calendar },
             { label: "Check-in Rate", value: stats?.check_in_rate != null ? `${Math.round(stats.check_in_rate)}%` : "0%", icon: BarChart3 },
             { label: "Students Attended", value: stats?.total_students ?? 0, icon: GraduationCap },
-            { label: "Active Coaches", value: stats?.active_coaches ?? 0, icon: Users },
+            { label: `Active ${coachPlural}`, value: stats?.active_coaches ?? 0, icon: Users },
           ].map((stat) => (
             <div key={stat.label} className="bg-card rounded-xl border border-border p-4 shadow-card">
               {loadingStats ? (
@@ -314,7 +321,7 @@ export default function Reports() {
                   coachData.length === 0 ? (
                     <div className="text-center py-12 text-muted-foreground">
                       <Users className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                      <p>No coach attendance data for this period</p>
+                      <p>No {coachSingular.toLowerCase()} attendance data for this period</p>
                     </div>
                   ) : (
                     <div className="space-y-3">
@@ -330,7 +337,7 @@ export default function Reports() {
                             <div className="flex-1 min-w-0">
                               <p className="font-medium text-foreground text-sm truncate">{coach.coach_name}</p>
                               <p className="text-xs text-muted-foreground">
-                                {coach.checked_in}/{coach.total_sessions} sessions checked in
+                                {coach.checked_in}/{coach.total_sessions} {sessionPlural.toLowerCase()} checked in
                               </p>
                             </div>
                             <div className="w-32">
@@ -347,7 +354,7 @@ export default function Reports() {
                   locationData.length === 0 ? (
                     <div className="text-center py-12 text-muted-foreground">
                       <MapPin className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                      <p>No location attendance data for this period</p>
+                      <p>No {locationSingular.toLowerCase()} attendance data for this period</p>
                     </div>
                   ) : (
                     <div className="space-y-3">
@@ -361,7 +368,7 @@ export default function Reports() {
                             <div className="flex-1 min-w-0">
                               <p className="font-medium text-foreground text-sm truncate">{loc.location_name}</p>
                               <p className="text-xs text-muted-foreground">
-                                {loc.checked_in}/{loc.total_sessions} sessions with check-in
+                                {loc.checked_in}/{loc.total_sessions} {sessionPlural.toLowerCase()} with check-in
                               </p>
                             </div>
                             <div className="w-32">
@@ -385,8 +392,8 @@ export default function Reports() {
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b border-border text-left">
-                            <th className="py-2 px-3 font-medium text-muted-foreground">Player</th>
-                            <th className="py-2 px-3 font-medium text-muted-foreground">Team(s)</th>
+                            <th className="py-2 px-3 font-medium text-muted-foreground">{playerSingular}</th>
+                            <th className="py-2 px-3 font-medium text-muted-foreground">{teamPlural}</th>
                             <th className="py-2 px-3 font-medium text-muted-foreground text-center">Attended</th>
                             <th className="py-2 px-3 font-medium text-muted-foreground text-center">Absent</th>
                             <th className="py-2 px-3 font-medium text-muted-foreground w-40">Rate</th>

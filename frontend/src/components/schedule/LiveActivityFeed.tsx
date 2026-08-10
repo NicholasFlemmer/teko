@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { MessageSquare, Send, ClipboardCheck, MapPin, Camera, Radio } from "lucide-react";
 import { sseAPI } from "@/services/api";
+import { useTerm } from "@/contexts/TerminologyContext";
 
 interface ActivityEvent {
   type: string;
@@ -27,6 +28,7 @@ function formatTime(ts: string): string {
 }
 
 export function LiveActivityFeed() {
+  const coachSingular = useTerm("coach_singular");
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [connected, setConnected] = useState(false);
   const esRef = useRef<EventSource | null>(null);
@@ -61,7 +63,7 @@ export function LiveActivityFeed() {
         {events.length === 0 ? (
           <div className="px-4 py-8 text-center">
             <p className="text-sm text-muted-foreground">No activity yet.</p>
-            <p className="text-xs text-muted-foreground mt-1">Coach messages, check-ins, and attendance will appear here in real time.</p>
+            <p className="text-xs text-muted-foreground mt-1">{coachSingular} messages, check-ins, and attendance will appear here in real time.</p>
           </div>
         ) : (
           <div className="divide-y divide-border">

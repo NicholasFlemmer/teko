@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Loader2, X, Download } from "lucide-react";
+import { useTerm } from "@/contexts/TerminologyContext";
 import {
   Dialog,
   DialogContent,
@@ -21,6 +22,9 @@ interface BulkUploadModalProps {
 type UploadState = "select" | "uploading" | "done";
 
 export function BulkUploadModal({ open, onOpenChange, onPlayersAdded }: BulkUploadModalProps) {
+  const playerSingular = useTerm("player_singular");
+  const playerPlural = useTerm("player_plural");
+  const teamPlural = useTerm("team_plural");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string[][]>([]);
   const [teams, setTeams] = useState<any[]>([]);
@@ -124,9 +128,9 @@ export function BulkUploadModal({ open, onOpenChange, onPlayersAdded }: BulkUplo
               <Upload className="w-5 h-5 text-primary" />
             </div>
             <div>
-              <DialogTitle className="text-xl">Bulk Upload Players</DialogTitle>
+              <DialogTitle className="text-xl">Bulk Upload {playerPlural}</DialogTitle>
               <p className="text-sm text-muted-foreground mt-0.5">
-                Import players from a CSV file
+                Import {playerPlural.toLowerCase()} from a CSV file
               </p>
             </div>
           </div>
@@ -148,7 +152,7 @@ export function BulkUploadModal({ open, onOpenChange, onPlayersAdded }: BulkUplo
                   <div>
                     <p className="font-medium text-foreground">{result.message}</p>
                     <p className="text-sm text-muted-foreground mt-0.5">
-                      {result.created_count} player{result.created_count !== 1 ? "s" : ""} added
+                      {result.created_count} {result.created_count === 1 ? playerSingular.toLowerCase() : playerPlural.toLowerCase()} added
                     </p>
                   </div>
                 </div>
@@ -261,7 +265,7 @@ export function BulkUploadModal({ open, onOpenChange, onPlayersAdded }: BulkUplo
 
                 {/* Team assignment */}
                 <div className="space-y-2">
-                  <Label>Assign all players to teams (optional)</Label>
+                  <Label>Assign all {playerPlural.toLowerCase()} to {teamPlural.toLowerCase()} (optional)</Label>
                   <div className="border border-border rounded-lg p-3 space-y-2 max-h-32 overflow-y-auto">
                     {teams.map((team) => (
                       <div key={team.id} className="flex items-center gap-2">
@@ -277,7 +281,7 @@ export function BulkUploadModal({ open, onOpenChange, onPlayersAdded }: BulkUplo
                       </div>
                     ))}
                     {teams.length === 0 && (
-                      <p className="text-sm text-muted-foreground">No teams available</p>
+                      <p className="text-sm text-muted-foreground">No {teamPlural.toLowerCase()} available</p>
                     )}
                   </div>
                 </div>
@@ -297,7 +301,7 @@ export function BulkUploadModal({ open, onOpenChange, onPlayersAdded }: BulkUplo
                     ) : (
                       <>
                         <Upload className="w-4 h-4 mr-2" />
-                        Upload Players
+                        Upload {playerPlural}
                       </>
                     )}
                   </Button>

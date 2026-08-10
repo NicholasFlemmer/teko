@@ -159,7 +159,9 @@ def normalize_phones():
         return jsonify({'error': 'Unauthorized'}), 401
     try:
         from utils.phone import normalize_sa_phone
-        coaches = FirebaseService.get_all_coaches()
+        # System-level maintenance endpoint (shared-secret auth, not JWT/org),
+        # so it intentionally spans every org.
+        coaches = FirebaseService.get_all_coaches(None)
         updated = []
         for coach in coaches:
             raw = coach.get('phone_number', '')

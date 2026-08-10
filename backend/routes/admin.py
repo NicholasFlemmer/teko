@@ -1,5 +1,5 @@
 import logging
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from werkzeug.security import generate_password_hash
 from services.firebase_service import FirebaseService
 from services.scheduler_service import SchedulerService
@@ -10,6 +10,21 @@ logger = logging.getLogger(__name__)
 
 admin_bp = Blueprint('admin', __name__)
 
+
+def _resolve_org_scope():
+    """Resolve the org_id to filter by for the current request.
+
+    Returns (org_id, None) on success, or (None, error_response) if the
+    caller has no org context and isn't the intentional super_admin
+    cross-org case (role == 'super_admin' with no assigned org).
+    """
+    org_id = getattr(g, 'current_user_org_id', None)
+    role = getattr(g, 'current_user_role', None)
+    if org_id is None and role != 'super_admin':
+        return None, (jsonify({'success': False, 'error': 'Organisation context missing'}), 403)
+    return org_id, None
+
+
 # --- Admin Users ---
 
 @admin_bp.route('/users', methods=['GET'])
@@ -17,7 +32,15 @@ admin_bp = Blueprint('admin', __name__)
 def get_admin_users(current_user):
     """Get all admin users"""
     try:
-        users = FirebaseService.get_all_admins()
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+        if org_id is None:
+            # Intentional cross-org admin: super_admin with no assigned org
+            # sees every admin across every organisation.
+            users = FirebaseService.get_all_admins()
+        else:
+            users = FirebaseService.get_all_admins_by_org(org_id)
         return jsonify({
             'success': True,
             'admins': users
@@ -57,6 +80,10 @@ def create_admin_user(current_user):
         if len(data['password']) < 8:
             return jsonify({'success': False, 'error': 'Password must be at least 8 characters'}), 400
 
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Check email uniqueness
         email = data['email'].strip().lower()
         existing = FirebaseService.get_admin_by_email(email)
@@ -68,7 +95,8 @@ def create_admin_user(current_user):
             'name': data['name'].strip(),
             'email': email,
             'password': generate_password_hash(data['password']),
-            'role': data['role']
+            'role': data['role'],
+            'org_id': org_id,
         })
 
         return jsonify({
@@ -91,8 +119,12 @@ def update_admin_user(current_user, admin_id):
     try:
         data = request.get_json()
 
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Check if admin user exists
-        user = FirebaseService.get_admin(admin_id)
+        user = FirebaseService.get_admin(admin_id, org_id)
         if not user:
             return jsonify({
                 'success': False,
@@ -144,8 +176,12 @@ def update_admin_user(current_user, admin_id):
 def delete_admin_user(current_user, admin_id):
     """Delete an admin user"""
     try:
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Check if admin user exists
-        user = FirebaseService.get_admin(admin_id)
+        user = FirebaseService.get_admin(admin_id, org_id)
         if not user:
             return jsonify({
                 'success': False,
@@ -172,8 +208,12 @@ def delete_admin_user(current_user, admin_id):
 def toggle_admin_status(current_user, admin_id):
     """Toggle an admin user's active/suspended status"""
     try:
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Check if admin user exists
-        user = FirebaseService.get_admin(admin_id)
+        user = FirebaseService.get_admin(admin_id, org_id)
         if not user:
             return jsonify({
                 'success': False,

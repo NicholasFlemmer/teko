@@ -1,5 +1,5 @@
 import logging
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from services.firebase_service import FirebaseService
 from services.whatsapp_service import WhatsAppService
 from routes.auth import token_required
@@ -14,6 +14,20 @@ import re
 logger = logging.getLogger(__name__)
 
 sessions_bp = Blueprint('sessions', __name__)
+
+
+def _resolve_org_scope():
+    """Resolve the org_id to filter by for the current request.
+
+    Returns (org_id, None) on success, or (None, error_response) if the
+    caller has no org context and isn't the intentional super_admin
+    cross-org case (role == 'super_admin' with no assigned org).
+    """
+    org_id = getattr(g, 'current_user_org_id', None)
+    role = getattr(g, 'current_user_role', None)
+    if org_id is None and role != 'super_admin':
+        return None, (jsonify({'success': False, 'error': 'Organisation context missing'}), 403)
+    return org_id, None
 
 
 def _generate_recurrence_dates(start, end, frequency):
@@ -42,12 +56,17 @@ def _generate_recurrence_dates(start, end, frequency):
 def get_sessions(current_user):
     """Get all sessions with optional filters"""
     try:
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Get query parameters
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
         coach_id = request.args.get('coach_id')
-        
+
         sessions = FirebaseService.get_all_sessions(
+            org_id,
             start_date=start_date,
             end_date=end_date,
             coach_id=coach_id
@@ -69,7 +88,10 @@ def get_sessions(current_user):
 def get_session(current_user, session_id):
     """Get a specific session by ID"""
     try:
-        session = FirebaseService.get_session(session_id)
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+        session = FirebaseService.get_session(session_id, org_id)
         if not session:
             return jsonify({
                 'success': False,
@@ -92,6 +114,10 @@ def get_session(current_user, session_id):
 def create_session(current_user):
     """Create a new session"""
     try:
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         data = request.get_json()
         if not data:
             return jsonify({'success': False, 'error': 'Request body is required'}), 400
@@ -135,6 +161,7 @@ def create_session(current_user):
             'team_ids': team_ids,
             'team_id': team_ids[0] if team_ids else '',
             'address': data.get('address', ''),
+            'org_id': org_id,
         }
 
         # Handle location - can be lat/lng object or location_id
@@ -211,14 +238,18 @@ def update_session(current_user, session_id):
         if not data:
             return jsonify({'success': False, 'error': 'Request body is required'}), 400
 
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Check if session exists
-        session = FirebaseService.get_session(session_id)
+        session = FirebaseService.get_session(session_id, org_id)
         if not session:
             return jsonify({
                 'success': False,
                 'error': 'Session not found'
             }), 404
-        
+
         # Update allowed fields
         update_data = {}
         allowed_fields = ['date', 'start_time', 'end_time', 'coach_id', 'coach_ids', 'location', 'address',
@@ -302,7 +333,11 @@ def delete_session(current_user, session_id):
             - all: delete all sessions in the recurrence group
     """
     try:
-        session = FirebaseService.get_session(session_id)
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
+        session = FirebaseService.get_session(session_id, org_id)
         if not session:
             return jsonify({'success': False, 'error': 'Session not found'}), 404
 
@@ -334,14 +369,18 @@ def delete_session(current_user, session_id):
 def send_reminder(current_user, session_id):
     """Manually send reminder for a session"""
     try:
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Get session
-        session = FirebaseService.get_session(session_id)
+        session = FirebaseService.get_session(session_id, org_id)
         if not session:
             return jsonify({
                 'success': False,
                 'error': 'Session not found'
             }), 404
-        
+
         # Get all coaches for this session
         coach_ids = FirebaseService.get_session_coach_ids(session)
         if not coach_ids:
@@ -354,7 +393,7 @@ def send_reminder(current_user, session_id):
         location_address = ''
         location_id = session.get('location_id')
         if location_id:
-            loc = FirebaseService.get_location(location_id)
+            loc = FirebaseService.get_location(location_id, org_id)
             if loc:
                 lat = loc.get('latitude')
                 lng = loc.get('longitude')
@@ -369,7 +408,7 @@ def send_reminder(current_user, session_id):
 
         results = []
         for cid in coach_ids:
-            coach = FirebaseService.get_coach(cid)
+            coach = FirebaseService.get_coach(cid, org_id)
             if not coach:
                 results.append({'coach_id': cid, 'error': 'Coach not found'})
                 continue
@@ -415,7 +454,10 @@ def send_reminder(current_user, session_id):
 def get_attendance(current_user, session_id):
     """Get attendance for a session"""
     try:
-        session = FirebaseService.get_session(session_id)
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+        session = FirebaseService.get_session(session_id, org_id)
         if not session:
             return jsonify({'success': False, 'error': 'Session not found'}), 404
 
@@ -436,7 +478,10 @@ def update_attendance(current_user, session_id):
         data = request.get_json()
         if not data:
             return jsonify({'success': False, 'error': 'Request body is required'}), 400
-        session = FirebaseService.get_session(session_id)
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+        session = FirebaseService.get_session(session_id, org_id)
         if not session:
             return jsonify({'success': False, 'error': 'Session not found'}), 404
 
@@ -459,7 +504,10 @@ def update_attendance(current_user, session_id):
 def cancel_session(current_user, session_id):
     """Cancel a session (admin-only)"""
     try:
-        session = FirebaseService.get_session(session_id)
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+        session = FirebaseService.get_session(session_id, org_id)
         if not session:
             return jsonify({'success': False, 'error': 'Session not found'}), 404
 
@@ -490,7 +538,10 @@ def cancel_session(current_user, session_id):
 def get_session_photos(current_user, session_id):
     """List photos attached to a session (admin)"""
     try:
-        session = FirebaseService.get_session(session_id)
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+        session = FirebaseService.get_session(session_id, org_id)
         if not session:
             return jsonify({'success': False, 'error': 'Session not found'}), 404
         return jsonify({
@@ -507,12 +558,16 @@ def get_session_photos(current_user, session_id):
 def add_session_photo_admin(current_user, session_id):
     """Attach a photo URL to a session (admin path)"""
     try:
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         data = request.get_json() or {}
         url = (data.get('url') or '').strip()
         if not url:
             return jsonify({'success': False, 'error': 'url is required'}), 400
 
-        session = FirebaseService.get_session(session_id)
+        session = FirebaseService.get_session(session_id, org_id)
         if not session:
             return jsonify({'success': False, 'error': 'Session not found'}), 404
 
@@ -537,7 +592,10 @@ def add_session_photo_admin(current_user, session_id):
 def delete_session_photo(current_user, session_id, photo_id):
     """Remove a photo reference from a session (admin)"""
     try:
-        session = FirebaseService.get_session(session_id)
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+        session = FirebaseService.get_session(session_id, org_id)
         if not session:
             return jsonify({'success': False, 'error': 'Session not found'}), 404
 
@@ -575,7 +633,9 @@ def add_session_photo_via_token(token):
                 return jsonify({'success': False, 'error': 'Check-in link has expired'}), 400
 
         session_id = token_data.get('session_id')
-        session = FirebaseService.get_session(session_id)
+        # Public endpoint: the check-in token is the authorization, not a
+        # JWT/org, so we look up the session directly without an org filter.
+        session = FirebaseService.get_session(session_id, None)
         if not session:
             return jsonify({'success': False, 'error': 'Session not found'}), 404
 
@@ -627,19 +687,21 @@ def get_check_in_info(token):
                     'error': 'This check-in link has expired'
                 }), 400
         
-        # Get session details
+        # Get session details. Public endpoint: the check-in token is the
+        # authorization, not a JWT/org, so we look up records directly
+        # without an org filter.
         session_id = token_data.get('session_id')
-        session = FirebaseService.get_session(session_id)
-        
+        session = FirebaseService.get_session(session_id, None)
+
         if not session:
             return jsonify({
                 'success': False,
                 'error': 'Session not found'
             }), 404
-        
+
         # Get coach details
         coach_id = session.get('coach_id')
-        coach = FirebaseService.get_coach(coach_id) if coach_id else None
+        coach = FirebaseService.get_coach(coach_id, None) if coach_id else None
         coach_name = 'Unknown'
         if coach:
             coach_name = coach.get('name') or f"{coach.get('first_name', '')} {coach.get('last_name', '')}".strip() or 'Unknown'
@@ -649,7 +711,7 @@ def get_check_in_info(token):
         address = session.get('address', '')
         location_id = session.get('location_id')
         if location_id:
-            location_record = FirebaseService.get_location(location_id)
+            location_record = FirebaseService.get_location(location_id, None)
             if location_record:
                 address = location_record.get('address', address)
                 lat = location_record.get('latitude')
@@ -721,10 +783,12 @@ def check_in(token):
                     'error': 'This check-in link has expired'
                 }), 400
         
-        # Get session
+        # Get session. Public endpoint: the check-in token is the
+        # authorization, not a JWT/org, so we look up the session directly
+        # without an org filter.
         session_id = token_data.get('session_id')
-        session = FirebaseService.get_session(session_id)
-        
+        session = FirebaseService.get_session(session_id, None)
+
         if not session:
             return jsonify({
                 'success': False,
@@ -742,7 +806,7 @@ def check_in(token):
         allowed_radius = Config.GEOLOCATION_RADIUS_METERS
         location_id = session.get('location_id')
         if location_id:
-            location_record = FirebaseService.get_location(location_id)
+            location_record = FirebaseService.get_location(location_id, None)
             if location_record:
                 lat = location_record.get('latitude')
                 lng = location_record.get('longitude')

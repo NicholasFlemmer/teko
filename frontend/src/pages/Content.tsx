@@ -12,6 +12,7 @@ import { EditContentModal } from "@/components/content/EditContentModal";
 import { AddUrlModal, type UrlItem } from "@/components/content/AddUrlModal";
 import { useToast } from "@/hooks/use-toast";
 import { contentAPI } from "@/services/api";
+import { useTerm } from "@/contexts/TerminologyContext";
 
 const typeFilters = ["All", "Text", "PDF", "CSV", "Excel", "Document"];
 
@@ -24,6 +25,8 @@ const typeIcons: Record<string, React.ElementType> = {
 };
 
 export default function Content() {
+  const coachSingular = useTerm("coach_singular");
+  const coachPlural = useTerm("coach_plural");
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("All");
@@ -164,7 +167,7 @@ export default function Content() {
         <div className="page-header">
           <div>
             <h1 className="page-title">Content</h1>
-            <p className="page-subtitle">Manage learning and coaching content</p>
+            <p className="page-subtitle">Manage learning and {coachSingular.toLowerCase()} content</p>
           </div>
           <Button className="gap-2" onClick={() => setIsAddModalOpen(true)}>
             <Upload className="w-4 h-4" />
@@ -269,7 +272,7 @@ export default function Content() {
                 URL Resources
               </h2>
               <p className="text-sm text-muted-foreground">
-                URLs the AI assistant can share with coaches based on context
+                URLs the AI assistant can share with {coachPlural.toLowerCase()} based on context
               </p>
             </div>
             <Button variant="outline" className="gap-2" onClick={() => { setEditUrl(null); setIsAddUrlOpen(true); }}>

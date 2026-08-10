@@ -2,6 +2,9 @@
 
 Creates the CATCH Trust organisation in a new `organisations` collection and
 backfills `org_id` onto every existing document across the core collections.
+Also backfills the `ai_persona_prompt` field (empty string) onto the org so
+it picks up its type-based default AI system prompt automatically — see
+ConversationService.get_ai_persona_prompt.
 
 Usage:
     cd backend
@@ -11,6 +14,9 @@ Safe to run more than once:
   - The CATCH Trust org is matched by its slug; it is reused if it already
     exists rather than duplicated.
   - Documents that already carry an `org_id` are skipped.
+  - The org's `ai_persona_prompt` is only backfilled if the field is
+    missing entirely — an existing value (even an empty string set some
+    other way) is left untouched.
 """
 import sys
 import os
@@ -32,6 +38,7 @@ COLLECTIONS = [
     'sessions',
     'broadcasts',
     'content',
+    'content_urls',
     'reminders',
     'admin_users',
 ]
@@ -56,10 +63,24 @@ def get_or_create_org(db, dry_run=False):
     Idempotent: matches an existing org by slug so re-running does not create
     a duplicate organisation. In dry-run mode, never writes — returns a
     placeholder id when the org doesn't yet exist.
+
+    Also backfills `ai_persona_prompt` (empty string) onto an existing org
+    that predates the field, so it falls back to its type's default AI
+    system prompt rather than having no field at all.
     """
     existing = db.collection('organisations').where('slug', '==', ORG_SLUG).limit(1).stream()
     for doc in existing:
-        print(f"Organisation '{ORG_NAME}' already exists (id: {doc.id}) — reusing it.")
+        data = doc.to_dict() or {}
+        if 'ai_persona_prompt' not in data:
+            if dry_run:
+                print(f"Organisation '{ORG_NAME}' already exists (id: {doc.id}) — reusing it.")
+                print(f"[dry-run] Would backfill ai_persona_prompt='' onto it (currently type={data.get('type')!r}).")
+            else:
+                doc.reference.update({'ai_persona_prompt': ''})
+                print(f"Organisation '{ORG_NAME}' already exists (id: {doc.id}) — reusing it.")
+                print(f"Backfilled ai_persona_prompt='' onto it (type={data.get('type')!r}).")
+        else:
+            print(f"Organisation '{ORG_NAME}' already exists (id: {doc.id}) — reusing it.")
         return doc.id
 
     if dry_run:
@@ -72,6 +93,7 @@ def get_or_create_org(db, dry_run=False):
         'slug': ORG_SLUG,
         'type': 'ngo',
         'terminology': TERMINOLOGY,
+        'ai_persona_prompt': '',
         'created_at': firestore.SERVER_TIMESTAMP,
         'is_active': True,
     })

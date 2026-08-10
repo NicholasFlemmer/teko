@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Plus, X, Loader2, Repeat } from "lucide-react";
+import { useTerm } from "@/contexts/TerminologyContext";
 import {
   Dialog,
   DialogContent,
@@ -66,6 +67,13 @@ const defaultSessionTypes = [
 ];
 
 export function CreateSessionModal({ open, onOpenChange, coaches, teams, locations, onSuccess }: CreateSessionModalProps) {
+  const sessionSingular = useTerm("session_singular");
+  const sessionPlural = useTerm("session_plural");
+  const coachSingular = useTerm("coach_singular");
+  const coachPlural = useTerm("coach_plural");
+  const teamPlural = useTerm("team_plural");
+  const locationSingular = useTerm("location_singular");
+  const playerPlural = useTerm("player_plural");
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
   const [formData, setFormData] = useState({
@@ -113,7 +121,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
     }
 
     if (formData.recurring && !formData.recurrenceEndDate) {
-      toast({ title: "Missing end date", description: "Please set an end date for the recurring session.", variant: "destructive" });
+      toast({ title: "Missing end date", description: `Please set an end date for the recurring ${sessionSingular.toLowerCase()}.`, variant: "destructive" });
       return;
     }
 
@@ -140,15 +148,15 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
 
       const result = await sessionsAPI.create(payload);
       const desc = (result as any).sessions
-        ? `${(result as any).sessions.length} recurring sessions created.`
-        : "The session has been scheduled successfully.";
-      toast({ title: "Session created", description: desc });
+        ? `${(result as any).sessions.length} recurring ${sessionPlural.toLowerCase()} created.`
+        : `The ${sessionSingular.toLowerCase()} has been scheduled successfully.`;
+      toast({ title: `${sessionSingular} created`, description: desc });
       resetForm();
       onOpenChange(false);
       onSuccess();
     } catch (err: any) {
       console.error("Failed to create session:", err);
-      toast({ title: "Error", description: err.message || "Failed to create session.", variant: "destructive" });
+      toast({ title: "Error", description: err.message || `Failed to create ${sessionSingular.toLowerCase()}.`, variant: "destructive" });
     } finally {
       setSubmitting(false);
     }
@@ -186,9 +194,9 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
               <Plus className="w-5 h-5 text-primary" />
             </div>
             <div>
-              <DialogTitle className="text-xl">Create Session</DialogTitle>
+              <DialogTitle className="text-xl">Create {sessionSingular}</DialogTitle>
               <p className="text-sm text-muted-foreground mt-0.5">
-                Schedule a new coaching session
+                Schedule a new {sessionSingular.toLowerCase()}
               </p>
             </div>
           </div>
@@ -197,7 +205,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
         <form onSubmit={handleSubmit} className="space-y-4 mt-4">
           {/* Team Selection (multi) */}
           <div className="space-y-2">
-            <Label>Team(s)</Label>
+            <Label>{teamPlural}</Label>
             <div className="border border-border rounded-md p-2 max-h-[140px] overflow-y-auto space-y-1">
               {teams.map((team) => {
                 const isSelected = formData.teams.includes(team.id.toString());
@@ -225,12 +233,12 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
                 );
               })}
               {teams.length === 0 && (
-                <p className="text-xs text-muted-foreground px-2 py-1">No teams available</p>
+                <p className="text-xs text-muted-foreground px-2 py-1">No {teamPlural.toLowerCase()} available</p>
               )}
             </div>
             {selectedTeams.length > 0 && (
               <p className="text-xs text-muted-foreground">
-                Players will be loaded from {selectedTeams.map(t => t.name).join(", ")} for roll call
+                {playerPlural} will be loaded from {selectedTeams.map(t => t.name).join(", ")} for roll call
               </p>
             )}
           </div>
@@ -238,7 +246,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
           {/* Session Type with add/delete */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label>Session Type</Label>
+              <Label>{sessionSingular} Type</Label>
               <Popover open={isAddingType} onOpenChange={setIsAddingType}>
                 <PopoverTrigger asChild>
                   <Button type="button" variant="ghost" size="sm" className="h-7 gap-1 text-xs text-primary">
@@ -298,12 +306,12 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
               })}
             </div>
             {sessionTypes.length === 0 && (
-              <p className="text-xs text-muted-foreground">No session types. Click "New Type" to add one.</p>
+              <p className="text-xs text-muted-foreground">No {sessionSingular.toLowerCase()} types. Click "New Type" to add one.</p>
             )}
           </div>
 
           <div className="space-y-2">
-            <Label>Coach(es)</Label>
+            <Label>{coachPlural}</Label>
             <div className="border border-border rounded-md p-2 max-h-[140px] overflow-y-auto space-y-1">
               {coaches.map((coach) => {
                 const isSelected = formData.coaches.includes(coach.id.toString());
@@ -331,24 +339,24 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
                 );
               })}
               {coaches.length === 0 && (
-                <p className="text-xs text-muted-foreground px-2 py-1">No coaches available</p>
+                <p className="text-xs text-muted-foreground px-2 py-1">No {coachPlural.toLowerCase()} available</p>
               )}
             </div>
             {formData.coaches.length > 0 && (
               <p className="text-xs text-muted-foreground">
-                {formData.coaches.length} coach{formData.coaches.length > 1 ? "es" : ""} selected
+                {formData.coaches.length} {formData.coaches.length === 1 ? coachSingular.toLowerCase() : coachPlural.toLowerCase()} selected
               </p>
             )}
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="location">Location</Label>
+            <Label htmlFor="location">{locationSingular}</Label>
             <Select
               value={formData.location}
               onValueChange={(value) => setFormData(prev => ({ ...prev, location: value }))}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select a location" />
+                <SelectValue placeholder={`Select a ${locationSingular.toLowerCase()}`} />
               </SelectTrigger>
               <SelectContent>
                 {locations.map((location) => (
@@ -361,7 +369,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
             {selectedLocation?.address && import.meta.env.VITE_GOOGLE_MAPS_API_KEY && (
               <div className="rounded-lg border border-border overflow-hidden mt-2">
                 <iframe
-                  title="Location Preview"
+                  title={`${locationSingular} Preview`}
                   width="100%"
                   height="150"
                   style={{ border: 0 }}
@@ -415,7 +423,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
                 className="rounded border-border"
               />
               <Repeat className="w-4 h-4 text-muted-foreground" />
-              <span className="text-sm font-medium">Recurring session</span>
+              <span className="text-sm font-medium">Recurring {sessionSingular.toLowerCase()}</span>
             </label>
 
             {formData.recurring && (
@@ -455,7 +463,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
             <Label htmlFor="notes">Notes (Optional)</Label>
             <Textarea
               id="notes"
-              placeholder="Any additional notes for this session..."
+              placeholder={`Any additional notes for this ${sessionSingular.toLowerCase()}...`}
               value={formData.notes}
               onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
               rows={2}
@@ -465,7 +473,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
           <div className="flex gap-3 pt-4">
             <Button type="submit" className="flex-1" disabled={submitting}>
               {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-              {submitting ? "Creating..." : "Create Session"}
+              {submitting ? "Creating..." : `Create ${sessionSingular}`}
             </Button>
             <Button
               type="button"
@@ -483,9 +491,9 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
       <AlertDialog open={deleteTypeId !== null} onOpenChange={() => setDeleteTypeId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Session Type?</AlertDialogTitle>
+            <AlertDialogTitle>Delete {sessionSingular} Type?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will remove "{sessionTypes.find((t) => t.id === deleteTypeId)?.name}" from your session types. Any existing sessions using this type won't be affected.
+              This will remove "{sessionTypes.find((t) => t.id === deleteTypeId)?.name}" from your {sessionSingular.toLowerCase()} types. Any existing {sessionPlural.toLowerCase()} using this type won't be affected.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

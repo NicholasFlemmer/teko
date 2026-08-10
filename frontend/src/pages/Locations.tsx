@@ -10,6 +10,9 @@ import { locationsAPI, sessionsAPI, coachesAPI } from "@/services/api";
 
 export default function Locations() {
   const locationPlural = useTerm("location_plural");
+  const locationSingular = useTerm("location_singular");
+  const coachPlural = useTerm("coach_plural");
+  const sessionPlural = useTerm("session_plural");
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -33,7 +36,7 @@ export default function Locations() {
       setCoaches(coachesRes.coaches || []);
     } catch (err: any) {
       console.error("Failed to fetch locations:", err);
-      setError(err.message || "Failed to load locations. Please try again.");
+      setError(err.message || `Failed to load ${locationPlural.toLowerCase()}. Please try again.`);
     } finally {
       setLoading(false);
     }
@@ -89,14 +92,14 @@ export default function Locations() {
           </div>
           <Button className="gap-2" onClick={() => setIsAddModalOpen(true)}>
             <Plus className="w-4 h-4" />
-            Add Location
+            Add {locationSingular}
           </Button>
         </div>
 
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
-            placeholder="Search locations..."
+            placeholder={`Search ${locationPlural.toLowerCase()}...`}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10 bg-card"
@@ -106,7 +109,7 @@ export default function Locations() {
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-            <span className="ml-2 text-muted-foreground">Loading locations...</span>
+            <span className="ml-2 text-muted-foreground">Loading {locationPlural.toLowerCase()}...</span>
           </div>
         ) : error ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -131,14 +134,14 @@ export default function Locations() {
                   <div className="text-center p-2 rounded-lg bg-muted/50">
                     <div className="flex items-center justify-center gap-1 text-xs text-muted-foreground">
                       <Users className="w-3 h-3" />
-                      Coaches
+                      {coachPlural}
                     </div>
                     <p className="font-semibold text-foreground mt-1">{location.coaches}</p>
                   </div>
                   <div className="text-center p-2 rounded-lg bg-muted/50">
                     <div className="flex items-center justify-center gap-1 text-xs text-muted-foreground">
                       <Calendar className="w-3 h-3" />
-                      Sessions
+                      {sessionPlural}
                     </div>
                     <p className="font-semibold text-foreground mt-1">{location.sessions}</p>
                   </div>
@@ -161,7 +164,7 @@ export default function Locations() {
         {!loading && filteredLocations.length === 0 && (
           <div className="text-center py-12">
             <MapPin className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
-            <p className="text-muted-foreground">No locations found</p>
+            <p className="text-muted-foreground">No {locationPlural.toLowerCase()} found</p>
           </div>
         )}
       </div>

@@ -1,12 +1,26 @@
 import logging
 from datetime import date as _date
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from services.firebase_service import FirebaseService
 from routes.auth import token_required
 
 logger = logging.getLogger(__name__)
 
 reports_bp = Blueprint('reports', __name__)
+
+
+def _resolve_org_scope():
+    """Resolve the org_id to filter by for the current request.
+
+    Returns (org_id, None) on success, or (None, error_response) if the
+    caller has no org context and isn't the intentional super_admin
+    cross-org case (role == 'super_admin' with no assigned org).
+    """
+    org_id = getattr(g, 'current_user_org_id', None)
+    role = getattr(g, 'current_user_role', None)
+    if org_id is None and role != 'super_admin':
+        return None, (jsonify({'success': False, 'error': 'Organisation context missing'}), 403)
+    return org_id, None
 
 
 def _validate_date(date_str):
@@ -24,16 +38,20 @@ def _validate_date(date_str):
 def get_coach_attendance(current_user):
     """Get coach attendance data with optional date range"""
     try:
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         start_date = _validate_date(request.args.get('start_date'))
         end_date = _validate_date(request.args.get('end_date'))
 
         # Get sessions in date range
         if start_date and end_date:
-            sessions = FirebaseService.get_sessions_by_date_range(start_date, end_date)
+            sessions = FirebaseService.get_sessions_by_date_range(org_id, start_date, end_date)
         else:
-            sessions = FirebaseService.get_all_sessions(start_date=start_date, end_date=end_date)
+            sessions = FirebaseService.get_all_sessions(org_id, start_date=start_date, end_date=end_date)
 
-        coaches = FirebaseService.get_all_coaches()
+        coaches = FirebaseService.get_all_coaches(org_id)
         coach_map = {c['id']: c for c in coaches}
 
         # Aggregate by coach
@@ -74,15 +92,19 @@ def get_coach_attendance(current_user):
 def get_location_attendance(current_user):
     """Get location attendance data with optional date range"""
     try:
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         start_date = _validate_date(request.args.get('start_date'))
         end_date = _validate_date(request.args.get('end_date'))
 
         if start_date and end_date:
-            sessions = FirebaseService.get_sessions_by_date_range(start_date, end_date)
+            sessions = FirebaseService.get_sessions_by_date_range(org_id, start_date, end_date)
         else:
-            sessions = FirebaseService.get_all_sessions(start_date=start_date, end_date=end_date)
+            sessions = FirebaseService.get_all_sessions(org_id, start_date=start_date, end_date=end_date)
 
-        locations = FirebaseService.get_all_locations()
+        locations = FirebaseService.get_all_locations(org_id)
         location_map = {l['id']: l for l in locations}
 
         # Aggregate by location
@@ -121,18 +143,22 @@ def get_location_attendance(current_user):
 def get_student_rollcall(current_user):
     """Get student participation / roll call data using attended_player_ids"""
     try:
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         start_date = _validate_date(request.args.get('start_date'))
         end_date = _validate_date(request.args.get('end_date'))
 
         # Get sessions in date range
         if start_date and end_date:
-            sessions = FirebaseService.get_sessions_by_date_range(start_date, end_date)
+            sessions = FirebaseService.get_sessions_by_date_range(org_id, start_date, end_date)
         else:
-            sessions = FirebaseService.get_all_sessions(start_date=start_date, end_date=end_date)
+            sessions = FirebaseService.get_all_sessions(org_id, start_date=start_date, end_date=end_date)
 
         # Get all players
-        players = FirebaseService.get_all_players()
-        teams = FirebaseService.get_all_teams()
+        players = FirebaseService.get_all_players(org_id)
+        teams = FirebaseService.get_all_teams(org_id)
         team_map = {t['id']: t for t in teams}
 
         # For each player, count how many sessions they appear in attended_player_ids
@@ -185,13 +211,17 @@ def get_student_rollcall(current_user):
 def get_stats(current_user):
     """Get quick stats: total sessions, check-in rate, students, active coaches"""
     try:
-        sessions = FirebaseService.get_all_sessions()
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
+        sessions = FirebaseService.get_all_sessions(org_id)
         total_sessions = len(sessions)
         checked_in_count = sum(1 for s in sessions if s.get('status') in ('checked_in', 'completed'))
         check_in_rate = round((checked_in_count / total_sessions) * 100) if total_sessions > 0 else 0
 
-        total_students = FirebaseService.count_players()
-        active_coaches = FirebaseService.count_active_coaches()
+        total_students = FirebaseService.count_players(org_id)
+        active_coaches = FirebaseService.count_active_coaches(org_id)
 
         stats = {
             'total_sessions': total_sessions,

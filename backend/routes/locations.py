@@ -1,5 +1,5 @@
 import logging
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from services.firebase_service import FirebaseService
 from routes.auth import token_required
 from utils.geolocation import extract_coords_from_maps_url
@@ -8,12 +8,30 @@ logger = logging.getLogger(__name__)
 
 locations_bp = Blueprint('locations', __name__)
 
+
+def _resolve_org_scope():
+    """Resolve the org_id to filter by for the current request.
+
+    Returns (org_id, None) on success, or (None, error_response) if the
+    caller has no org context and isn't the intentional super_admin
+    cross-org case (role == 'super_admin' with no assigned org).
+    """
+    org_id = getattr(g, 'current_user_org_id', None)
+    role = getattr(g, 'current_user_role', None)
+    if org_id is None and role != 'super_admin':
+        return None, (jsonify({'success': False, 'error': 'Organisation context missing'}), 403)
+    return org_id, None
+
+
 @locations_bp.route('', methods=['GET'])
 @token_required
 def get_locations(current_user):
     """Get all locations"""
     try:
-        locations = FirebaseService.get_all_locations()
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+        locations = FirebaseService.get_all_locations(org_id)
         return jsonify({
             'success': True,
             'locations': locations
@@ -30,7 +48,10 @@ def get_locations(current_user):
 def get_location(current_user, location_id):
     """Get a specific location by ID"""
     try:
-        location = FirebaseService.get_location(location_id)
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+        location = FirebaseService.get_location(location_id, org_id)
         if not location:
             return jsonify({
                 'success': False,
@@ -79,13 +100,18 @@ def create_location(current_user):
                 except (ValueError, TypeError):
                     pass
 
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Create location
         location_data = {
             'name': data['name'],
             'address': data.get('address', ''),
             'google_maps_link': maps_link,
             'radius': data.get('radius', 100),
-            'notes': data.get('notes', '')
+            'notes': data.get('notes', ''),
+            'org_id': org_id,
         }
         if coords:
             location_data['latitude'] = coords['latitude']
@@ -114,8 +140,12 @@ def update_location(current_user, location_id):
         if not data:
             return jsonify({'success': False, 'error': 'Request body is required'}), 400
 
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Check if location exists
-        location = FirebaseService.get_location(location_id)
+        location = FirebaseService.get_location(location_id, org_id)
         if not location:
             return jsonify({
                 'success': False,
@@ -163,8 +193,12 @@ def update_location(current_user, location_id):
 def delete_location(current_user, location_id):
     """Delete a location"""
     try:
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
         # Check if location exists
-        location = FirebaseService.get_location(location_id)
+        location = FirebaseService.get_location(location_id, org_id)
         if not location:
             return jsonify({
                 'success': False,

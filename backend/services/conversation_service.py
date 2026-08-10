@@ -39,8 +39,12 @@ def _sanitize_for_prompt(text, max_length=200):
 
 class ConversationService:
     """Service for managing AI conversations with coaches via WhatsApp"""
-    
-    CRICKET_COACHING_PROMPT = """You are a professional cricket coaching specialist assistant helping coaches in South Africa.
+
+    # Default AI persona prompts, keyed by Organisation.type. An org can
+    # override its prompt entirely via Organisation.ai_persona_prompt; see
+    # get_ai_persona_prompt().
+    DEFAULT_AI_PERSONA_PROMPTS = {
+        "sports": """You are a professional cricket coaching specialist assistant helping coaches in South Africa.
 
 EXPERTISE:
 - Cricket techniques: Batting (grip, stance, footwork, shots), Bowling (grip, action, variations), Fielding (catching, throwing, positioning)
@@ -81,7 +85,162 @@ CONSTRAINTS:
 - When the coach asks about their team, players, or schedule, use the data provided
 - Don't provide medical advice, refer to professionals
 
-Remember: You're helping coaches develop their skills and help their players improve."""
+Remember: You're helping coaches develop their skills and help their players improve.""",
+
+        "ngo": """You are a program support assistant helping coaches and session facilitators at a community or non-profit organisation in South Africa.
+
+EXPERTISE:
+- Facilitating group sessions and activities for community programs
+- Youth and community development methodologies
+- Session planning, structure, and pacing
+- Participant engagement and inclusive facilitation techniques
+- Attendance tracking and session logistics
+- Safeguarding awareness and creating a safe, supportive environment
+- Working with volunteers and community stakeholders
+
+YOUR ROLE:
+- Provide practical, actionable facilitation advice
+- Suggest activities and exercises suited to the program's goals
+- Explain techniques clearly and simply
+- Consider the coach's experience level and available resources
+- Be encouraging and supportive
+
+COMMUNICATION STYLE:
+- Professional but friendly
+- Concise responses (suitable for WhatsApp)
+- Use bullet points and numbered lists
+- Include practical examples
+- Ask clarifying questions when needed
+
+LANGUAGE:
+- Detect and respond in the SAME language the coach uses
+- Support all 11 official South African languages:
+  * Afrikaans, English
+  * isiNdebele, isiXhosa, isiZulu
+  * Sepedi, Sesotho, Setswana
+  * siSwati, Tshivenda, Xitsonga
+
+CONSTRAINTS:
+- Keep responses under 1000 characters when possible
+- Focus on program facilitation and the coach's group/schedule
+- If asked about unrelated topics, politely redirect
+- When the coach asks about their group, participants, or schedule, use the data provided
+- Don't provide medical, legal, or safeguarding-incident advice beyond general awareness — refer serious concerns to the organisation's designated safeguarding contact
+
+Remember: You're helping coaches run great sessions and support their participants.""",
+
+        "events": """You are a session support assistant helping coaches and crew leads coordinate activities and sessions at events in South Africa.
+
+EXPERTISE:
+- Running activity sessions, workshops, and event-day programming
+- Session and shift planning, timing, and logistics
+- Participant and attendee engagement techniques
+- Team and volunteer coordination on event day
+- Attendance and check-in tracking
+- Troubleshooting common on-the-day event issues (venue, timing, equipment)
+
+YOUR ROLE:
+- Provide practical, actionable guidance for running sessions smoothly
+- Suggest ways to keep activities on schedule and engaging
+- Explain processes clearly and simply
+- Consider the coach's experience level and the resources on hand
+- Be encouraging and supportive
+
+COMMUNICATION STYLE:
+- Professional but friendly
+- Concise responses (suitable for WhatsApp)
+- Use bullet points and numbered lists
+- Include practical examples
+- Ask clarifying questions when needed
+
+LANGUAGE:
+- Detect and respond in the SAME language the coach uses
+- Support all 11 official South African languages:
+  * Afrikaans, English
+  * isiNdebele, isiXhosa, isiZulu
+  * Sepedi, Sesotho, Setswana
+  * siSwati, Tshivenda, Xitsonga
+
+CONSTRAINTS:
+- Keep responses under 1000 characters when possible
+- Focus on event sessions and the coach's team/schedule
+- If asked about unrelated topics, politely redirect
+- When the coach asks about their team, participants, or schedule, use the data provided
+- Don't provide medical advice, refer to professionals
+
+Remember: You're helping coaches deliver smooth, well-run sessions at every event.""",
+
+        "corporate": """You are a training and session support assistant helping coaches and facilitators run corporate learning and development sessions in South Africa.
+
+EXPERTISE:
+- Facilitating workplace training sessions and workshops
+- Adult learning principles and corporate coaching methodologies
+- Session planning, structure, and pacing
+- Participant engagement and group facilitation techniques
+- Attendance tracking and session logistics
+- Giving and structuring constructive feedback
+
+YOUR ROLE:
+- Provide practical, actionable coaching and facilitation advice
+- Suggest exercises and activities suited to the session's objectives
+- Explain concepts clearly and simply
+- Consider the coach's experience level and the resources available
+- Be encouraging and professional
+
+COMMUNICATION STYLE:
+- Professional but approachable
+- Concise responses (suitable for WhatsApp)
+- Use bullet points and numbered lists
+- Include practical examples
+- Ask clarifying questions when needed
+
+LANGUAGE:
+- Detect and respond in the SAME language the coach uses
+- Support all 11 official South African languages:
+  * Afrikaans, English
+  * isiNdebele, isiXhosa, isiZulu
+  * Sepedi, Sesotho, Setswana
+  * siSwati, Tshivenda, Xitsonga
+
+CONSTRAINTS:
+- Keep responses under 1000 characters when possible
+- Focus on session facilitation and the coach's team/schedule
+- If asked about unrelated topics, politely redirect
+- When the coach asks about their team, participants, or schedule, use the data provided
+- Don't provide HR, legal, or performance-management advice — refer to HR or the appropriate department
+
+Remember: You're helping coaches run effective sessions and support their team's development.""",
+    }
+
+    @classmethod
+    def get_ai_persona_prompt(cls, org_id):
+        """Resolve the AI system persona prompt to use for a given org.
+
+        Priority:
+        1. The org's own Organisation.ai_persona_prompt override, if set.
+        2. The default prompt for the org's Organisation.type.
+        3. The sports default, as a defensive fallback — this shouldn't be
+           reachable once every org has a valid type post-migration, so it's
+           logged as a warning if hit.
+        """
+        org = FirebaseService.get_organisation(org_id) if org_id else None
+
+        if org:
+            custom_prompt = (org.get('ai_persona_prompt') or '').strip()
+            if custom_prompt:
+                return custom_prompt
+
+            org_type = org.get('type')
+            default_prompt = cls.DEFAULT_AI_PERSONA_PROMPTS.get(org_type)
+            if default_prompt:
+                return default_prompt
+
+        logger.warning(
+            "No org/type found for org_id=%s when resolving AI persona prompt "
+            "(org=%s) — falling back to the sports default.",
+            org_id, 'found' if org else 'not found'
+        )
+        return cls.DEFAULT_AI_PERSONA_PROMPTS['sports']
 
     @classmethod
     def get_conversation_history(cls, coach_phone, limit=10):
@@ -161,11 +320,11 @@ Remember: You're helping coaches develop their skills and help their players imp
             logger.error("Error saving message: %s", e)
     
     @classmethod
-    def load_rag_context(cls):
-        """Load all content and URLs from Firestore for RAG context"""
+    def load_rag_context(cls, org_id):
+        """Load all content and URLs from Firestore for RAG context, scoped to org_id"""
         try:
-            content_items = FirebaseService.get_all_content()
-            url_items = FirebaseService.get_all_urls()
+            content_items = FirebaseService.get_all_content(org_id)
+            url_items = FirebaseService.get_all_urls(org_id)
 
             sections = []
 
@@ -212,8 +371,8 @@ Remember: You're helping coaches develop their skills and help their players imp
             return ''
 
     @classmethod
-    def load_coach_context(cls, coach_id):
-        """Load coach-specific context: their teams, players, and upcoming sessions."""
+    def load_coach_context(cls, coach_id, org_id):
+        """Load coach-specific context: their teams, players, and upcoming sessions, scoped to org_id."""
         if not coach_id:
             return ''
         try:
@@ -221,7 +380,7 @@ Remember: You're helping coaches develop their skills and help their players imp
             sections = []
 
             # Teams this coach belongs to
-            all_teams = FirebaseService.get_all_teams()
+            all_teams = FirebaseService.get_all_teams(org_id)
             coach_teams = [t for t in all_teams if coach_id in (t.get('coach_ids') or [])]
 
             if coach_teams:
@@ -232,7 +391,7 @@ Remember: You're helping coaches develop their skills and help their players imp
                     lines.append(f"- {team_name} ({age_group})" if age_group else f"- {team_name}")
 
                     # Players in this team
-                    players = FirebaseService.get_all_players(team_id=team.get('id'))
+                    players = FirebaseService.get_all_players(org_id, team_id=team.get('id'))
                     if players:
                         for p in players:
                             pname = _sanitize_for_prompt(
@@ -246,7 +405,7 @@ Remember: You're helping coaches develop their skills and help their players imp
 
             # Upcoming sessions (today and future)
             today_str = _date.today().strftime('%Y-%m-%d')
-            sessions = FirebaseService.get_all_sessions(coach_id=coach_id, start_date=today_str)
+            sessions = FirebaseService.get_all_sessions(org_id, coach_id=coach_id, start_date=today_str)
             if sessions:
                 sessions.sort(key=lambda s: (s.get('date', ''), s.get('start_time', '')))
                 lines = ["YOUR UPCOMING SESSIONS:"]
@@ -278,14 +437,20 @@ Remember: You're helping coaches develop their skills and help their players imp
             # Get conversation history
             history = cls.get_conversation_history(coach_phone, limit=5)
 
+            # Determine the coach's org from their own record (matched by
+            # phone number, which carries org_id after the migration script)
+            # so RAG content and coach context stay scoped to their org.
+            requesting_coach = cls.get_coach_by_phone(coach_phone)
+            org_id = requesting_coach.get('org_id') if requesting_coach else None
+
             # Load RAG content
-            rag_context = cls.load_rag_context()
+            rag_context = cls.load_rag_context(org_id)
 
             # Load coach-specific context (teams, players, sessions)
-            coach_context = cls.load_coach_context(coach_id)
+            coach_context = cls.load_coach_context(coach_id, org_id)
 
             # Build context for Gemini
-            context = cls.CRICKET_COACHING_PROMPT + "\n\n"
+            context = cls.get_ai_persona_prompt(org_id) + "\n\n"
 
             if rag_context:
                 context += rag_context + "\n"
@@ -399,12 +564,13 @@ Remember: You're helping coaches develop their skills and help their players imp
     @classmethod
     def _handle_attendance_command_inner(cls, coach):
         coach_id = coach.get('id')
+        org_id = coach.get('org_id')
         today_str = date.today().strftime('%Y-%m-%d')
         logger.info("Attendance command from coach %s (id=%s) for %s", coach.get('name'), coach_id, today_str)
 
         # Query by coach_id only to avoid Firestore composite index requirement,
         # then filter by date in Python
-        all_coach_sessions = FirebaseService.get_all_sessions(coach_id=coach_id)
+        all_coach_sessions = FirebaseService.get_all_sessions(org_id, coach_id=coach_id)
         sessions = [s for s in all_coach_sessions if s.get('date') == today_str and s.get('team_id')]
         logger.info("Found %d session(s) with teams for today (out of %d total)", len(sessions), len(all_coach_sessions))
 
@@ -419,7 +585,7 @@ Remember: You're helping coaches develop their skills and help their players imp
         # Check if attendance already recorded
         if session.get('attended_player_ids') is not None and len(session.get('attended_player_ids', [])) > 0:
             attended_ids = set(session['attended_player_ids'])
-            players = FirebaseService.get_all_players(team_id=team_id)
+            players = FirebaseService.get_all_players(org_id, team_id=team_id)
             total = len(players)
             present_count = 0
             absent_names = []
@@ -441,10 +607,10 @@ Remember: You're helping coaches develop their skills and help their players imp
             lines.append("\nSend /attendance-redo to record it again.")
             return '\n'.join(lines)
 
-        team = FirebaseService.get_team(team_id)
+        team = FirebaseService.get_team(team_id, org_id)
         team_name = team.get('name', 'your team') if team else 'your team'
 
-        players = FirebaseService.get_all_players(team_id=team_id)
+        players = FirebaseService.get_all_players(org_id, team_id=team_id)
         if not players:
             return f"No players found for {team_name}. Please contact your administrator."
 
@@ -557,8 +723,10 @@ Remember: You're helping coaches develop their skills and help their players imp
         lines.append("\n📸 Please send a group photo of the team!")
         lines.append("Reply /end to mark this session as completed.")
 
-        # Set pending photo state so next image is linked to this session
-        session_data = FirebaseService.get_session(session_id)
+        # Set pending photo state so next image is linked to this session.
+        # session_id comes from our own server-side pending-attendance state
+        # for this coach, not user input, so no org filter is needed here.
+        session_data = FirebaseService.get_session(session_id, None)
         team_id = session_data.get('team_id', '') if session_data else ''
         cls.set_pending_photo(coach_phone, session_id, team_id)
 
@@ -568,8 +736,9 @@ Remember: You're helping coaches develop their skills and help their players imp
     def handle_attendance_redo(cls, coach):
         """Allow re-recording attendance for today's session"""
         coach_id = coach.get('id')
+        org_id = coach.get('org_id')
         today_str = date.today().strftime('%Y-%m-%d')
-        all_coach_sessions = FirebaseService.get_all_sessions(coach_id=coach_id)
+        all_coach_sessions = FirebaseService.get_all_sessions(org_id, coach_id=coach_id)
         sessions = [s for s in all_coach_sessions if s.get('date') == today_str and s.get('team_id')]
         if not sessions:
             return "You don't have any sessions scheduled for today. 📋"
@@ -779,11 +948,12 @@ Remember: You're helping coaches develop their skills and help their players imp
                 return
 
             coach_id = coach.get('id')
+            org_id = coach.get('org_id')
             coach_name = coach.get('name', 'Coach')
             today_str = date.today().strftime('%Y-%m-%d')
 
             # Find today's sessions for this coach
-            all_sessions = FirebaseService.get_all_sessions(coach_id=coach_id)
+            all_sessions = FirebaseService.get_all_sessions(org_id, coach_id=coach_id)
             sessions = [s for s in all_sessions if s.get('date') == today_str]
             logger.info("Found %d session(s) for %s today", len(sessions), coach_name)
 
@@ -816,7 +986,7 @@ Remember: You're helping coaches develop their skills and help their players imp
             allowed_radius = Config.GEOLOCATION_RADIUS_METERS
 
             if location_id:
-                loc_record = FirebaseService.get_location(location_id)
+                loc_record = FirebaseService.get_location(location_id, org_id)
                 if loc_record:
                     lat = loc_record.get('latitude')
                     lng = loc_record.get('longitude')
@@ -906,9 +1076,10 @@ Remember: You're helping coaches develop their skills and help their players imp
         """Mark today's active session as completed."""
         from firebase_admin import firestore as _firestore
         coach_id = coach.get('id')
+        org_id = coach.get('org_id')
         today_str = date.today().strftime('%Y-%m-%d')
 
-        all_coach_sessions = FirebaseService.get_all_sessions(coach_id=coach_id)
+        all_coach_sessions = FirebaseService.get_all_sessions(org_id, coach_id=coach_id)
         sessions = [s for s in all_coach_sessions if s.get('date') == today_str]
 
         if not sessions:
@@ -957,7 +1128,8 @@ Remember: You're helping coaches develop their skills and help their players imp
     def handle_players_command(cls, coach):
         """Return a formatted list of the coach's players grouped by team."""
         coach_id = coach.get('id')
-        all_teams = FirebaseService.get_all_teams()
+        org_id = coach.get('org_id')
+        all_teams = FirebaseService.get_all_teams(org_id)
         coach_teams = [t for t in all_teams if coach_id in (t.get('coach_ids') or [])]
 
         if not coach_teams:
@@ -973,7 +1145,7 @@ Remember: You're helping coaches develop their skills and help their players imp
                 header += f" ({age_group})"
             lines.append(header)
 
-            players = FirebaseService.get_all_players(team_id=team.get('id'))
+            players = FirebaseService.get_all_players(org_id, team_id=team.get('id'))
             if not players:
                 lines.append("  (no players registered)")
             else:
@@ -1086,7 +1258,10 @@ Remember: You're helping coaches develop their skills and help their players imp
         if now - cls._coach_phone_cache_ts < cls._COACH_CACHE_TTL and cls._coach_phone_cache:
             return
         try:
-            coaches = FirebaseService.get_all_coaches()
+            # This is the phone-number-to-coach identity lookup used before
+            # we know which org an incoming message belongs to (analogous to
+            # login-by-email), so it intentionally spans every org.
+            coaches = FirebaseService.get_all_coaches(None)
             cache: dict = {}
             for coach in coaches:
                 raw = coach.get('phone_number', '')

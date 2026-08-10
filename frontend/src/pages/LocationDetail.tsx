@@ -26,6 +26,7 @@ import {
 import { MainLayout } from "@/components/layout/MainLayout";
 import { locationsAPI, sessionsAPI, coachesAPI, playersAPI } from "@/services/api";
 import { geocodeAddress, extractCoordsFromMapsUrl } from "@/lib/geocode";
+import { useTerm } from "@/contexts/TerminologyContext";
 
 const COACH_COLORS = [
   "bg-primary", "bg-success", "bg-info", "bg-warning",
@@ -33,6 +34,11 @@ const COACH_COLORS = [
 ];
 
 export default function LocationDetail() {
+  const locationSingular = useTerm("location_singular");
+  const locationPlural = useTerm("location_plural");
+  const coachPlural = useTerm("coach_plural");
+  const sessionSingular = useTerm("session_singular");
+  const sessionPlural = useTerm("session_plural");
   const { id } = useParams();
   const navigate = useNavigate();
   const [location, setLocation] = useState<any>(null);
@@ -78,7 +84,7 @@ export default function LocationDetail() {
         });
       } catch (err) {
         console.error("Failed to fetch location detail:", err);
-        setFetchError("Failed to load location. Please check your connection and try again.");
+        setFetchError(`Failed to load ${locationSingular.toLowerCase()}. Please check your connection and try again.`);
       } finally {
         setLoading(false);
       }
@@ -121,7 +127,7 @@ export default function LocationDetail() {
       setIsEditing(false);
     } catch (err: any) {
       console.error("Failed to save location:", err);
-      setSaveError(err.message || "Failed to save location");
+      setSaveError(err.message || `Failed to save ${locationSingular.toLowerCase()}`);
     } finally {
       setSaving(false);
     }
@@ -134,7 +140,7 @@ export default function LocationDetail() {
       await locationsAPI.delete(id);
       navigate("/locations");
     } catch (err: any) {
-      setSaveError(err.message || "Failed to delete location");
+      setSaveError(err.message || `Failed to delete ${locationSingular.toLowerCase()}`);
       setDeleteConfirmOpen(false);
     } finally {
       setDeleting(false);
@@ -158,7 +164,7 @@ export default function LocationDetail() {
       <MainLayout>
         <div className="flex items-center justify-center py-24">
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-          <span className="ml-2 text-muted-foreground">Loading location...</span>
+          <span className="ml-2 text-muted-foreground">Loading {locationSingular.toLowerCase()}...</span>
         </div>
       </MainLayout>
     );
@@ -168,9 +174,9 @@ export default function LocationDetail() {
     return (
       <MainLayout>
         <div className="text-center py-24">
-          <p className="text-muted-foreground">{fetchError || "Location not found"}</p>
+          <p className="text-muted-foreground">{fetchError || `${locationSingular} not found`}</p>
           <Button variant="outline" className="mt-4" onClick={() => navigate("/locations")}>
-            Back to Locations
+            Back to {locationPlural}
           </Button>
         </div>
       </MainLayout>
@@ -245,7 +251,7 @@ export default function LocationDetail() {
           </Button>
           <div className="flex-1">
             <h1 className="page-title">{location.name}</h1>
-            <p className="page-subtitle">Location Details</p>
+            <p className="page-subtitle">{locationSingular} Details</p>
           </div>
           {googleMapsLink && (
             <Button variant="outline" className="gap-2" asChild>
@@ -274,7 +280,7 @@ export default function LocationDetail() {
           ) : (
             <Button className="gap-2" onClick={() => setIsEditing(true)}>
               <Edit className="w-4 h-4" />
-              Edit Location
+              Edit {locationSingular}
             </Button>
           )}
         </div>
@@ -356,7 +362,7 @@ export default function LocationDetail() {
             {location.address && import.meta.env.VITE_GOOGLE_MAPS_API_KEY && (
               <div className="bg-card rounded-xl border border-border shadow-card overflow-hidden">
                 <iframe
-                  title="Location Map"
+                  title={`${locationSingular} Map`}
                   width="100%"
                   height="300"
                   style={{ border: 0 }}
@@ -372,11 +378,11 @@ export default function LocationDetail() {
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-card rounded-xl border border-border p-4 shadow-card text-center">
                 <p className="text-2xl font-bold text-foreground">{totalSessions}</p>
-                <p className="text-xs text-muted-foreground">Sessions</p>
+                <p className="text-xs text-muted-foreground">{sessionPlural}</p>
               </div>
               <div className="bg-card rounded-xl border border-border p-4 shadow-card text-center">
                 <p className="text-2xl font-bold text-foreground">{activeCoaches}</p>
-                <p className="text-xs text-muted-foreground">Coaches</p>
+                <p className="text-xs text-muted-foreground">{coachPlural}</p>
               </div>
               <div className="bg-card rounded-xl border border-border p-4 shadow-card text-center">
                 <p className="text-2xl font-bold text-foreground">{totalStudents}</p>
@@ -403,7 +409,7 @@ export default function LocationDetail() {
           <div className="space-y-4">
             {/* Coaches at location */}
             <div className="bg-card rounded-xl border border-border p-5 shadow-card">
-              <h3 className="font-semibold text-foreground mb-4">Coaches at this Location</h3>
+              <h3 className="font-semibold text-foreground mb-4">{coachPlural} at this {locationSingular}</h3>
               <div className="space-y-3">
                 {locationCoaches.length > 0 ? locationCoaches.map((coach) => (
                   <div
@@ -417,10 +423,10 @@ export default function LocationDetail() {
                       </div>
                       <span className="font-medium text-foreground">{coach.name}</span>
                     </div>
-                    <span className="text-sm text-muted-foreground">{coach.sessions} sessions</span>
+                    <span className="text-sm text-muted-foreground">{coach.sessions} {coach.sessions === 1 ? sessionSingular.toLowerCase() : sessionPlural.toLowerCase()}</span>
                   </div>
                 )) : (
-                  <p className="text-sm text-muted-foreground text-center py-4">No coaches at this location yet</p>
+                  <p className="text-sm text-muted-foreground text-center py-4">No {coachPlural.toLowerCase()} at this {locationSingular.toLowerCase()} yet</p>
                 )}
               </div>
             </div>
@@ -445,7 +451,7 @@ export default function LocationDetail() {
           <div className="space-y-4">
             {/* Upcoming sessions */}
             <div className="bg-card rounded-xl border border-border p-5 shadow-card">
-              <h3 className="font-semibold text-foreground mb-4">Upcoming Sessions</h3>
+              <h3 className="font-semibold text-foreground mb-4">Upcoming {sessionPlural}</h3>
               {upcomingSessions.length > 0 ? (
                 <div className="space-y-3">
                   {upcomingSessions.map((session) => {
@@ -479,14 +485,14 @@ export default function LocationDetail() {
               ) : (
                 <div className="text-center py-8">
                   <Calendar className="w-10 h-10 text-muted-foreground/30 mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground">No upcoming sessions</p>
+                  <p className="text-sm text-muted-foreground">No upcoming {sessionPlural.toLowerCase()}</p>
                 </div>
               )}
             </div>
 
             {/* Recent sessions */}
             <div className="bg-card rounded-xl border border-border p-5 shadow-card">
-              <h3 className="font-semibold text-foreground mb-4">Recent Sessions</h3>
+              <h3 className="font-semibold text-foreground mb-4">Recent {sessionPlural}</h3>
               <div className="space-y-3">
                 {recentSessions.length > 0 ? recentSessions.map((session) => {
                   const sessionDate = session.date || session.session_date;
@@ -509,7 +515,7 @@ export default function LocationDetail() {
                     </div>
                   );
                 }) : (
-                  <p className="text-sm text-muted-foreground text-center py-4">No recent sessions</p>
+                  <p className="text-sm text-muted-foreground text-center py-4">No recent {sessionPlural.toLowerCase()}</p>
                 )}
               </div>
             </div>
@@ -520,15 +526,15 @@ export default function LocationDetail() {
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Location?</AlertDialogTitle>
+            <AlertDialogTitle>Delete {locationSingular}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete <strong>{location.name}</strong>? This action cannot be undone. Sessions at this location will not be deleted.
+              Are you sure you want to delete <strong>{location.name}</strong>? This action cannot be undone. {sessionPlural} at this {locationSingular.toLowerCase()} will not be deleted.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              {deleting ? "Deleting..." : "Delete Location"}
+              {deleting ? "Deleting..." : `Delete ${locationSingular}`}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

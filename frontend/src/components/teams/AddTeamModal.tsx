@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Users, Loader2 } from "lucide-react";
+import { useTerm } from "@/contexts/TerminologyContext";
 import {
   Dialog,
   DialogContent,
@@ -27,6 +28,8 @@ interface AddTeamModalProps {
 const ageGroups = ["U8", "U10", "U12", "U14", "U16", "U18", "Senior", "Mixed", "Not Applicable"];
 
 export function AddTeamModal({ open, onOpenChange, onTeamAdded }: AddTeamModalProps) {
+  const teamSingular = useTerm("team_singular");
+  const locationSingular = useTerm("location_singular");
   const [locations, setLocations] = useState<any[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +68,7 @@ export function AddTeamModal({ open, onOpenChange, onTeamAdded }: AddTeamModalPr
       onTeamAdded?.();
     } catch (err: any) {
       console.error("Failed to create team:", err);
-      setError(err.message || "Failed to create team");
+      setError(err.message || `Failed to create ${teamSingular.toLowerCase()}`);
     } finally {
       setSubmitting(false);
     }
@@ -80,7 +83,7 @@ export function AddTeamModal({ open, onOpenChange, onTeamAdded }: AddTeamModalPr
               <Users className="w-5 h-5 text-primary" />
             </div>
             <div>
-              <DialogTitle className="text-xl">Add New Team</DialogTitle>
+              <DialogTitle className="text-xl">Add New {teamSingular}</DialogTitle>
               <p className="text-sm text-muted-foreground mt-0.5">
                 Create a new squad or age group
               </p>
@@ -93,7 +96,7 @@ export function AddTeamModal({ open, onOpenChange, onTeamAdded }: AddTeamModalPr
             <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg">{error}</div>
           )}
           <div className="space-y-2">
-            <Label htmlFor="name">Team Name</Label>
+            <Label htmlFor="name">{teamSingular} Name</Label>
             <Input
               id="name"
               placeholder="e.g. U16 Khayelitsha"
@@ -123,13 +126,13 @@ export function AddTeamModal({ open, onOpenChange, onTeamAdded }: AddTeamModalPr
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="location">Default Location (Optional)</Label>
+            <Label htmlFor="location">Default {locationSingular} (Optional)</Label>
             <Select
               value={formData.locationId}
               onValueChange={(value) => setFormData({ ...formData, locationId: value })}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select a location" />
+                <SelectValue placeholder={`Select a ${locationSingular.toLowerCase()}`} />
               </SelectTrigger>
               <SelectContent>
                 {locations.map((loc) => (
@@ -149,7 +152,7 @@ export function AddTeamModal({ open, onOpenChange, onTeamAdded }: AddTeamModalPr
                   Adding...
                 </>
               ) : (
-                "Add Team"
+                `Add ${teamSingular}`
               )}
             </Button>
             <Button

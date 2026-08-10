@@ -20,11 +20,9 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTerm } from "@/contexts/TerminologyContext";
 
-const ROLE_LABELS: Record<string, string> = {
+const STATIC_ROLE_LABELS: Record<string, string> = {
   super_admin: "Super Admin",
   location_admin: "Location Admin",
-  coach: "Coach",
-  player: "Player",
 };
 
 /** Build initials from a full name: first letter of first + last word. */
@@ -43,7 +41,6 @@ export function AppSidebar() {
 
   const fullName = user?.username ?? "";
   const initials = getInitials(fullName);
-  const roleLabel = user?.role ? ROLE_LABELS[user.role] ?? user.role : "";
 
   const isSuperAdmin = user?.role === "super_admin";
   // Super and location admins get the full operational nav; coaches see only
@@ -51,10 +48,21 @@ export function AppSidebar() {
   const canSeeOps = isSuperAdmin || user?.role === "location_admin";
 
   // Terminology labels — called unconditionally so hook order stays stable.
+  const coachSingular = useTerm("coach_singular");
   const coachPlural = useTerm("coach_plural");
   const teamPlural = useTerm("team_plural");
+  const playerSingular = useTerm("player_singular");
   const playerPlural = useTerm("player_plural");
   const locationPlural = useTerm("location_plural");
+
+  // Role badge label: coach/player follow org terminology so a renamed role
+  // (e.g. Coach -> Trainer) shows up for that user's badge.
+  const roleLabels: Record<string, string> = {
+    ...STATIC_ROLE_LABELS,
+    coach: coachSingular,
+    player: playerSingular,
+  };
+  const roleLabel = user?.role ? roleLabels[user.role] ?? user.role : "";
 
   const navItems = [
     { title: "Schedule", path: "/", icon: Calendar },
@@ -88,7 +96,7 @@ export function AppSidebar() {
         {!collapsed && (
           <div className="flex flex-col">
             <span className="font-bold text-foreground">Teko</span>
-            <span className="text-xs text-muted-foreground">Coach Management</span>
+            <span className="text-xs text-muted-foreground">{coachSingular} Management</span>
           </div>
         )}
       </div>
@@ -151,8 +159,11 @@ export function AppSidebar() {
         {/* Divider between profile and actions */}
         <div className="border-t border-border my-2" />
 
-        {/* Org settings are super-admin only. */}
-        {isSuperAdmin && (
+        {/* Org settings: super_admin and location_admin, matching the /settings
+            RoleGuard in App.tsx. super_admin has org_id = null so the page
+            currently loads nothing for them (known gap) — location_admin is
+            who actually uses this. */}
+        {canSeeOps && (
           <NavLink
             to="/settings"
             className={cn(

@@ -13,7 +13,8 @@ from utils.phone import normalize_sa_phone
 
 def main():
     FirebaseService.initialize()
-    coaches = FirebaseService.get_all_coaches()
+    # One-off maintenance script — intentionally spans every org.
+    coaches = FirebaseService.get_all_coaches(None)
     updated = 0
 
     for coach in coaches:
