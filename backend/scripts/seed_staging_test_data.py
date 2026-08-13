@@ -6,6 +6,7 @@ Creates test-org-a and test-org-b, each with:
   - 2 coaches, each with a distinct phone number
   - 1 team (both coaches assigned)
   - 2 players on that team
+  - 2 participants, each with a distinct phone number
   - 1 location
   - 1 session
   - 1 broadcast
@@ -50,6 +51,7 @@ ORGS = [
         'label': 'Org A',
         'type': 'sports',
         'phones': ('+10000000001', '+10000000003'),
+        'participant_phones': ('+10000000005', '+10000000007'),
     },
     {
         'org_id': 'test-org-b',
@@ -57,6 +59,7 @@ ORGS = [
         'label': 'Org B',
         'type': 'ngo',
         'phones': ('+10000000002', '+10000000004'),
+        'participant_phones': ('+10000000006', '+10000000008'),
     },
 ]
 
@@ -69,6 +72,8 @@ _COLLECTION_FOR = {
     'team': 'teams',
     'player_1': 'players',
     'player_2': 'players',
+    'participant_1': 'participants',
+    'participant_2': 'participants',
     'location': 'locations',
     'session': 'sessions',
     'broadcast': 'broadcasts',
@@ -189,6 +194,22 @@ def _seed_org(db, org_cfg):
         })
         created.append(('players', doc_id))
 
+    # Participants (separate collection from players — self-owned WhatsApp
+    # identity, not a guardian-contact roster entry)
+    participant_phone_1, participant_phone_2 = org_cfg['participant_phones']
+    participant_names = [(ids['participant_1'], f"{label} Participant One", participant_phone_1),
+                          (ids['participant_2'], f"{label} Participant Two", participant_phone_2)]
+    for doc_id, full_name, phone in participant_names:
+        db.collection('participants').document(doc_id).set({
+            'name': full_name,
+            'phone_number': phone,
+            'active': True,
+            'org_id': org_id,
+            'created_at': now,
+            'updated_at': now,
+        })
+        created.append(('participants', doc_id))
+
     # Location
     db.collection('locations').document(ids['location']).set({
         'name': f'{label} Location',
@@ -275,8 +296,8 @@ def _verify_org(db, org_cfg):
     org_id = org_cfg['org_id']
     expected = {
         'admin_users': 1, 'coaches': 2, 'teams': 1, 'players': 2,
-        'locations': 1, 'sessions': 1, 'broadcasts': 1, 'content': 1,
-        'content_urls': 1,
+        'participants': 2, 'locations': 1, 'sessions': 1, 'broadcasts': 1,
+        'content': 1, 'content_urls': 1,
     }
     print(f"  Verifying org_id='{org_id}' counts:")
     all_ok = True

@@ -143,7 +143,121 @@ class FirebaseService:
         db = cls.get_db()
         db.collection('coaches').document(coach_id).delete()
         return True
-    
+
+    # =========================================================================
+    # Participant operations (collection: 'participants')
+    # =========================================================================
+    # A separate collection from 'players' — players stores a guardian's
+    # contact phone for a roster entry, not a self-owned WhatsApp identity.
+    # Fields: org_id, name, phone_number (normalized via normalize_sa_phone
+    # by the caller before reaching these methods), active, created_at,
+    # updated_at.
+    @classmethod
+    def create_participant(cls, org_id, data):
+        """Create a new participant under org_id.
+
+        org_id is stamped from the explicit parameter, not from `data`, so a
+        caller can never smuggle in a different org_id via the request body.
+        """
+        db = cls.get_db()
+        now = firestore.SERVER_TIMESTAMP
+        participant_data = {
+            **data,
+            'org_id': org_id,
+            'active': data.get('active', True),
+            'created_at': now,
+            'updated_at': now,
+        }
+        doc_ref = db.collection('participants').document()
+        doc_ref.set(participant_data)
+        return cls.get_participant(org_id, doc_ref.id)
+
+    @classmethod
+    def get_participant(cls, org_id, participant_id):
+        """Get participant by ID, scoped to org_id.
+
+        Returns None (treated as not found) if the participant belongs to a
+        different org. Pass org_id=None only for the intentional super_admin
+        cross-org case, or for internal callers that already verified
+        ownership.
+        """
+        db = cls.get_db()
+        doc = db.collection('participants').document(participant_id).get()
+        if not doc.exists:
+            return None
+        data = {'id': doc.id, **doc.to_dict()}
+        if org_id is not None and data.get('org_id') != org_id:
+            return None
+        return data
+
+    @classmethod
+    def get_all_participants(cls, org_id):
+        """Get all participants for an org. Pass org_id=None only for the
+        intentional super_admin cross-org case."""
+        db = cls.get_db()
+        query = db.collection('participants')
+        if org_id is not None:
+            query = query.where('org_id', '==', org_id)
+        participants = []
+        docs = query.stream()
+        for doc in docs:
+            participants.append({'id': doc.id, **doc.to_dict()})
+        return participants
+
+    @classmethod
+    def update_participant(cls, org_id, participant_id, data):
+        """Update participant, scoped to org_id.
+
+        Returns None without applying the update if the participant doesn't
+        exist or belongs to a different org — ownership is re-verified here,
+        not just trusted from the caller.
+        """
+        existing = cls.get_participant(org_id, participant_id)
+        if existing is None:
+            return None
+        allowed_fields = ['name', 'phone_number', 'active']
+        filtered_data = {k: v for k, v in data.items() if k in allowed_fields}
+        filtered_data['updated_at'] = firestore.SERVER_TIMESTAMP
+        db = cls.get_db()
+        doc_ref = db.collection('participants').document(participant_id)
+        doc_ref.update(filtered_data)
+        return cls.get_participant(org_id, participant_id)
+
+    @classmethod
+    def delete_participant(cls, org_id, participant_id):
+        """Delete participant, scoped to org_id.
+
+        Returns False without deleting if the participant doesn't exist or
+        belongs to a different org.
+        """
+        existing = cls.get_participant(org_id, participant_id)
+        if existing is None:
+            return False
+        db = cls.get_db()
+        db.collection('participants').document(participant_id).delete()
+        return True
+
+    @classmethod
+    def get_participant_by_phone(cls, phone):
+        """Get a participant by phone number, searched across ALL orgs.
+
+        DELIBERATE EXCEPTION to org scoping — the only one among the
+        participant accessors. Every other method above takes org_id and
+        enforces it; this one deliberately doesn't, because it exists for
+        WhatsApp identity resolution, where the org isn't known until AFTER
+        the phone number resolves to a person (mirrors how
+        ConversationService.get_coach_by_phone works today for coaches — see
+        that method's comment for the same reasoning). `phone` must already
+        be normalized via normalize_sa_phone() by the caller/writer; this
+        does an exact-match Firestore query, not the coach path's
+        scan-and-strip in-memory cache.
+        """
+        db = cls.get_db()
+        docs = db.collection('participants').where('phone_number', '==', phone).limit(1).stream()
+        for doc in docs:
+            return {'id': doc.id, **doc.to_dict()}
+        return None
+
     # Session operations
     @classmethod
     def create_session(cls, data):

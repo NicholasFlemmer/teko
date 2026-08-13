@@ -104,6 +104,7 @@ GET_ALL_METHODS = [
     ('get_all_coaches', FirebaseService.get_all_coaches, 2),
     ('get_all_sessions', FirebaseService.get_all_sessions, 1),
     ('get_all_players', FirebaseService.get_all_players, 2),
+    ('get_all_participants', FirebaseService.get_all_participants, 2),
     ('get_all_teams', FirebaseService.get_all_teams, 1),
     ('get_all_locations', FirebaseService.get_all_locations, 1),
     ('get_all_broadcasts', FirebaseService.get_all_broadcasts, 1),
@@ -197,6 +198,32 @@ def test_single_doc_getter_blocks_cross_org_id_guess(label, method, doc_key):
     cross_org_result = method(org_b_doc_id, ORG_A)
     assert cross_org_result is None, (
         f"{label}({org_b_doc_id!r}, org_id={ORG_A!r}) returned {ORG_B!r}'s record "
+        f"instead of None — an org can fetch another org's record by guessing its ID."
+    )
+
+
+def test_get_participant_blocks_cross_org_id_guess():
+    """get_participant takes (org_id, participant_id) — the reverse argument
+    order from get_coach/get_session/get_player — so it can't share the
+    generic SINGLE_DOC_GETTERS harness above. Same isolation guarantee,
+    called with its own signature."""
+    _assert_seed_data_present()
+    org_b_doc_id = IDS_B['participant_1']
+
+    # Sanity precondition: the record must actually exist and be fetchable
+    # under its OWN org, proving this isn't just "always returns None".
+    own_org_result = FirebaseService.get_participant(ORG_B, org_b_doc_id)
+    assert own_org_result is not None, (
+        f"get_participant({ORG_B!r}, {org_b_doc_id!r}) returned None for a record "
+        f"that should exist — seed data may be missing, run "
+        f"scripts.seed_staging_test_data first."
+    )
+    assert own_org_result.get('org_id') == ORG_B
+
+    # The actual attack: org A guesses org B's document ID.
+    cross_org_result = FirebaseService.get_participant(ORG_A, org_b_doc_id)
+    assert cross_org_result is None, (
+        f"get_participant({ORG_A!r}, {org_b_doc_id!r}) returned {ORG_B!r}'s record "
         f"instead of None — an org can fetch another org's record by guessing its ID."
     )
 

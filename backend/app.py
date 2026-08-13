@@ -12,6 +12,7 @@ from config import Config
 logger = logging.getLogger(__name__)
 from routes.auth import auth_bp
 from routes.coaches import coaches_bp
+from routes.participants import participants_bp
 from routes.sessions import sessions_bp
 from routes.teams import teams_bp
 from routes.players import players_bp
@@ -60,6 +61,7 @@ FirebaseService.initialize()
 # Register blueprints
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
 app.register_blueprint(coaches_bp, url_prefix='/api/coaches')
+app.register_blueprint(participants_bp, url_prefix='/api/participants')
 app.register_blueprint(sessions_bp, url_prefix='/api/sessions')
 app.register_blueprint(teams_bp, url_prefix='/api/teams')
 app.register_blueprint(players_bp, url_prefix='/api/players')
