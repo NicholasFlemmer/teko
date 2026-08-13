@@ -18,7 +18,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import pytest  # noqa: E402
-from services.person_service import PersonService  # noqa: E402
+from services.person_service import PersonService, PersonCacheUnavailableError  # noqa: E402
 from services.firebase_service import FirebaseService  # noqa: E402
 
 
@@ -30,10 +30,12 @@ def _reset_person_cache():
     PersonService._coach_cache = {}
     PersonService._participant_cache = {}
     PersonService._cache_ts = 0
+    PersonService._cache_populated = False
     yield
     PersonService._coach_cache = {}
     PersonService._participant_cache = {}
     PersonService._cache_ts = 0
+    PersonService._cache_populated = False
 
 
 def _stub_directory(monkeypatch, coaches=None, participants=None):
@@ -152,3 +154,89 @@ def test_resolve_skips_malformed_stored_phone_without_breaking_others(monkeypatc
 
     assert person is not None
     assert person['id'] == 'coach-good'
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 step 3c: a broken cache refresh must never present as "this phone
+# isn't registered" — see PersonService._refresh_cache_if_stale/resolve.
+# ---------------------------------------------------------------------------
+
+def _raise(exc):
+    return lambda *a, **kw: (_ for _ in ()).throw(exc)
+
+
+def test_cold_start_refresh_failure_raises_unavailable_not_none(monkeypatch, caplog):
+    """The cache has NEVER successfully populated (fresh process, or every
+    refresh so far has failed) and this refresh attempt also fails. This
+    must raise, not return None — a None here is indistinguishable from
+    "cache is healthy, nobody matches", which would tell a real coach or
+    participant they aren't registered when the actual problem is a broken
+    Firestore read."""
+    monkeypatch.setattr(FirebaseService, 'get_all_coaches', _raise(Exception("simulated Firestore outage")))
+    monkeypatch.setattr(FirebaseService, 'get_all_participants', _raise(Exception("simulated Firestore outage")))
+
+    with caplog.at_level('ERROR'):
+        with pytest.raises(PersonCacheUnavailableError):
+            PersonService.resolve('27821234567')
+
+    assert any(r.levelname == 'ERROR' and 'never' in r.message.lower() for r in caplog.records), (
+        "Expected an ERROR log distinguishing a never-populated cache from a stale one."
+    )
+
+
+def test_stale_cache_served_through_on_refresh_failure(monkeypatch, caplog):
+    """The cache populated successfully once, then TTL expired, then the
+    next refresh attempt fails (e.g. a transient Firestore blip). The
+    coach who was already in that last-known-good snapshot must still
+    resolve normally — a stale-but-populated cache is safe to keep serving,
+    it is NOT the same failure as a cache that has never loaded."""
+    _stub_directory(monkeypatch, coaches=[
+        {'id': 'coach-1', 'org_id': 'org-a', 'name': 'Alice', 'phone_number': '0821234567'},
+    ])
+    person = PersonService.resolve('27821234567')
+    assert person is not None and person['id'] == 'coach-1'
+
+    # Force the cache to look stale, then make the next refresh fail.
+    PersonService._cache_ts = 0
+    monkeypatch.setattr(FirebaseService, 'get_all_coaches', _raise(Exception("simulated Firestore outage")))
+    monkeypatch.setattr(FirebaseService, 'get_all_participants', _raise(Exception("simulated Firestore outage")))
+
+    with caplog.at_level('ERROR'):
+        person_again = PersonService.resolve('27821234567')
+
+    assert person_again is not None, "A stale-but-previously-populated cache must still be served on refresh failure."
+    assert person_again['id'] == 'coach-1'
+    assert any(r.levelname == 'ERROR' and 'stale' in r.message.lower() for r in caplog.records), (
+        "Expected an ERROR log noting the stale cache is being served through."
+    )
+
+
+def test_refresh_failure_does_not_wipe_existing_cache_data(monkeypatch):
+    """A failed refresh must leave _coach_cache/_participant_cache exactly
+    as they were — never reset to empty. Destroying good data on a
+    transient failure would be worse than the original silent-empty bug."""
+    _stub_directory(monkeypatch, coaches=[
+        {'id': 'coach-1', 'org_id': 'org-a', 'name': 'Alice', 'phone_number': '0821234567'},
+    ])
+    PersonService.resolve('27821234567')
+    assert PersonService._coach_cache  # populated
+
+    PersonService._cache_ts = 0
+    monkeypatch.setattr(FirebaseService, 'get_all_coaches', _raise(Exception("simulated Firestore outage")))
+    monkeypatch.setattr(FirebaseService, 'get_all_participants', _raise(Exception("simulated Firestore outage")))
+    PersonService._refresh_cache_if_stale()
+
+    assert PersonService._coach_cache.get('27821234567', {}).get('id') == 'coach-1', (
+        "A failed refresh must not discard the last known good cache."
+    )
+
+
+def test_resolve_no_match_with_healthy_cache_still_returns_none(monkeypatch):
+    """Regression guard: the normal 'not registered' outcome (cache loaded
+    fine, this phone just isn't in it) must still return None, not raise —
+    PersonCacheUnavailableError is only for a cache that never populated."""
+    _stub_directory(monkeypatch, coaches=[
+        {'id': 'coach-1', 'org_id': 'org-a', 'name': 'Alice', 'phone_number': '0821234567'},
+    ])
+
+    assert PersonService.resolve('27000000000') is None

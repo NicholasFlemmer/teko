@@ -2,13 +2,30 @@ import logging
 from services.firebase_service import FirebaseService
 from services.gemini_service import GeminiService
 from services.whatsapp_service import WhatsAppService
-from services.person_service import PersonService
+from services.person_service import PersonService, PersonCacheUnavailableError
 from routes.sse import push_event
 from datetime import datetime, date, timezone
 import uuid
 import re
 
 logger = logging.getLogger(__name__)
+
+
+class PendingStateReadError(Exception):
+    """Raised by get_pending_attendance/get_pending_photo when the
+    Firestore read itself fails.
+
+    Deliberately NOT the same outcome as a None return, which means "no
+    pending request exists". Conflating the two lets a coach's numeric
+    attendance reply (or their photo) fall through as if there were never
+    anything pending — silently misrouted into the AI chat, or into a "no
+    pending request" reply — instead of surfacing as a fixable, worth-
+    telling-someone failure. Both call sites are already wrapped by an
+    outer try/except that logs at ERROR and asks the coach to retry, so
+    letting this propagate is enough; neither call site needs its own
+    handling.
+    """
+    pass
 
 def format_maps_link(lat, lng):
     """Return a Google Maps pin URL for the given coordinates, or None if invalid."""
@@ -245,17 +262,27 @@ Remember: You're helping coaches run effective sessions and support their team's
 
     @classmethod
     def get_conversation_history(cls, coach_phone, limit=10):
-        """Get recent conversation history for a coach"""
+        """Get recent conversation history for a coach.
+
+        On failure, returns a single degradation-note entry instead of []
+        — an empty list is indistinguishable from a genuinely fresh
+        conversation, and would let the model confidently treat this as a
+        first-ever message when history actually exists but couldn't be
+        read. See _context_degraded_note (same pattern as
+        load_rag_context/load_coach_context); generate_response's history
+        loop renders this note's 'role' specially rather than as a chat
+        turn.
+        """
         db = FirebaseService.get_db()
-        
+
         # Format phone number
         phone_key = coach_phone.replace('+', '').replace(' ', '').replace('-', '')
-        
+
         try:
             # Get messages from Firestore
             messages_ref = db.collection('conversations').document(phone_key).collection('messages')
             messages = messages_ref.order_by('timestamp', direction='DESCENDING').limit(limit).stream()
-            
+
             history = []
             for msg in messages:
                 msg_data = msg.to_dict()
@@ -264,13 +291,17 @@ Remember: You're helping coaches run effective sessions and support their team's
                     'content': msg_data.get('content'),
                     'timestamp': msg_data.get('timestamp')
                 })
-            
+
             # Reverse to get chronological order (oldest first)
             history.reverse()
             return history
         except Exception as e:
-            logger.error("Error loading conversation history: %s", e)
-            return []
+            logger.error("Error loading conversation history for %s: %s", coach_phone, e)
+            return [{
+                'role': 'system_note',
+                'content': cls._context_degraded_note("Recent conversation history"),
+                'timestamp': None,
+            }]
     
     @classmethod
     def strip_markdown(cls, text):
@@ -560,6 +591,9 @@ Remember: You're helping coaches run effective sessions and support their team's
 
             context += "Recent conversation:\n"
             for msg in history:
+                if msg['role'] == 'system_note':
+                    context += f"{msg['content']}\n"
+                    continue
                 role_label = role_word if msg['role'] == 'user' else "You"
                 context += f"{role_label}: {msg['content']}\n"
 
@@ -593,7 +627,14 @@ Remember: You're helping coaches run effective sessions and support their team's
 
     @classmethod
     def get_pending_attendance(cls, coach_phone):
-        """Check if a coach has a pending attendance request"""
+        """Check if a coach has a pending attendance request.
+
+        Raises PendingStateReadError if the Firestore read itself fails —
+        must stay distinguishable from a None return (no pending request).
+        See PendingStateReadError for why: callers are already wrapped in
+        an outer try/except that logs at ERROR and asks the coach to retry,
+        so letting this propagate is the fix.
+        """
         db = FirebaseService.get_db()
         key = cls._phone_key(coach_phone)
         try:
@@ -615,8 +656,8 @@ Remember: You're helping coaches run effective sessions and support their team's
                 return data
             return None
         except Exception as e:
-            logger.warning("Error reading pending attendance: %s", e)
-            return None
+            logger.error("Error reading pending attendance for %s: %s", coach_phone, e)
+            raise PendingStateReadError(str(e)) from e
 
     @classmethod
     def set_pending_attendance(cls, coach_phone, session_id, players):
@@ -792,8 +833,14 @@ Remember: You're helping coaches run effective sessions and support their team's
             return "Failed to save attendance. Please try again. 🏏"
 
         cls.clear_pending_attendance(coach_phone)
-        _coach = cls.get_coach_by_phone(coach_phone)
-        push_event('attendance', coach_name=(_coach.get('name') if _coach else None) or 'Unknown',
+        # Dashboard display name only — non-critical, so a cache-unavailable
+        # failure here just falls back to 'Unknown' rather than blocking the
+        # attendance confirmation that's already been saved.
+        try:
+            _person = PersonService.resolve(coach_phone)
+        except PersonCacheUnavailableError:
+            _person = None
+        push_event('attendance', coach_name=(_person.get('name') if _person else None) or 'Unknown',
                    preview=f"{len(attended_ids)}/{len(players)} present")
 
         # Build confirmation
@@ -843,7 +890,14 @@ Remember: You're helping coaches run effective sessions and support their team's
 
     @classmethod
     def get_pending_photo(cls, coach_phone):
-        """Check if a coach has been asked to send a group photo."""
+        """Check if a coach has been asked to send a group photo.
+
+        Raises PendingStateReadError if the Firestore read itself fails —
+        must stay distinguishable from a None return (no pending request).
+        See PendingStateReadError: handle_image_message's outer try/except
+        already logs at ERROR and asks the coach to retry, so letting this
+        propagate is the fix.
+        """
         db = FirebaseService.get_db()
         key = cls._phone_key(coach_phone)
         try:
@@ -862,8 +916,8 @@ Remember: You're helping coaches run effective sessions and support their team's
                 return data
             return None
         except Exception as e:
-            logger.warning("Error reading pending photo: %s", e)
-            return None
+            logger.error("Error reading pending photo for %s: %s", coach_phone, e)
+            raise PendingStateReadError(str(e)) from e
 
     @classmethod
     def set_pending_photo(cls, coach_phone, session_id, team_id):
@@ -895,7 +949,15 @@ Remember: You're helping coaches run effective sessions and support their team's
         both the session and the team.
         """
         try:
-            person = PersonService.resolve(from_number)
+            try:
+                person = PersonService.resolve(from_number)
+            except PersonCacheUnavailableError:
+                logger.error("Identity cache unavailable — cannot resolve image sender %s", from_number)
+                WhatsAppService.send_message(
+                    phone_number=from_number,
+                    message_text=cls.TRANSIENT_ERROR_MESSAGE
+                )
+                return
             if not person:
                 logger.warning("Image from unrecognised number: %s", from_number)
                 WhatsAppService.send_message(
@@ -1040,7 +1102,15 @@ Remember: You're helping coaches run effective sessions and support their team's
         try:
             logger.info("Location received from %s: lat=%s, lng=%s", from_number, latitude, longitude)
 
-            person = PersonService.resolve(from_number)
+            try:
+                person = PersonService.resolve(from_number)
+            except PersonCacheUnavailableError:
+                logger.error("Identity cache unavailable — cannot resolve location sender %s", from_number)
+                WhatsAppService.send_message(
+                    phone_number=from_number,
+                    message_text=cls.TRANSIENT_ERROR_MESSAGE
+                )
+                return
             if not person:
                 WhatsAppService.send_message(
                     phone_number=from_number,
@@ -1279,7 +1349,15 @@ Remember: You're helping coaches run effective sessions and support their team's
 
             # Resolve the sender to a person (coach or participant), across
             # both collections — see PersonService for details.
-            person = PersonService.resolve(from_number)
+            try:
+                person = PersonService.resolve(from_number)
+            except PersonCacheUnavailableError:
+                logger.error("Identity cache unavailable — cannot resolve message sender %s", from_number)
+                WhatsAppService.send_message(
+                    phone_number=from_number,
+                    message_text=cls.TRANSIENT_ERROR_MESSAGE
+                )
+                return
 
             if not person:
                 logger.warning("Message from unrecognised number: %s", from_number)
@@ -1363,45 +1441,6 @@ Remember: You're helping coaches run effective sessions and support their team's
             except Exception:
                 pass
     
-    # In-memory cache: normalised phone → coach dict.  Rebuilt every 5 minutes
-    # so we don't load ALL coaches on every single WhatsApp message.
-    _coach_phone_cache: dict = {}
-    _coach_phone_cache_ts: float = 0
-    _COACH_CACHE_TTL = 300  # seconds
-
-    @classmethod
-    def _refresh_coach_cache_if_stale(cls):
-        import time
-        now = time.time()
-        if now - cls._coach_phone_cache_ts < cls._COACH_CACHE_TTL and cls._coach_phone_cache:
-            return
-        try:
-            # This is the phone-number-to-coach identity lookup used before
-            # we know which org an incoming message belongs to (analogous to
-            # login-by-email), so it intentionally spans every org.
-            coaches = FirebaseService.get_all_coaches(None)
-            cache: dict = {}
-            for coach in coaches:
-                raw = coach.get('phone_number', '')
-                normalised = raw.replace('+', '').replace(' ', '').replace('-', '')
-                if normalised:
-                    cache[normalised] = coach
-            cls._coach_phone_cache = cache
-            cls._coach_phone_cache_ts = now
-        except Exception as e:
-            logger.error("Error refreshing coach cache: %s", e)
-
-    @classmethod
-    def get_coach_by_phone(cls, phone_number):
-        """Find a coach by their phone number (cached, refreshed every 5 min)"""
-        try:
-            formatted_phone = phone_number.replace('+', '').replace(' ', '').replace('-', '')
-            cls._refresh_coach_cache_if_stale()
-            return cls._coach_phone_cache.get(formatted_phone)
-        except Exception as e:
-            logger.error("Error finding coach: %s", e)
-            return None
-    
     # Sent when an inbound phone number doesn't resolve to any known person
     # (coach or participant). Deliberately person-type-neutral — it used to
     # say "you need to be registered as a coach", which actively misled
@@ -1409,6 +1448,17 @@ Remember: You're helping coaches run effective sessions and support their team's
     UNRECOGNISED_SENDER_MESSAGE = (
         "Hello! This number isn't registered with Teko. Please contact your "
         "administrator to get set up. 🏏"
+    )
+
+    # Sent instead of UNRECOGNISED_SENDER_MESSAGE when PersonService can't
+    # tell whether this phone is registered at all (PersonCacheUnavailableError)
+    # — a real coach or participant must never be told they aren't
+    # registered just because the identity cache failed to load. Also
+    # reused for pending-attendance/pending-photo read failures, which are
+    # the same "we don't know, don't guess" situation.
+    TRANSIENT_ERROR_MESSAGE = (
+        "Sorry, something's not quite right on our side right now. Please "
+        "try again in a moment. 🏏"
     )
 
     @classmethod

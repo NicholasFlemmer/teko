@@ -32,14 +32,38 @@ DEFAULT_PRICING = {
 
 
 def _get_pricing():
-    """Load pricing from Firestore settings, falling back to defaults."""
+    """Load pricing from Firestore settings, falling back to defaults.
+
+    Best-effort read for display/estimate endpoints (get_pricing,
+    estimate_cost, the cost estimate inside send_broadcast) where serving a
+    default rate on a transient read failure is an acceptable degradation.
+
+    NEVER use this inside update_pricing's read-merge-write: swallowing the
+    read failure here would let a transient Firestore blip merge onto
+    DEFAULT_PRICING and then WRITE those defaults over real saved pricing.
+    Use _get_pricing_or_raise() there instead.
+    """
     try:
         settings = FirebaseService.get_settings()
         if settings:
             return settings.get('whatsapp_pricing', DEFAULT_PRICING)
         return DEFAULT_PRICING
-    except Exception:
+    except Exception as e:
+        logger.error("Failed to load pricing settings, serving defaults for display: %s", e)
         return DEFAULT_PRICING
+
+
+def _get_pricing_or_raise():
+    """Load pricing from Firestore settings, raising on read failure.
+
+    Used only by update_pricing's read-merge-write. A read failure must
+    fail the update explicitly rather than silently merging new values onto
+    DEFAULT_PRICING and overwriting whatever was actually saved.
+    """
+    settings = FirebaseService.get_settings()
+    if settings:
+        return settings.get('whatsapp_pricing', DEFAULT_PRICING)
+    return DEFAULT_PRICING
 
 
 @broadcasts_bp.route('', methods=['POST'])
@@ -245,7 +269,19 @@ def update_pricing(current_user):
         data = request.get_json()
         if not data:
             return jsonify({'success': False, 'error': 'Request body is required'}), 400
-        current_pricing = _get_pricing()
+        try:
+            current_pricing = _get_pricing_or_raise()
+        except Exception as e:
+            # A failed read here must NOT fall back to DEFAULT_PRICING: that
+            # default would get merged with the incoming changes and written
+            # back, permanently overwriting whatever pricing was actually
+            # saved. Fail the update explicitly instead — an admin retrying
+            # is fine, silently losing their pricing is not.
+            logger.error("Failed to read current pricing before update — aborting to avoid overwriting saved pricing with defaults: %s", e)
+            return jsonify({
+                'success': False,
+                'error': 'Could not load current pricing right now, so the update was not applied. Please try again.'
+            }), 503
         import math
         for key in ('marketing', 'utility', 'service', 'usd_to_zar'):
             if key in data:

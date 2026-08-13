@@ -245,12 +245,16 @@ class FirebaseService:
         participant accessors. Every other method above takes org_id and
         enforces it; this one deliberately doesn't, because it exists for
         WhatsApp identity resolution, where the org isn't known until AFTER
-        the phone number resolves to a person (mirrors how
-        ConversationService.get_coach_by_phone works today for coaches — see
-        that method's comment for the same reasoning). `phone` must already
-        be normalized via normalize_sa_phone() by the caller/writer; this
-        does an exact-match Firestore query, not the coach path's
-        scan-and-strip in-memory cache.
+        the phone number resolves to a person (mirrors PersonService's same
+        exception, for the same reasoning — see PersonService's class
+        docstring). `phone` must already be normalized via
+        normalize_sa_phone() by the caller/writer; this does an exact-match
+        Firestore query, not PersonService's scan-and-cache approach.
+
+        NOT currently called anywhere — PersonService.resolve() is the
+        actual identity-resolution path in production. Left in place rather
+        than removed since deleting it wasn't part of the Phase 2 step 3c
+        scope; flagged here so it doesn't look like a second live path.
         """
         db = cls.get_db()
         docs = db.collection('participants').where('phone_number', '==', phone).limit(1).stream()

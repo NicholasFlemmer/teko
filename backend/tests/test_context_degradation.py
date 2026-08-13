@@ -166,3 +166,92 @@ def test_context_degradation_does_not_become_user_facing_error(monkeypatch):
 
     assert response == stubbed_reply, "A context failure must not turn into an error reply to the person messaging."
     assert DEGRADED_MARKER in captured['prompt'], "The degradation note must still reach the assembled prompt."
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 step 3c: get_conversation_history degraded the same way its
+# siblings did before 3b — logged, but returned [] with no note, which is
+# indistinguishable from a genuinely fresh conversation. Same fix, same
+# pattern (_context_degraded_note), applied here.
+# ---------------------------------------------------------------------------
+
+class _FailingDocRef:
+    def collection(self, name):
+        return _FailingMessagesCollection()
+
+
+class _FailingMessagesCollection:
+    def order_by(self, *a, **kw):
+        return self
+
+    def limit(self, *a, **kw):
+        return self
+
+    def stream(self):
+        raise Exception("simulated Firestore read failure")
+
+
+class _FailingConversationsCollection:
+    def document(self, key):
+        return _FailingDocRef()
+
+
+class _FailingDb:
+    def collection(self, name):
+        return _FailingConversationsCollection()
+
+
+def test_conversation_history_read_failure_returns_degradation_note_not_empty(monkeypatch, caplog):
+    monkeypatch.setattr(FirebaseService, 'get_db', lambda: _FailingDb())
+
+    with caplog.at_level('ERROR'):
+        history = ConversationService.get_conversation_history('27821234567')
+
+    assert history != [], "A failed read must not look identical to a genuinely empty/fresh conversation."
+    assert len(history) == 1
+    assert history[0]['role'] == 'system_note'
+    assert DEGRADED_MARKER in history[0]['content']
+    assert any(
+        r.levelname == 'ERROR' and '27821234567' in r.message
+        for r in caplog.records
+    ), "Expected an ERROR log identifying the phone number for a history-read failure."
+
+
+def test_conversation_history_failure_note_reaches_assembled_prompt_not_a_chat_turn(monkeypatch):
+    """The degradation note must show up as a system-level note in the
+    prompt, not be rendered as if the AI ('You:') actually said it."""
+    monkeypatch.setattr(FirebaseService, 'get_db', lambda: _FailingDb())
+    monkeypatch.setattr(FirebaseService, 'get_all_teams', lambda org_id: [])
+    monkeypatch.setattr(FirebaseService, 'get_all_sessions', lambda *a, **kw: [])
+    monkeypatch.setattr(FirebaseService, 'get_all_content', lambda org_id: [])
+    monkeypatch.setattr(FirebaseService, 'get_all_urls', lambda org_id: [])
+    monkeypatch.setattr(FirebaseService, 'get_organisation', lambda org_id: {'id': org_id, 'type': 'sports'})
+    monkeypatch.setattr(FirebaseService, 'get_org_terminology',
+                         lambda org_id: FirebaseService.DEFAULT_TERMINOLOGY_BY_TYPE['sports'])
+    monkeypatch.setattr(ConversationService, 'save_message', lambda phone, role, content: None)
+
+    stubbed_reply = "Sure, here's a drill."
+    captured = {}
+
+    def _fake_gemini(prompt):
+        captured['prompt'] = prompt
+        return stubbed_reply
+
+    monkeypatch.setattr(GeminiService, 'generate_custom_message', _fake_gemini)
+
+    response = ConversationService.generate_response(
+        phone='27821234567',
+        user_message='What is a good warm-up drill?',
+        org_id='org-a',
+        person_name='Alice',
+        person_id='coach-1',
+        person_type='coach',
+    )
+
+    assert response == stubbed_reply, "A history read failure must not turn into an error reply to the person messaging."
+    prompt = captured['prompt']
+    assert DEGRADED_MARKER in prompt
+    assert "Recent conversation history" in prompt
+    assert "You: [SYSTEM NOTE:" not in prompt, (
+        "The degradation note must not be rendered as though the AI said it in a prior turn."
+    )
