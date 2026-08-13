@@ -193,7 +193,7 @@ def test_pending_attendance_read_failure_does_not_misroute_into_ai_chat(monkeypa
     ConversationService.handle_incoming_message('27821234567', '2 5 8', message_id='test-1')
 
     assert not ai_called['value'], "A pending-attendance read failure must never fall through to the AI chat."
-    assert sent.get('message_text') == "Sorry, I encountered an error. Please try again. 🏏"
+    assert sent.get('message_text') == "Sorry, I encountered an error. Please try again."
 
 
 def test_pending_photo_read_failure_does_not_lose_the_photo_silently(monkeypatch):

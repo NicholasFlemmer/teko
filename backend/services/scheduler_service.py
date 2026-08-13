@@ -187,6 +187,9 @@ class SchedulerService:
                 if now < prompt_after:
                     continue
 
+                session_org_id = session.get('org_id')
+                coach_word = (FirebaseService.get_org_terminology(session_org_id)['coach_singular']
+                              if session_org_id else FirebaseService.DEFAULT_TERMINOLOGY['coach_singular'])
                 coach_ids = FirebaseService.get_session_coach_ids(session)
                 for coach_id in coach_ids:
                     coach = FirebaseService.get_coach(coach_id, None)
@@ -195,10 +198,10 @@ class SchedulerService:
                     phone = normalize_sa_phone(coach.get('phone_number', ''))
                     if not phone:
                         continue
-                    coach_name = coach.get('name') or coach.get('first_name', '') or 'Coach'
+                    coach_name = coach.get('name') or coach.get('first_name', '') or coach_word
                     result = WhatsAppService.send_message(
                         phone_number=phone,
-                        message_text=f"Hi {coach_name}! Has your session ended? Reply /end to mark it as complete. 🏏"
+                        message_text=f"Hi {coach_name}! Has your session ended? Reply /end to mark it as complete."
                     )
                     if result.get('success'):
                         sent += 1

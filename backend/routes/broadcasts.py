@@ -1,4 +1,5 @@
 import logging
+import copy
 from flask import Blueprint, request, jsonify, g
 from services.firebase_service import FirebaseService
 from services.whatsapp_service import WhatsAppService
@@ -38,19 +39,28 @@ def _get_pricing():
     estimate_cost, the cost estimate inside send_broadcast) where serving a
     default rate on a transient read failure is an acceptable degradation.
 
-    NEVER use this inside update_pricing's read-merge-write: swallowing the
-    read failure here would let a transient Firestore blip merge onto
-    DEFAULT_PRICING and then WRITE those defaults over real saved pricing.
-    Use _get_pricing_or_raise() there instead.
+    Always returns a fresh copy of DEFAULT_PRICING, never the literal
+    module-level dict: settings.get('whatsapp_pricing', DEFAULT_PRICING)
+    returns that exact object when the key is missing, and a caller doing
+    `pricing[key] = val` on it would corrupt the process-global default for
+    every subsequent request/org for the rest of the worker's lifetime —
+    this is the exact bug update_pricing had. Callers here happen to be
+    read-only today, but returning a copy unconditionally means that stays
+    true even if a future caller isn't.
+
+    NEVER use this inside update_pricing's read-merge-write: even with the
+    copy, a swallowed read failure would still merge onto DEFAULT_PRICING's
+    values and write THOSE over real saved pricing. Use
+    _get_pricing_or_raise() there instead.
     """
     try:
         settings = FirebaseService.get_settings()
-        if settings:
-            return settings.get('whatsapp_pricing', DEFAULT_PRICING)
-        return DEFAULT_PRICING
+        if settings and 'whatsapp_pricing' in settings:
+            return copy.deepcopy(settings['whatsapp_pricing'])
+        return copy.deepcopy(DEFAULT_PRICING)
     except Exception as e:
         logger.error("Failed to load pricing settings, serving defaults for display: %s", e)
-        return DEFAULT_PRICING
+        return copy.deepcopy(DEFAULT_PRICING)
 
 
 def _get_pricing_or_raise():
@@ -59,11 +69,16 @@ def _get_pricing_or_raise():
     Used only by update_pricing's read-merge-write. A read failure must
     fail the update explicitly rather than silently merging new values onto
     DEFAULT_PRICING and overwriting whatever was actually saved.
+
+    Always returns a fresh copy — see _get_pricing's docstring for why
+    returning the literal DEFAULT_PRICING object is the bug being fixed
+    here specifically: update_pricing mutates whatever this returns
+    in place before writing it back.
     """
     settings = FirebaseService.get_settings()
-    if settings:
-        return settings.get('whatsapp_pricing', DEFAULT_PRICING)
-    return DEFAULT_PRICING
+    if settings and 'whatsapp_pricing' in settings:
+        return copy.deepcopy(settings['whatsapp_pricing'])
+    return copy.deepcopy(DEFAULT_PRICING)
 
 
 @broadcasts_bp.route('', methods=['POST'])

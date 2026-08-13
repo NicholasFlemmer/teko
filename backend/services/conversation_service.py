@@ -61,8 +61,21 @@ class ConversationService:
     # Default AI persona prompts, keyed by Organisation.type. An org can
     # override its prompt entirely via Organisation.ai_persona_prompt; see
     # get_ai_persona_prompt().
+    #
+    # {coach_word}/{coach_word_lower}/{coach_word_plural_lower} and
+    # {country}/{language_list} are filled in at render time (see
+    # _render_persona_template) from the org's own terminology/locale
+    # config, falling back to the org type's defaults exactly like
+    # generate_response's own role_word resolution does. sports/events
+    # already correctly say "coach" (their terminology default IS "Coach"),
+    # so their templates use the literal word rather than the placeholder —
+    # only ngo/corporate (whose terminology default is "Facilitator") use
+    # {coach_word...}. Domain-specific phrases like "cricket coaching" or
+    # "corporate coaching methodologies" are deliberately left as literal
+    # text in every template — those name a subject-matter discipline, not
+    # the role of the person messaging, so they aren't part of this fix.
     DEFAULT_AI_PERSONA_PROMPTS = {
-        "sports": """You are a professional cricket coaching specialist assistant helping coaches in South Africa.
+        "sports": """You are a professional cricket coaching specialist assistant helping coaches in {country}.
 
 EXPERTISE:
 - Cricket techniques: Batting (grip, stance, footwork, shots), Bowling (grip, action, variations), Fielding (catching, throwing, positioning)
@@ -72,7 +85,7 @@ EXPERTISE:
 - Physical fitness and conditioning for cricket
 - Mental preparation and sports psychology
 - Youth cricket development (U10 to U19)
-- South African cricket context (facilities, weather, conditions)
+- {country} cricket context (facilities, weather, conditions)
 
 YOUR ROLE:
 - Provide practical, actionable coaching advice
@@ -90,11 +103,7 @@ COMMUNICATION STYLE:
 
 LANGUAGE:
 - Detect and respond in the SAME language the coach uses
-- Support all 11 official South African languages:
-  * Afrikaans, English
-  * isiNdebele, isiXhosa, isiZulu
-  * Sepedi, Sesotho, Setswana
-  * siSwati, Tshivenda, Xitsonga
+- Support these languages: {language_list}
 
 CONSTRAINTS:
 - Keep responses under 1000 characters when possible
@@ -105,7 +114,7 @@ CONSTRAINTS:
 
 Remember: You're helping coaches develop their skills and help their players improve.""",
 
-        "ngo": """You are a program support assistant helping coaches and session facilitators at a community or non-profit organisation in South Africa.
+        "ngo": """You are a program support assistant helping {coach_word_plural_lower} at a community or non-profit organisation in {country}.
 
 EXPERTISE:
 - Facilitating group sessions and activities for community programs
@@ -120,7 +129,7 @@ YOUR ROLE:
 - Provide practical, actionable facilitation advice
 - Suggest activities and exercises suited to the program's goals
 - Explain techniques clearly and simply
-- Consider the coach's experience level and available resources
+- Consider the {coach_word_lower}'s experience level and available resources
 - Be encouraging and supportive
 
 COMMUNICATION STYLE:
@@ -131,23 +140,19 @@ COMMUNICATION STYLE:
 - Ask clarifying questions when needed
 
 LANGUAGE:
-- Detect and respond in the SAME language the coach uses
-- Support all 11 official South African languages:
-  * Afrikaans, English
-  * isiNdebele, isiXhosa, isiZulu
-  * Sepedi, Sesotho, Setswana
-  * siSwati, Tshivenda, Xitsonga
+- Detect and respond in the SAME language the {coach_word_lower} uses
+- Support these languages: {language_list}
 
 CONSTRAINTS:
 - Keep responses under 1000 characters when possible
-- Focus on program facilitation and the coach's group/schedule
+- Focus on program facilitation and the {coach_word_lower}'s group/schedule
 - If asked about unrelated topics, politely redirect
-- When the coach asks about their group, participants, or schedule, use the data provided
+- When the {coach_word_lower} asks about their group, participants, or schedule, use the data provided
 - Don't provide medical, legal, or safeguarding-incident advice beyond general awareness — refer serious concerns to the organisation's designated safeguarding contact
 
-Remember: You're helping coaches run great sessions and support their participants.""",
+Remember: You're helping {coach_word_plural_lower} run great sessions and support their participants.""",
 
-        "events": """You are a session support assistant helping coaches and crew leads coordinate activities and sessions at events in South Africa.
+        "events": """You are a session support assistant helping coaches and crew leads coordinate activities and sessions at events in {country}.
 
 EXPERTISE:
 - Running activity sessions, workshops, and event-day programming
@@ -173,11 +178,7 @@ COMMUNICATION STYLE:
 
 LANGUAGE:
 - Detect and respond in the SAME language the coach uses
-- Support all 11 official South African languages:
-  * Afrikaans, English
-  * isiNdebele, isiXhosa, isiZulu
-  * Sepedi, Sesotho, Setswana
-  * siSwati, Tshivenda, Xitsonga
+- Support these languages: {language_list}
 
 CONSTRAINTS:
 - Keep responses under 1000 characters when possible
@@ -188,7 +189,7 @@ CONSTRAINTS:
 
 Remember: You're helping coaches deliver smooth, well-run sessions at every event.""",
 
-        "corporate": """You are a training and session support assistant helping coaches and facilitators run corporate learning and development sessions in South Africa.
+        "corporate": """You are a training and session support assistant helping {coach_word_plural_lower} run corporate learning and development sessions in {country}.
 
 EXPERTISE:
 - Facilitating workplace training sessions and workshops
@@ -202,7 +203,7 @@ YOUR ROLE:
 - Provide practical, actionable coaching and facilitation advice
 - Suggest exercises and activities suited to the session's objectives
 - Explain concepts clearly and simply
-- Consider the coach's experience level and the resources available
+- Consider the {coach_word_lower}'s experience level and the resources available
 - Be encouraging and professional
 
 COMMUNICATION STYLE:
@@ -213,30 +214,58 @@ COMMUNICATION STYLE:
 - Ask clarifying questions when needed
 
 LANGUAGE:
-- Detect and respond in the SAME language the coach uses
-- Support all 11 official South African languages:
-  * Afrikaans, English
-  * isiNdebele, isiXhosa, isiZulu
-  * Sepedi, Sesotho, Setswana
-  * siSwati, Tshivenda, Xitsonga
+- Detect and respond in the SAME language the {coach_word_lower} uses
+- Support these languages: {language_list}
 
 CONSTRAINTS:
 - Keep responses under 1000 characters when possible
-- Focus on session facilitation and the coach's team/schedule
+- Focus on session facilitation and the {coach_word_lower}'s team/schedule
 - If asked about unrelated topics, politely redirect
-- When the coach asks about their team, participants, or schedule, use the data provided
+- When the {coach_word_lower} asks about their team, participants, or schedule, use the data provided
 - Don't provide HR, legal, or performance-management advice — refer to HR or the appropriate department
 
-Remember: You're helping coaches run effective sessions and support their team's development.""",
+Remember: You're helping {coach_word_plural_lower} run effective sessions and support their team's development.""",
     }
+
+    @classmethod
+    def _render_persona_template(cls, template, org_id):
+        """Fill a DEFAULT_AI_PERSONA_PROMPTS template's {coach_word...}/
+        {country}/{language_list} placeholders from the org's own
+        terminology/locale config (FirebaseService.get_org_terminology/
+        get_org_locale), falling back to the sports/South-Africa defaults
+        for a missing org_id exactly like generate_response's role_word
+        resolution does. A template that doesn't reference a given
+        placeholder (sports/events don't use {coach_word_lower} — their
+        default wording is already correct) simply ignores the extra kwarg.
+        """
+        terminology = (FirebaseService.get_org_terminology(org_id) if org_id
+                       else FirebaseService.DEFAULT_TERMINOLOGY)
+        locale = (FirebaseService.get_org_locale(org_id) if org_id
+                  else {'country': FirebaseService.DEFAULT_COUNTRY,
+                        'supported_languages': FirebaseService.DEFAULT_SUPPORTED_LANGUAGES})
+        return template.format(
+            coach_word=terminology['coach_singular'],
+            coach_word_lower=terminology['coach_singular'].lower(),
+            coach_word_plural_lower=terminology['coach_plural'].lower(),
+            country=locale['country'],
+            language_list=', '.join(locale['supported_languages']),
+        )
 
     @classmethod
     def get_ai_persona_prompt(cls, org_id):
         """Resolve the AI system persona prompt to use for a given org.
 
         Priority:
-        1. The org's own Organisation.ai_persona_prompt override, if set.
-        2. The default prompt for the org's Organisation.type.
+        1. The org's own Organisation.ai_persona_prompt override, if set —
+           returned verbatim, exactly as the admin wrote it. Never passed
+           through _render_persona_template; that's only for filling in
+           the placeholders in OUR default templates above.
+        2. The default prompt for the org's Organisation.type, rendered
+           with that org's own terminology/country/language config (Phase
+           1's org-configurable terminology/persona system already
+           supported per-org overrides for everything else in this
+           prompt — this makes the default TEXT respect that too, instead
+           of hardcoding "coach" and "South Africa" regardless of the org).
         3. The sports default, as a defensive fallback — this shouldn't be
            reachable once every org has a valid type post-migration, so it's
            logged as a warning if hit.
@@ -251,14 +280,14 @@ Remember: You're helping coaches run effective sessions and support their team's
             org_type = org.get('type')
             default_prompt = cls.DEFAULT_AI_PERSONA_PROMPTS.get(org_type)
             if default_prompt:
-                return default_prompt
+                return cls._render_persona_template(default_prompt, org_id)
 
         logger.warning(
             "No org/type found for org_id=%s when resolving AI persona prompt "
             "(org=%s) — falling back to the sports default.",
             org_id, 'found' if org else 'not found'
         )
-        return cls.DEFAULT_AI_PERSONA_PROMPTS['sports']
+        return cls._render_persona_template(cls.DEFAULT_AI_PERSONA_PROMPTS['sports'], org_id)
 
     @classmethod
     def get_conversation_history(cls, coach_phone, limit=10):
@@ -532,6 +561,24 @@ Remember: You're helping coaches run effective sessions and support their team's
         return cls.load_participant_context(person_id, org_id)
 
     @classmethod
+    def _terminology_for(cls, org_id):
+        """Resolve org terminology, always safe to mutate.
+
+        get_org_terminology(org_id) already returns a fresh dict, but the
+        no-org_id fallback used to bind FirebaseService.DEFAULT_TERMINOLOGY
+        directly — the literal class-level dict (itself the same object as
+        DEFAULT_TERMINOLOGY_BY_TYPE["sports"]), not a copy. Nothing mutates
+        it today, but that's exactly the shape of the DEFAULT_PRICING
+        aliasing bug fixed in routes/broadcasts.py, one stray
+        `terminology[key] = ...` away from corrupting the sports defaults
+        for every org in the process. Copying here closes that off before
+        it can happen.
+        """
+        if org_id:
+            return FirebaseService.get_org_terminology(org_id)
+        return dict(FirebaseService.DEFAULT_TERMINOLOGY)
+
+    @classmethod
     def generate_response(cls, phone, user_message, org_id, person_name=None, person_id=None, person_type='coach'):
         """Generate an AI response to the sender's message using RAG context.
 
@@ -560,7 +607,7 @@ Remember: You're helping coaches run effective sessions and support their team's
             # what to call a participant ("Player", "Participant",
             # "Attendee"...). Falls back to the sports defaults exactly like
             # get_ai_persona_prompt does if org_id is missing.
-            terminology = FirebaseService.get_org_terminology(org_id) if org_id else FirebaseService.DEFAULT_TERMINOLOGY
+            terminology = cls._terminology_for(org_id)
             role_word = terminology['coach_singular'] if person_type == 'coach' else terminology['player_singular']
             role_word_lower = role_word.lower()
 
@@ -617,7 +664,7 @@ Remember: You're helping coaches run effective sessions and support their team's
 
         except Exception as e:
             logger.error("Error generating response: %s", e)
-            return "I apologize, I'm having trouble responding right now. Please try again in a moment. 🏏"
+            return "I apologize, I'm having trouble responding right now. Please try again in a moment."
     
     # ── Attendance via WhatsApp ──────────────────────────────────────────
 
@@ -694,6 +741,7 @@ Remember: You're helping coaches run effective sessions and support their team's
         coach_id = coach.get('id')
         org_id = coach.get('org_id')
         today_str = date.today().strftime('%Y-%m-%d')
+        terminology = cls._terminology_for(org_id)
         logger.info("Attendance command from coach %s (id=%s) for %s", coach.get('name'), coach_id, today_str)
 
         # Query by coach_id only to avoid Firestore composite index requirement,
@@ -736,11 +784,12 @@ Remember: You're helping coaches run effective sessions and support their team's
             return '\n'.join(lines)
 
         team = FirebaseService.get_team(team_id, org_id)
-        team_name = team.get('name', 'your team') if team else 'your team'
+        default_team_name = f"your {terminology['team_singular'].lower()}"
+        team_name = team.get('name', default_team_name) if team else default_team_name
 
         players = FirebaseService.get_all_players(org_id, team_id=team_id)
         if not players:
-            return f"No players found for {team_name}. Please contact your administrator."
+            return f"No {terminology['player_plural'].lower()} found for {team_name}. Please contact your administrator."
 
         # Sort players alphabetically
         players.sort(key=lambda p: (p.get('first_name', '') + ' ' + p.get('last_name', '')).strip().lower())
@@ -748,7 +797,7 @@ Remember: You're helping coaches run effective sessions and support their team's
         # Build numbered list
         player_list = []
         for i, p in enumerate(players, 1):
-            name = (p.get('first_name', '') + ' ' + p.get('last_name', '')).strip() or p.get('name', f'Player {i}')
+            name = (p.get('first_name', '') + ' ' + p.get('last_name', '')).strip() or p.get('name', f"{terminology['player_singular']} {i}")
             player_list.append({'id': p['id'], 'name': name, 'number': i})
 
         # Store pending state
@@ -760,9 +809,9 @@ Remember: You're helping coaches run effective sessions and support their team's
 
         # Build message
         session_time = session.get('start_time', '')
-        session_type = session.get('type', 'practice').capitalize()
+        session_type = session.get('type', terminology['session_singular']).capitalize()
         lines = [f"📋 *{team_name}* — {session_type} ({today_str}, {session_time})\n"]
-        lines.append("Reply with the *numbers of ABSENT players*.")
+        lines.append(f"Reply with the *numbers of ABSENT {terminology['player_plural'].upper()}*.")
         lines.append("Example: 2 5 8\n")
         for p in player_list:
             lines.append(f"{p['number']}. {p['name']}")
@@ -780,7 +829,7 @@ Remember: You're helping coaches run effective sessions and support their team's
         session_id = pending.get('session_id')
         if not players or not session_id:
             cls.clear_pending_attendance(coach_phone)
-            return "Something went wrong with your attendance session. Please send /attendance to start again. 🏏"
+            return "Something went wrong with your attendance session. Please send /attendance to start again."
 
         if text == 'cancel':
             cls.clear_pending_attendance(coach_phone)
@@ -830,7 +879,7 @@ Remember: You're helping coaches run effective sessions and support their team's
             })
         except Exception as e:
             logger.error("Error saving attendance: %s", e)
-            return "Failed to save attendance. Please try again. 🏏"
+            return "Failed to save attendance. Please try again."
 
         cls.clear_pending_attendance(coach_phone)
         # Dashboard display name only — non-critical, so a cache-unavailable
@@ -1052,7 +1101,7 @@ Remember: You're helping coaches run effective sessions and support their team's
 
             WhatsAppService.send_message(
                 phone_number=from_number,
-                message_text=f"📸 Group photo saved! Great work, {coach_name}!\nReply /end to mark this session as completed. 🏏"
+                message_text=f"📸 Group photo saved! Great work, {coach_name}!\nReply /end to mark this session as completed."
             )
             logger.info("Group photo saved for session %s by %s", session_id, coach_name)
 
@@ -1226,7 +1275,7 @@ Remember: You're helping coaches run effective sessions and support their team's
             if within:
                 WhatsAppService.send_message(
                     phone_number=from_number,
-                    message_text=f"✅ Checked in! You're {dist_str} from the venue. Have a great session, {coach_name}! 🏏{venue_ref}"
+                    message_text=f"✅ Checked in! You're {dist_str} from the venue. Have a great session, {coach_name}!{venue_ref}"
                 )
             else:
                 radius_str = f"{allowed_radius}m" if allowed_radius < 1000 else f"{allowed_radius/1000:.1f}km"
@@ -1244,7 +1293,7 @@ Remember: You're helping coaches run effective sessions and support their team's
             try:
                 WhatsAppService.send_message(
                     phone_number=from_number,
-                    message_text="Sorry, something went wrong with your check-in. Please try again. 🏏"
+                    message_text="Sorry, something went wrong with your check-in. Please try again."
                 )
             except Exception:
                 pass
@@ -1258,6 +1307,7 @@ Remember: You're helping coaches run effective sessions and support their team's
         coach_id = coach.get('id')
         org_id = coach.get('org_id')
         today_str = date.today().strftime('%Y-%m-%d')
+        terminology = cls._terminology_for(org_id)
 
         all_coach_sessions = FirebaseService.get_all_sessions(org_id, coach_id=coach_id)
         sessions = [s for s in all_coach_sessions if s.get('date') == today_str]
@@ -1277,7 +1327,7 @@ Remember: You're helping coaches run effective sessions and support their team's
 
         # Build summary
         session_time = session.get('start_time', '')
-        session_type = session.get('type', 'practice').capitalize()
+        session_type = session.get('type', terminology['session_singular']).capitalize()
         attended = session.get('attended_player_ids', [])
 
         FirebaseService.update_session(session['id'], {
@@ -1290,10 +1340,10 @@ Remember: You're helping coaches run effective sessions and support their team's
 
         lines = [f"✅ Session completed! ({session_type} at {session_time})"]
         if attended:
-            lines.append(f"Attendance: {len(attended)} player(s) recorded")
+            lines.append(f"Attendance: {len(attended)} {terminology['player_plural'].lower()} recorded")
         else:
             lines.append("No attendance was recorded for this session.")
-        lines.append("\nGreat work, Coach! 🏏")
+        lines.append(f"\nGreat work, {terminology['coach_singular']}! 🎉")
         return '\n'.join(lines)
 
     # ── Players command ────────────────────────────────────────────────
@@ -1309,34 +1359,39 @@ Remember: You're helping coaches run effective sessions and support their team's
         """Return a formatted list of the coach's players grouped by team."""
         coach_id = coach.get('id')
         org_id = coach.get('org_id')
+        terminology = cls._terminology_for(org_id)
+        player_singular = terminology['player_singular']
+        player_plural_lower = terminology['player_plural'].lower()
+        team_plural_lower = terminology['team_plural'].lower()
+
         all_teams = FirebaseService.get_all_teams(org_id)
         coach_teams = [t for t in all_teams if coach_id in (t.get('coach_ids') or [])]
 
         if not coach_teams:
-            return "You don't have any teams assigned yet. Please contact your administrator. 📋"
+            return f"You don't have any {team_plural_lower} assigned yet. Please contact your administrator. 📋"
 
         lines = []
         total_players = 0
         for team in coach_teams:
             team_name = team.get('name', 'Unnamed')
             age_group = team.get('age_group', '')
-            header = f"🏏 *{team_name}*"
+            header = f"*{team_name}*"
             if age_group:
                 header += f" ({age_group})"
             lines.append(header)
 
             players = FirebaseService.get_all_players(org_id, team_id=team.get('id'))
             if not players:
-                lines.append("  (no players registered)")
+                lines.append(f"  (no {player_plural_lower} registered)")
             else:
                 total_players += len(players)
                 players.sort(key=lambda p: (p.get('first_name', '') + ' ' + p.get('last_name', '')).strip().lower())
                 for i, p in enumerate(players, 1):
-                    name = (p.get('first_name', '') + ' ' + p.get('last_name', '')).strip() or p.get('name', f'Player {i}')
+                    name = (p.get('first_name', '') + ' ' + p.get('last_name', '')).strip() or p.get('name', f'{player_singular} {i}')
                     lines.append(f"  {i}. {name}")
             lines.append("")  # blank line between teams
 
-        lines.append(f"Total: {total_players} player(s) across {len(coach_teams)} team(s)")
+        lines.append(f"Total: {total_players} {player_plural_lower} across {len(coach_teams)} {team_plural_lower}")
         return '\n'.join(lines)
 
     # ── Message handler ──────────────────────────────────────────────────
@@ -1388,10 +1443,10 @@ Remember: You're helping coaches run effective sessions and support their team's
                 response = cls.handle_attendance_response(from_number, message_text, pending)
             # Check for commands
             elif text_lower in ['/help', 'help', '/start']:
-                response = cls.get_help_message(coach.get('name'))
+                response = cls.get_help_message(coach.get('name'), coach.get('org_id'))
             elif text_lower in ['/reset', 'reset']:
                 cls.clear_pending_attendance(from_number)
-                response = "Your conversation has been reset. Feel free to ask me anything about cricket coaching! 🏏"
+                response = "Your conversation has been reset. Feel free to ask me anything!"
             elif text_lower in ['/attendance', 'attendance']:
                 logger.info("Matched /attendance command")
                 response = cls.handle_attendance_command(coach)
@@ -1436,7 +1491,7 @@ Remember: You're helping coaches run effective sessions and support their team's
             try:
                 WhatsAppService.send_message(
                     phone_number=from_number,
-                    message_text="Sorry, I encountered an error. Please try again. 🏏"
+                    message_text="Sorry, I encountered an error. Please try again."
                 )
             except Exception:
                 pass
@@ -1447,7 +1502,7 @@ Remember: You're helping coaches run effective sessions and support their team's
     # anyone who wasn't a coach.
     UNRECOGNISED_SENDER_MESSAGE = (
         "Hello! This number isn't registered with Teko. Please contact your "
-        "administrator to get set up. 🏏"
+        "administrator to get set up."
     )
 
     # Sent instead of UNRECOGNISED_SENDER_MESSAGE when PersonService can't
@@ -1458,7 +1513,7 @@ Remember: You're helping coaches run effective sessions and support their team's
     # the same "we don't know, don't guess" situation.
     TRANSIENT_ERROR_MESSAGE = (
         "Sorry, something's not quite right on our side right now. Please "
-        "try again in a moment. 🏏"
+        "try again in a moment."
     )
 
     @classmethod
@@ -1506,7 +1561,7 @@ Remember: You're helping coaches run effective sessions and support their team's
         if text_lower in ['/help', 'help', '/start']:
             response = cls.get_participant_help_message(person_name)
         elif text_lower in ['/reset', 'reset']:
-            response = "Your conversation has been reset. Feel free to ask me anything! 🏏"
+            response = "Your conversation has been reset. Feel free to ask me anything!"
         elif (text_lower in ['/attendance', 'attendance', '/attendance-redo', 'attendance-redo',
                               '/end', 'end session', '/players', 'players']
               or cls.PLAYER_INTENT_RE.search(text_lower)):
@@ -1526,30 +1581,30 @@ Remember: You're helping coaches run effective sessions and support their team's
             logger.error("Failed to send response to participant: %s", result.get('error'))
 
     @classmethod
-    def get_help_message(cls, coach_name=None):
-        """Generate help message"""
-        greeting = f"Hi Coach {coach_name}! 👋\n\n" if coach_name else "Hi Coach! 👋\n\n"
-        
-        return greeting + """I'm your Cricket Coaching Assistant! 🏏
+    def get_help_message(cls, coach_name=None, org_id=None):
+        """Generate the /help reply for a coach, using the org's own
+        terminology (Coach/Facilitator, Player/Participant/Attendee,
+        Team/Group, Session) instead of hardcoding sports/cricket-specific
+        wording that doesn't fit every org type."""
+        terminology = cls._terminology_for(org_id)
+        role = terminology['coach_singular']
+        player = terminology['player_singular'].lower()
+        players_plural = terminology['player_plural'].lower()
+        team = terminology['team_singular'].lower()
+        session = terminology['session_singular'].lower()
 
-I can help you with:
-• Batting techniques & drills
-• Bowling tips & variations
-• Fielding exercises
-• Match tactics & strategy
-• Player development
-• Fitness training
-• Mental preparation
+        greeting = f"Hi {role} {coach_name}! 👋\n\n" if coach_name else f"Hi {role}! 👋\n\n"
 
-Just ask me anything about cricket coaching!
-
-Commands:
-/attendance - Mark player attendance for today's session
-/players - Show your team's player list
-/end - Mark today's session as completed
-/help - Show this message
-/reset - Start fresh conversation
-
-To check in, just send your location! 📍
-
-I speak all 11 SA languages - just message me in your preferred language!"""
+        return greeting + (
+            f"I'm your coaching assistant! I can help with planning drills, "
+            f"session ideas, and supporting your {players_plural} — ask me "
+            f"anything, any time.\n\n"
+            "Commands:\n"
+            f"/attendance - Mark {player} attendance for today's {session}\n"
+            f"/players - Show your {team}'s {player} list\n"
+            f"/end - Mark today's {session} as completed\n"
+            "/help - Show this message\n"
+            "/reset - Start fresh conversation\n\n"
+            "To check in, just send your location! 📍\n\n"
+            "I'll respond in whichever language you message me in!"
+        )

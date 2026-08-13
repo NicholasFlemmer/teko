@@ -237,31 +237,6 @@ class FirebaseService:
         db.collection('participants').document(participant_id).delete()
         return True
 
-    @classmethod
-    def get_participant_by_phone(cls, phone):
-        """Get a participant by phone number, searched across ALL orgs.
-
-        DELIBERATE EXCEPTION to org scoping — the only one among the
-        participant accessors. Every other method above takes org_id and
-        enforces it; this one deliberately doesn't, because it exists for
-        WhatsApp identity resolution, where the org isn't known until AFTER
-        the phone number resolves to a person (mirrors PersonService's same
-        exception, for the same reasoning — see PersonService's class
-        docstring). `phone` must already be normalized via
-        normalize_sa_phone() by the caller/writer; this does an exact-match
-        Firestore query, not PersonService's scan-and-cache approach.
-
-        NOT currently called anywhere — PersonService.resolve() is the
-        actual identity-resolution path in production. Left in place rather
-        than removed since deleting it wasn't part of the Phase 2 step 3c
-        scope; flagged here so it doesn't look like a second live path.
-        """
-        db = cls.get_db()
-        docs = db.collection('participants').where('phone_number', '==', phone).limit(1).stream()
-        for doc in docs:
-            return {'id': doc.id, **doc.to_dict()}
-        return None
-
     # Session operations
     @classmethod
     def create_session(cls, data):
@@ -1061,6 +1036,18 @@ class FirebaseService:
     # Final catch-all fallback for a missing/unrecognized org type.
     DEFAULT_TERMINOLOGY = DEFAULT_TERMINOLOGY_BY_TYPE["sports"]
 
+    # Default country + supported-language set, used by
+    # ConversationService.DEFAULT_AI_PERSONA_PROMPTS so the AI persona
+    # doesn't hardcode South Africa for every org. These are exactly the
+    # values every org implicitly had before country/supported_languages
+    # existed as org fields, so an org that hasn't set its own (e.g. CATCH
+    # Trust) sees no change in behaviour — see get_org_locale.
+    DEFAULT_COUNTRY = "South Africa"
+    DEFAULT_SUPPORTED_LANGUAGES = [
+        "Afrikaans", "English", "isiNdebele", "isiXhosa", "isiZulu",
+        "Sepedi", "Sesotho", "Setswana", "siSwati", "Tshivenda", "Xitsonga",
+    ]
+
     @classmethod
     def get_organisation(cls, org_id):
         """Get a single organisation by ID."""
@@ -1092,10 +1079,13 @@ class FirebaseService:
     def create_organisation(cls, data):
         """Create a new organisation document.
 
-        Fields: name, slug, type, terminology, ai_persona_prompt, is_active,
-        created_at. ai_persona_prompt is optional — when empty/absent, the
-        AI system prompt falls back to the default for the org's type (see
-        ConversationService.get_ai_persona_prompt).
+        Fields: name, slug, type, terminology, ai_persona_prompt, country,
+        supported_languages, is_active, created_at. ai_persona_prompt is
+        optional — when empty/absent, the AI system prompt falls back to
+        the default for the org's type (see
+        ConversationService.get_ai_persona_prompt). country/
+        supported_languages are also optional and fall back to the South
+        African defaults (see get_org_locale) — same shape as terminology.
         """
         db = cls.get_db()
         data['created_at'] = firestore.SERVER_TIMESTAMP
@@ -1127,6 +1117,24 @@ class FirebaseService:
         if org and org.get('terminology'):
             return {**type_default, **org['terminology']}
         return dict(type_default)
+
+    @classmethod
+    def get_org_locale(cls, org_id):
+        """Get the country + supported-languages config for an org, falling
+        back to DEFAULT_COUNTRY/DEFAULT_SUPPORTED_LANGUAGES (the South
+        African values every org implicitly had before these were
+        configurable) when the org hasn't set its own. Same fallback shape
+        as get_org_terminology: saved org value > default.
+
+        Always returns a fresh list for supported_languages — never the
+        literal DEFAULT_SUPPORTED_LANGUAGES object — so a caller can never
+        mutate the shared module-level default in place (the exact bug
+        class fixed in routes/broadcasts.py's pricing defaults).
+        """
+        org = cls.get_organisation(org_id) if org_id else None
+        country = (org.get('country') if org else None) or cls.DEFAULT_COUNTRY
+        languages = (org.get('supported_languages') if org else None) or cls.DEFAULT_SUPPORTED_LANGUAGES
+        return {'country': country, 'supported_languages': list(languages)}
 
     # =========================================================================
     # Settings operations (single document 'app_settings')
