@@ -432,25 +432,65 @@ Remember: You're helping coaches run effective sessions and support their team's
             return ''
 
     @classmethod
-    def generate_response(cls, coach_phone, user_message, coach_name=None, coach_id=None):
-        """Generate AI response to coach's message using RAG context"""
+    def load_participant_context(cls, participant_id, org_id):
+        """Load participant-specific context.
+
+        Participants have no roster relationship (team/session assignment)
+        yet — that's later work — so there's nothing to add beyond their
+        own identity, which the persona line in generate_response already
+        surfaces. Kept as a real function (returning '') rather than
+        skipped entirely so load_person_context's dispatch stays explicit
+        and this is a single, obvious place to extend once participants
+        gain a roster relationship.
+        """
+        return ''
+
+    @classmethod
+    def load_person_context(cls, person_id, org_id, person_type):
+        """Load context for whoever is messaging: full team/session context
+        for a coach (identical to the original load_coach_context), or
+        minimal context for a participant."""
+        if person_type == 'coach':
+            return cls.load_coach_context(person_id, org_id)
+        return cls.load_participant_context(person_id, org_id)
+
+    @classmethod
+    def generate_response(cls, phone, user_message, org_id, person_name=None, person_id=None, person_type='coach'):
+        """Generate an AI response to the sender's message using RAG context.
+
+        org_id, person_name, person_id, and person_type are resolved by the
+        caller (via PersonService) and passed straight in — this no longer
+        re-derives org_id from a coach-only phone lookup like the original
+        coach_phone-only version did, which is what made this path unusable
+        for participants (their phone doesn't exist in the coaches
+        collection, so that lookup always returned None).
+        """
         try:
             # Get conversation history
-            history = cls.get_conversation_history(coach_phone, limit=5)
+            history = cls.get_conversation_history(phone, limit=5)
 
-            # Determine the coach's org from their own record (matched by
-            # phone number, which carries org_id after the migration script)
-            # so RAG content and coach context stay scoped to their org.
-            requesting_coach = cls.get_coach_by_phone(coach_phone)
-            org_id = requesting_coach.get('org_id') if requesting_coach else None
-
-            # Load RAG content
+            # Load RAG content — org-scoped exactly as before; Phase 0 org
+            # scoping is untouched, and load_rag_context was already
+            # person-type-agnostic (it only ever took org_id).
             rag_context = cls.load_rag_context(org_id)
 
-            # Load coach-specific context (teams, players, sessions)
-            coach_context = cls.load_coach_context(coach_id, org_id)
+            # Load person-specific context (teams/sessions for a coach,
+            # unchanged; minimal for a participant — see load_person_context).
+            person_context = cls.load_person_context(person_id, org_id, person_type)
 
-            # Build context for Gemini
+            # Org terminology (Phase 1) decides what to call this person —
+            # "Coach" for a sports org, "Facilitator" for an NGO, etc. — and
+            # what to call a participant ("Player", "Participant",
+            # "Attendee"...). Falls back to the sports defaults exactly like
+            # get_ai_persona_prompt does if org_id is missing.
+            terminology = FirebaseService.get_org_terminology(org_id) if org_id else FirebaseService.DEFAULT_TERMINOLOGY
+            role_word = terminology['coach_singular'] if person_type == 'coach' else terminology['player_singular']
+            role_word_lower = role_word.lower()
+
+            # Build context for Gemini. The org's configured persona prompt
+            # (Phase 1's get_ai_persona_prompt — default-by-type or the
+            # org's own override) always comes first and is only ever
+            # appended to below, never replaced or reordered.
             context = cls.get_ai_persona_prompt(org_id) + "\n\n"
 
             if rag_context:
@@ -461,27 +501,27 @@ Remember: You're helping coaches run effective sessions and support their team's
                     "If the knowledge base doesn't cover the topic, use your general knowledge.\n\n"
                 )
 
-            if coach_name:
-                context += f"You are chatting with Coach {_sanitize_for_prompt(coach_name, 100)}.\n\n"
+            if person_name:
+                context += f"You are chatting with {role_word} {_sanitize_for_prompt(person_name, 100)}.\n\n"
 
-            if coach_context:
-                context += coach_context + "\n"
+            if person_context:
+                context += person_context + "\n"
                 context += (
-                    "Use the coach's team, player, and session information above to give "
-                    "personalised answers. When the coach asks about their team or players, "
+                    f"Use the {role_word_lower}'s team, player, and session information above to give "
+                    f"personalised answers. When the {role_word_lower} asks about their team or players, "
                     "refer to this data.\n\n"
                 )
 
             context += "Recent conversation:\n"
             for msg in history:
-                role_label = "Coach" if msg['role'] == 'user' else "You"
+                role_label = role_word if msg['role'] == 'user' else "You"
                 context += f"{role_label}: {msg['content']}\n"
 
             context += (
-                "\nIMPORTANT: Always respond in the same language as the coach's LATEST message below. "
-                "If the coach switches language, you must switch with them.\n"
+                f"\nIMPORTANT: Always respond in the same language as the {role_word_lower}'s LATEST message below. "
+                f"If the {role_word_lower} switches language, you must switch with them.\n"
             )
-            context += f"\nCoach: {_sanitize_for_prompt(user_message, max_length=1000)}\nYou:"
+            context += f"\n{role_word}: {_sanitize_for_prompt(user_message, max_length=1000)}\nYou:"
 
             # Generate response using Gemini
             response = GeminiService.generate_custom_message(context)
@@ -490,8 +530,8 @@ Remember: You're helping coaches run effective sessions and support their team's
             clean_response = cls.strip_markdown(response)
 
             # Save both messages to history
-            cls.save_message(coach_phone, 'user', user_message)
-            cls.save_message(coach_phone, 'assistant', clean_response)
+            cls.save_message(phone, 'user', user_message)
+            cls.save_message(phone, 'assistant', clean_response)
 
             return clean_response
 
@@ -1204,11 +1244,7 @@ Remember: You're helping coaches run effective sessions and support their team's
                 return
 
             if person.get('person_type') != 'coach':
-                logger.info("Message from participant %s — not yet supported", person.get('id'))
-                WhatsAppService.send_message(
-                    phone_number=from_number,
-                    message_text=cls.get_participant_not_supported_message(person.get('name'))
-                )
+                cls._handle_participant_message(from_number, message_text, person)
                 return
 
             coach = person
@@ -1250,10 +1286,12 @@ Remember: You're helping coaches run effective sessions and support their team's
             else:
                 # Generate AI response
                 response = cls.generate_response(
-                    coach_phone=from_number,
+                    phone=from_number,
                     user_message=message_text,
-                    coach_name=coach.get('name'),
-                    coach_id=coach.get('id'),
+                    org_id=coach.get('org_id'),
+                    person_name=coach.get('name'),
+                    person_id=coach.get('id'),
+                    person_type='coach',
                 )
 
             # Send response via WhatsApp
@@ -1329,11 +1367,67 @@ Remember: You're helping coaches run effective sessions and support their team's
 
     @classmethod
     def get_participant_not_supported_message(cls, name=None):
-        """Sent to a correctly-identified participant. Phase 2 step 2 is
-        identity resolution only — no participant-facing behaviour exists
-        yet beyond recognising them."""
+        """Sent to a correctly-identified participant from the image and
+        location-check-in handlers — those stay coach-only in Phase 2 step 3
+        (see handle_image_message / handle_location_check_in). Text messages
+        no longer use this; see _handle_participant_message."""
         greeting = f"Hi {name}! " if name else "Hi! "
         return greeting + "You're on file, but this assistant doesn't support participants yet. Please check back soon."
+
+    @classmethod
+    def get_participant_help_message(cls, name=None):
+        """Person-type-neutral /help reply for a participant. Deliberately
+        simple — real command gating is step 4."""
+        greeting = f"Hi {name}! 👋\n\n" if name else "Hi! 👋\n\n"
+        return greeting + (
+            "I can answer questions — just ask me anything.\n\n"
+            "Commands:\n"
+            "/help - Show this message\n"
+            "/reset - Start a fresh conversation"
+        )
+
+    @classmethod
+    def get_participant_command_unavailable_message(cls, name=None):
+        """Polite decline for any recognised trainer-only command token sent
+        by a participant. Real command gating (trainer_only/participant_only
+        content flags) is step 4 — this is deliberately simple, not clever."""
+        greeting = f"Hi {name}! " if name else "Hi! "
+        return greeting + "That command isn't available to you yet. Feel free to ask me a question instead."
+
+    @classmethod
+    def _handle_participant_message(cls, from_number, message_text, person):
+        """Route a text message from an identified participant.
+
+        /help and /reset get simple participant-appropriate replies, any
+        other recognised command token (the same tokens the coach elif
+        chain below matches) politely declines, and everything else reaches
+        the AI Q&A fallback exactly like a coach's free-text message would.
+        This never touches the coach elif chain in handle_incoming_message.
+        """
+        text_lower = message_text.strip().lower()
+        person_name = person.get('name')
+
+        if text_lower in ['/help', 'help', '/start']:
+            response = cls.get_participant_help_message(person_name)
+        elif text_lower in ['/reset', 'reset']:
+            response = "Your conversation has been reset. Feel free to ask me anything! 🏏"
+        elif (text_lower in ['/attendance', 'attendance', '/attendance-redo', 'attendance-redo',
+                              '/end', 'end session', '/players', 'players']
+              or cls.PLAYER_INTENT_RE.search(text_lower)):
+            response = cls.get_participant_command_unavailable_message(person_name)
+        else:
+            response = cls.generate_response(
+                phone=from_number,
+                user_message=message_text,
+                org_id=person.get('org_id'),
+                person_name=person_name,
+                person_id=person.get('id'),
+                person_type='participant',
+            )
+
+        result = WhatsAppService.send_message(phone_number=from_number, message_text=response)
+        if not result.get('success'):
+            logger.error("Failed to send response to participant: %s", result.get('error'))
 
     @classmethod
     def get_help_message(cls, coach_name=None):
