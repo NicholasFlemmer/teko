@@ -37,10 +37,16 @@ behaviour of the real code path in this environment, so it's printed
 as-is with a clear banner, not faked.
 
 Checks:
-  1-4. Four combinations (org x person_type) — for each, prints the fully
-       assembled persona prompt (untruncated), the history role label, and
-       actual replies to a knowledge-base question, a trainer-only command
-       (/attendance), /help, and an unregistered sender.
+  1-4. Four combinations (org x person_type) — for each, prints an explicit
+       CONTEXT LOAD STATUS line (OK / DEGRADED / empty, for both person
+       context and RAG context, with the actual team/session/content/URL
+       item counts pulled), then the fully assembled persona prompt
+       (untruncated), the history role label, and actual replies to a
+       knowledge-base question, a trainer-only command (/attendance),
+       /help, and an unregistered sender. A degraded/empty context is
+       never silently absent from this output — a Phase 2 step 3 run
+       hid a real "no index" failure behind an empty section; this
+       status line exists so that can't happen again unnoticed.
   5. ai_persona_prompt override on test-org-b: confirms it wins for BOTH
      person types, then confirms clearing it falls back to the ngo
      default. Cleans up its own write, including on error — same pattern
@@ -60,6 +66,7 @@ Usage:
 import sys
 import os
 import concurrent.futures
+from datetime import date
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -180,6 +187,56 @@ def main():
         ConversationService.handle_incoming_message(phone, text, message_id='qa-check-person-context')
         return sent_box.get('message_text', '(no message was sent)'), prompt_box.get('prompt')
 
+    CONTEXT_DEGRADED_MARKER = '[SYSTEM NOTE:'
+
+    def _status_label(context_text):
+        if CONTEXT_DEGRADED_MARKER in context_text:
+            return 'DEGRADED'
+        if context_text:
+            return 'OK'
+        return 'empty (nothing to load)'
+
+    def report_context_status(org_id, person, person_type):
+        """Explicit, ground-truth report of whether context loaded cleanly
+        or degraded, plus the actual item counts pulled — called directly,
+        not inferred from whatever ended up in a Gemini prompt, so a
+        degraded/empty section can never be silently missed here."""
+        print("\n>>> CONTEXT LOAD STATUS <<<")
+
+        person_context = ConversationService.load_person_context(person['id'], org_id, person_type)
+        person_status = _status_label(person_context)
+
+        if person_type == 'coach':
+            all_teams = FirebaseService.get_all_teams(org_id)
+            coach_teams = [t for t in all_teams if person['id'] in (t.get('coach_ids') or [])]
+            player_count = sum(
+                len(FirebaseService.get_all_players(org_id, team_id=t.get('id'))) for t in coach_teams
+            )
+            today_str = date.today().strftime('%Y-%m-%d')
+            session_count = len(FirebaseService.get_all_sessions(org_id, coach_id=person['id'], start_date=today_str))
+            print(f"Person context (coach): {person_status}")
+            print(f"  Teams pulled: {len(coach_teams)} | Players pulled: {player_count} | "
+                  f"Upcoming sessions pulled: {session_count}")
+        else:
+            print(f"Person context (participant): {person_status}")
+            print("  Teams/sessions: N/A — participants have no roster relationship yet (Phase 2 step 3)")
+
+        if person_status == 'DEGRADED':
+            for line in person_context.split('\n'):
+                if CONTEXT_DEGRADED_MARKER in line:
+                    print(f"  >> {line.strip()}")
+
+        rag_context = ConversationService.load_rag_context(org_id)
+        rag_status = _status_label(rag_context)
+        content_count = len(FirebaseService.get_all_content(org_id))
+        url_count = len(FirebaseService.get_all_urls(org_id))
+        print(f"RAG context: {rag_status}")
+        print(f"  Content items pulled: {content_count} | URL items pulled: {url_count}")
+        if rag_status == 'DEGRADED':
+            for line in rag_context.split('\n'):
+                if CONTEXT_DEGRADED_MARKER in line:
+                    print(f"  >> {line.strip()}")
+
     # --- Unregistered sender (identity resolution doesn't depend on org or
     # person_type, so this is genuinely the same result in every combo —
     # computed once, printed per combo below) --------------------------------
@@ -196,6 +253,8 @@ def main():
         phone = person['phone_number']
         name = person['name']
         section(f"{org_id} ({org_type}) — {person_type}: {name} ({phone})")
+
+        report_context_status(org_id, person, person_type)
 
         subsection("Knowledge-base question reply + assembled persona prompt")
         kb_reply, prompt = drive(phone, "What is a good warm-up drill for beginners?")

@@ -321,15 +321,39 @@ Remember: You're helping coaches run effective sessions and support their team's
             logger.error("Error saving message: %s", e)
     
     @classmethod
+    def _context_degraded_note(cls, what):
+        """A short, honest note to embed in assembled context when a query
+        for it fails, instead of silently returning empty context.
+
+        This is a SYSTEM-level signal in the prompt, not a user-facing
+        error — the person messaging still gets a normal, helpful reply.
+        The point is that the AI must not treat "context failed to load"
+        the same as "there is nothing there": without this, a query error
+        looks identical to a coach genuinely having no teams/sessions, and
+        the AI would confidently (and wrongly) tell them so.
+        """
+        return (
+            f"[SYSTEM NOTE: {what} could not be loaded right now due to a "
+            f"data error. This does NOT mean there is none — do not tell "
+            f"the user there's nothing there. If it's relevant to their "
+            f"question, say you're unable to check right now instead.]"
+        )
+
+    @classmethod
     def load_rag_context(cls, org_id):
-        """Load all content and URLs from Firestore for RAG context, scoped to org_id"""
+        """Load all content and URLs from Firestore for RAG context, scoped
+        to org_id.
+
+        Content and URLs are fetched independently (separate try/except)
+        so a failure in one can never silently discard data the other
+        already fetched successfully. A failed fetch is never silently
+        dropped — it's logged at ERROR level and turned into an explicit
+        note in the returned context; see _context_degraded_note.
+        """
+        sections = []
+
         try:
             content_items = FirebaseService.get_all_content(org_id)
-            url_items = FirebaseService.get_all_urls(org_id)
-
-            sections = []
-
-            # Add text content
             for item in content_items:
                 text = (item.get('content_text') or '').strip()
                 if not text:
@@ -343,8 +367,12 @@ Remember: You're helping coaches run effective sessions and support their team's
                 if len(text) > 3000:
                     text = text[:3000] + '... (truncated)'
                 sections.append(f"{header}\n{text}")
+        except Exception as e:
+            logger.error("Error loading RAG content items (org_id=%s): %s", org_id, e)
+            sections.append(cls._context_degraded_note("Some knowledge base documents"))
 
-            # Add URL resources
+        try:
+            url_items = FirebaseService.get_all_urls(org_id)
             for item in url_items:
                 title = item.get('title', '')
                 url = item.get('url', '')
@@ -358,29 +386,37 @@ Remember: You're helping coaches run effective sessions and support their team's
                 if instructions:
                     parts.append(f"Usage instructions: {instructions}")
                 sections.append('\n'.join(parts))
-
-            if not sections:
-                return ''
-
-            return (
-                "KNOWLEDGE BASE (use this information to help answer questions):\n"
-                + "\n\n---\n\n".join(sections)
-                + "\n\nEND OF KNOWLEDGE BASE\n"
-            )
         except Exception as e:
-            logger.warning("Error loading RAG context: %s", e)
+            logger.error("Error loading RAG URL resources (org_id=%s): %s", org_id, e)
+            sections.append(cls._context_degraded_note("Some knowledge base URL resources"))
+
+        if not sections:
             return ''
+
+        return (
+            "KNOWLEDGE BASE (use this information to help answer questions):\n"
+            + "\n\n---\n\n".join(sections)
+            + "\n\nEND OF KNOWLEDGE BASE\n"
+        )
 
     @classmethod
     def load_coach_context(cls, coach_id, org_id):
-        """Load coach-specific context: their teams, players, and upcoming sessions, scoped to org_id."""
+        """Load coach-specific context: their teams, players, and upcoming
+        sessions, scoped to org_id.
+
+        Teams/players and sessions are fetched independently (separate
+        try/except) so a failure in one can never silently discard data
+        the other already fetched successfully — e.g. a sessions query
+        error must not wipe out a team list that already loaded fine. A
+        failed fetch is never silently dropped — it's logged at ERROR
+        level and turned into an explicit note in the returned context;
+        see _context_degraded_note.
+        """
         if not coach_id:
             return ''
-        try:
-            from datetime import date as _date
-            sections = []
+        sections = []
 
-            # Teams this coach belongs to
+        try:
             all_teams = FirebaseService.get_all_teams(org_id)
             coach_teams = [t for t in all_teams if coach_id in (t.get('coach_ids') or [])]
 
@@ -403,8 +439,15 @@ Remember: You're helping coaches run effective sessions and support their team's
                     else:
                         lines.append("  (no players registered yet)")
                 sections.append('\n'.join(lines))
+        except Exception as e:
+            logger.error(
+                "Error loading team/player context (coach_id=%s, org_id=%s): %s",
+                coach_id, org_id, e,
+            )
+            sections.append(cls._context_degraded_note("Your teams and players"))
 
-            # Upcoming sessions (today and future)
+        try:
+            from datetime import date as _date
             today_str = _date.today().strftime('%Y-%m-%d')
             sessions = FirebaseService.get_all_sessions(org_id, coach_id=coach_id, start_date=today_str)
             if sessions:
@@ -423,13 +466,16 @@ Remember: You're helping coaches run effective sessions and support their team's
                         line += f" [{s_status}]"
                     lines.append(line)
                 sections.append('\n'.join(lines))
-
-            if not sections:
-                return ''
-            return '\n\n'.join(sections) + '\n'
         except Exception as e:
-            logger.error("Error loading coach context: %s", e)
+            logger.error(
+                "Error loading session context (coach_id=%s, org_id=%s): %s",
+                coach_id, org_id, e,
+            )
+            sections.append(cls._context_degraded_note("Your upcoming sessions"))
+
+        if not sections:
             return ''
+        return '\n\n'.join(sections) + '\n'
 
     @classmethod
     def load_participant_context(cls, participant_id, org_id):
