@@ -2,7 +2,7 @@ import logging
 from flask import Blueprint, request, jsonify, g
 from services.firebase_service import FirebaseService
 from routes.auth import token_required
-from utils.phone import normalize_sa_phone
+from utils.phone import normalize_phone_for_matching
 
 logger = logging.getLogger(__name__)
 
@@ -97,10 +97,13 @@ def create_participant(current_user):
             'name': data['name'],
         }
 
-        # Phone number - normalize on save
+        # Phone number - normalize on save. SA numbers get their canonical
+        # 27XXXXXXXXX form; non-SA numbers (e.g. a Brazilian participant)
+        # get the permissive strip-only form rather than being rejected or
+        # blanked — normalize_sa_phone() alone would reject them outright.
         raw_phone = data.get('phone_number') or data.get('phone', '')
         if raw_phone:
-            participant_data['phone_number'] = normalize_sa_phone(raw_phone) or raw_phone
+            participant_data['phone_number'] = normalize_phone_for_matching(raw_phone) or raw_phone
 
         if 'active' in data:
             participant_data['active'] = bool(data['active'])
@@ -140,7 +143,7 @@ def update_participant(current_user, participant_id):
             if field in data:
                 # Normalize phone fields on save
                 if field in ('phone', 'phone_number'):
-                    normalized = normalize_sa_phone(data[field])
+                    normalized = normalize_phone_for_matching(data[field])
                     update_data['phone_number'] = normalized or data[field]
                 else:
                     update_data[field] = data[field]

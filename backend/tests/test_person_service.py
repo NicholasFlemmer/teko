@@ -2,9 +2,11 @@
 
 Unlike test_org_isolation.py, these are pure unit tests: FirebaseService's
 directory reads are stubbed via monkeypatch, so nothing here touches
-Firestore. Coach/participant fixtures use realistic South African phone
-formats (normalize_sa_phone only recognises those), not the synthetic
-+1000000000x numbers used by the staging seed data.
+Firestore. Coach/participant fixtures use realistic South African and
+Brazilian-shaped phone formats, exercising both normalize_phone_for_matching()
+paths — the SA canonical path and the permissive international fallback.
+See test_person_resolution_e2e.py for end-to-end coverage against the real
+seeded staging phone numbers via handle_incoming_message directly.
 
 Usage:
     cd backend
@@ -107,6 +109,35 @@ def test_resolve_both_match_logs_warning_and_returns_coach(monkeypatch, caplog):
     assert any('both' in record.message.lower() for record in caplog.records), (
         "Expected a warning log mentioning the both-match data problem."
     )
+
+
+def test_resolve_matches_international_coach(monkeypatch):
+    """A non-SA number (Brazilian-shaped) must still resolve. Regression
+    test: normalize_sa_phone() alone rejects anything not SA-shaped, which
+    would make identity resolution SA-only — PersonService must use the
+    permissive normalize_phone_for_matching() fallback instead."""
+    _stub_directory(monkeypatch, coaches=[
+        {'id': 'coach-br', 'org_id': 'org-a', 'name': 'Eduardo', 'phone_number': '+55 11 98765-4321'},
+    ])
+
+    person = PersonService.resolve('5511987654321')
+
+    assert person is not None
+    assert person['person_type'] == 'coach'
+    assert person['id'] == 'coach-br'
+
+
+def test_resolve_matches_international_participant(monkeypatch):
+    """Same regression coverage as above, for a participant."""
+    _stub_directory(monkeypatch, participants=[
+        {'id': 'participant-br', 'org_id': 'org-a', 'name': 'Fernanda', 'phone_number': '+5511912345678'},
+    ])
+
+    person = PersonService.resolve('5511912345678')
+
+    assert person is not None
+    assert person['person_type'] == 'participant'
+    assert person['id'] == 'participant-br'
 
 
 def test_resolve_skips_malformed_stored_phone_without_breaking_others(monkeypatch):

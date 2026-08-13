@@ -13,9 +13,18 @@ Creates test-org-a and test-org-b, each with:
   - 1 content item and 1 content_url item (for RAG/knowledge-base checks)
 
 All data is obviously fake and clearly labeled — test-org-* document IDs,
-"Test Org A" / "Test Org B" names, +1000000000x phone numbers, *@test.invalid
-emails (a reserved TLD that can never resolve) — so it can never be confused
-with real client data.
+"Test Org A" / "Test Org B" names, *@test.invalid emails (a reserved TLD
+that can never resolve) — so it can never be confused with real client
+data.
+
+Phone numbers are deliberately a MIX of SA-shaped and international-shaped
+(Brazilian) numbers per org, for both coaches and participants — #1 is
+always SA-shaped, #2 is always Brazilian-shaped. This exercises
+PersonService's identity resolution across both normalize_sa_phone()'s
+canonical path and its permissive international fallback
+(normalize_phone_for_matching in utils/phone.py), not just South African
+numbers. All values are obviously synthetic (all-zero runs, no real SA
+mobile prefix or real Brazilian area/subscriber pattern).
 
 Idempotent: every document uses a deterministic ID derived from the org id
 (e.g. test-org-a-coach-1). Re-running deletes each org's existing test
@@ -43,23 +52,26 @@ EXPECTED_PROJECT_ID = 'teko-staging-tgh'
 
 # --- Test org definitions -------------------------------------------------
 # Everything here is obviously fake: test-org-* ids, "Test Org" names,
-# +1000000000x phone numbers, *@test.invalid emails.
+# *@test.invalid emails. Phone #1 in each pair is SA-shaped (accepted by
+# normalize_sa_phone()), #2 is Brazilian-shaped (rejected by
+# normalize_sa_phone(), matched only via the permissive fallback in
+# normalize_phone_for_matching()) — see the module docstring.
 ORGS = [
     {
         'org_id': 'test-org-a',
         'org_name': 'Test Org A',
         'label': 'Org A',
         'type': 'sports',
-        'phones': ('+10000000001', '+10000000003'),
-        'participant_phones': ('+10000000005', '+10000000007'),
+        'phones': ('27000000101', '+5511900000102'),
+        'participant_phones': ('27000000105', '+5511900000106'),
     },
     {
         'org_id': 'test-org-b',
         'org_name': 'Test Org B',
         'label': 'Org B',
         'type': 'ngo',
-        'phones': ('+10000000002', '+10000000004'),
-        'participant_phones': ('+10000000006', '+10000000008'),
+        'phones': ('27000000201', '+5511900000202'),
+        'participant_phones': ('27000000205', '+5511900000206'),
     },
 ]
 

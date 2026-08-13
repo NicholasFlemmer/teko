@@ -2,7 +2,7 @@ import logging
 import time
 
 from services.firebase_service import FirebaseService
-from utils.phone import normalize_sa_phone
+from utils.phone import normalize_phone_for_matching
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +34,19 @@ class PersonService:
 
     @staticmethod
     def _safe_normalize(phone_number):
-        """normalize_sa_phone(), but a single malformed stored phone number
-        (None, empty, garbage) can never raise and break resolution for
-        every other record in the same refresh."""
+        """normalize_phone_for_matching(), but a single malformed stored
+        phone number (None, empty, garbage) can never raise and break
+        resolution for every other record in the same refresh.
+
+        Uses normalize_phone_for_matching(), NOT normalize_sa_phone()
+        directly: the latter rejects anything that isn't SA-shaped, which
+        would make identity resolution SA-only — a real regression (e.g.
+        a Brazilian coach's number would never resolve). The matching
+        variant falls back to a permissive strip-only normalization for
+        non-SA numbers instead of rejecting them.
+        """
         try:
-            return normalize_sa_phone(phone_number) or ''
+            return normalize_phone_for_matching(phone_number) or ''
         except Exception:
             return ''
 
@@ -77,12 +85,15 @@ class PersonService:
         org_id, name, phone_number, plus whatever other fields that record
         has) with an added 'person_type' key: 'coach' or 'participant'.
 
-        Both sides of the comparison are normalised via normalize_sa_phone()
-        at lookup time — never assume stored numbers are already canonical.
-        Some existing coach records were saved through paths that predate
-        that normalizer, so comparing raw strings would silently stop
-        matching them; normalizing both sides can only ever increase the
-        match rate, never decrease it.
+        Both sides of the comparison are normalised via
+        normalize_phone_for_matching() at lookup time — never assume stored
+        numbers are already canonical. Some existing coach records were
+        saved through paths that predate normalize_sa_phone(), so comparing
+        raw strings would silently stop matching them; normalizing both
+        sides can only ever increase the match rate, never decrease it.
+        normalize_phone_for_matching() (not normalize_sa_phone() directly)
+        is what makes this work for non-SA numbers too — normalize_sa_phone()
+        alone would reject them outright rather than widen the match.
 
         Resolution order: coaches first, then participants. If a phone
         somehow matches both, that's a data problem someone needs to see —
