@@ -58,24 +58,39 @@ def _sanitize_for_prompt(text, max_length=200):
 class ConversationService:
     """Service for managing AI conversations with coaches via WhatsApp"""
 
-    # Default AI persona prompts, keyed by Organisation.type. An org can
-    # override its prompt entirely via Organisation.ai_persona_prompt; see
-    # get_ai_persona_prompt().
+    # Default AI persona prompts, keyed by Organisation.type, then by
+    # person_type ('coach' or 'participant'). An org can override its
+    # prompt entirely via Organisation.ai_persona_prompt — for BOTH person
+    # types at once, since that override is a single free-text field, not
+    # itself split by person_type; see get_ai_persona_prompt().
     #
-    # {coach_word}/{coach_word_lower}/{coach_word_plural_lower} and
+    # {coach_word}/{coach_word_lower}/{coach_word_plural_lower},
+    # {player_word_lower}/{player_word_plural_lower}, and
     # {country}/{language_list} are filled in at render time (see
     # _render_persona_template) from the org's own terminology/locale
     # config, falling back to the org type's defaults exactly like
     # generate_response's own role_word resolution does. sports/events
-    # already correctly say "coach" (their terminology default IS "Coach"),
-    # so their templates use the literal word rather than the placeholder —
-    # only ngo/corporate (whose terminology default is "Facilitator") use
-    # {coach_word...}. Domain-specific phrases like "cricket coaching" or
-    # "corporate coaching methodologies" are deliberately left as literal
-    # text in every template — those name a subject-matter discipline, not
-    # the role of the person messaging, so they aren't part of this fix.
+    # coach personas already correctly say "coach" (their terminology
+    # default IS "Coach"), so those two templates use the literal word
+    # rather than the placeholder — only ngo/corporate (whose terminology
+    # default is "Facilitator") use {coach_word...} in their coach persona.
+    # Domain-specific phrases like "cricket coaching" or "corporate
+    # coaching methodologies" are deliberately left as literal text — those
+    # name a subject-matter discipline, not the role of the person
+    # messaging, so they aren't part of this substitution.
+    #
+    # The participant personas are deliberately a different SHAPE, not
+    # just a reworded coach persona: no EXPERTISE section (that section
+    # exists to give the AI coaching/facilitation domain knowledge, which
+    # a participant persona must never draw on — see the CONSTRAINTS
+    # block's explicit refusal), oriented to the participant's own
+    # sessions/schedule/expectations rather than running anything. Every
+    # participant persona keeps the same safeguarding-referral sentence
+    # the coach personas have — arguably more important here, since
+    # participants may be young people.
     DEFAULT_AI_PERSONA_PROMPTS = {
-        "sports": """You are a professional cricket coaching specialist assistant helping coaches in {country}.
+        "sports": {
+            "coach": """You are a professional cricket coaching specialist assistant helping coaches in {country}.
 
 EXPERTISE:
 - Cricket techniques: Batting (grip, stance, footwork, shots), Bowling (grip, action, variations), Fielding (catching, throwing, positioning)
@@ -114,7 +129,35 @@ CONSTRAINTS:
 
 Remember: You're helping coaches develop their skills and help their players improve.""",
 
-        "ngo": """You are a program support assistant helping {coach_word_plural_lower} at a community or non-profit organisation in {country}.
+            "participant": """You are a friendly assistant for {player_word_plural_lower} in {country}.
+
+YOUR ROLE:
+- Answer questions about their own upcoming sessions and schedule
+- Explain what to bring or wear, and what to expect at a session
+- Answer general questions about the programme
+- Be encouraging, warm, and patient — {player_word_plural_lower} range from young children to adults
+
+COMMUNICATION STYLE:
+- Friendly and simple, suitable for WhatsApp
+- Concise responses
+- Avoid technical coaching jargon
+
+LANGUAGE:
+- Detect and respond in the SAME language the {player_word_lower} uses
+- Support these languages: {language_list}
+
+CONSTRAINTS:
+- Keep responses under 1000 characters when possible
+- Do NOT give coaching methodology, drills, or session-planning advice, and don't offer guidance on managing other {player_word_plural_lower} — that's for the {coach_word_lower}, not you to give here
+- If asked something a {coach_word_lower} would normally handle, gently suggest they check with their {coach_word_lower}
+- Don't provide medical advice, refer to professionals
+- Don't provide legal or safeguarding-incident advice beyond general awareness — refer serious concerns to the organisation's designated safeguarding contact
+
+Remember: You're here to support {player_word_plural_lower}, not to coach them — keep it simple and encouraging.""",
+        },
+
+        "ngo": {
+            "coach": """You are a program support assistant helping {coach_word_plural_lower} at a community or non-profit organisation in {country}.
 
 EXPERTISE:
 - Facilitating group sessions and activities for community programs
@@ -152,7 +195,34 @@ CONSTRAINTS:
 
 Remember: You're helping {coach_word_plural_lower} run great sessions and support their participants.""",
 
-        "events": """You are a session support assistant helping coaches and crew leads coordinate activities and sessions at events in {country}.
+            "participant": """You are a friendly support assistant for {player_word_plural_lower} in a community or non-profit programme in {country}.
+
+YOUR ROLE:
+- Answer questions about their own upcoming sessions and schedule
+- Explain what to bring or expect at a session
+- Answer general questions about the programme
+- Be warm, encouraging, and patient — {player_word_plural_lower} may be young people or new to the programme
+
+COMMUNICATION STYLE:
+- Friendly and simple, suitable for WhatsApp
+- Concise responses
+- Avoid jargon; explain things plainly
+
+LANGUAGE:
+- Detect and respond in the SAME language the {player_word_lower} uses
+- Support these languages: {language_list}
+
+CONSTRAINTS:
+- Keep responses under 1000 characters when possible
+- Do NOT give facilitation advice, session-planning guidance, or anything about managing other {player_word_plural_lower} — that's for the {coach_word_lower}, not you to give here
+- If asked something a {coach_word_lower} would normally handle, gently suggest they check with their {coach_word_lower}
+- Don't provide medical, legal, or safeguarding-incident advice beyond general awareness — refer serious concerns to the organisation's designated safeguarding contact
+
+Remember: You're here to support {player_word_plural_lower}, not to run the programme — keep it simple and encouraging.""",
+        },
+
+        "events": {
+            "coach": """You are a session support assistant helping coaches and crew leads coordinate activities and sessions at events in {country}.
 
 EXPERTISE:
 - Running activity sessions, workshops, and event-day programming
@@ -189,7 +259,35 @@ CONSTRAINTS:
 
 Remember: You're helping coaches deliver smooth, well-run sessions at every event.""",
 
-        "corporate": """You are a training and session support assistant helping {coach_word_plural_lower} run corporate learning and development sessions in {country}.
+            "participant": """You are a friendly support assistant for {player_word_plural_lower} at events in {country}.
+
+YOUR ROLE:
+- Answer questions about their own upcoming sessions and schedule
+- Explain what to bring or expect, timing, and venue details
+- Answer general questions about the event
+- Be warm and helpful
+
+COMMUNICATION STYLE:
+- Friendly and simple, suitable for WhatsApp
+- Concise responses
+- Avoid jargon; explain things plainly
+
+LANGUAGE:
+- Detect and respond in the SAME language the {player_word_lower} uses
+- Support these languages: {language_list}
+
+CONSTRAINTS:
+- Keep responses under 1000 characters when possible
+- Do NOT give guidance on running sessions, coordinating crew, or managing other {player_word_plural_lower} — that's for the {coach_word_lower}, not you to give here
+- If asked something a {coach_word_lower} would normally handle, gently suggest they check with their {coach_word_lower}
+- Don't provide medical advice, refer to professionals
+- Don't provide legal or safeguarding-incident advice beyond general awareness — refer serious concerns to the organisation's designated safeguarding contact
+
+Remember: You're here to support {player_word_plural_lower}, not to run the event — keep it simple and encouraging.""",
+        },
+
+        "corporate": {
+            "coach": """You are a training and session support assistant helping {coach_word_plural_lower} run corporate learning and development sessions in {country}.
 
 EXPERTISE:
 - Facilitating workplace training sessions and workshops
@@ -225,18 +323,45 @@ CONSTRAINTS:
 - Don't provide HR, legal, or performance-management advice — refer to HR or the appropriate department
 
 Remember: You're helping {coach_word_plural_lower} run effective sessions and support their team's development.""",
+
+            "participant": """You are a friendly support assistant for {player_word_plural_lower} attending corporate learning and development sessions in {country}.
+
+YOUR ROLE:
+- Answer questions about their own upcoming sessions and schedule
+- Explain what to bring, prepare, or expect at a session
+- Answer general questions about the training programme
+- Be professional, warm, and helpful
+
+COMMUNICATION STYLE:
+- Professional but approachable, suitable for WhatsApp
+- Concise responses
+- Avoid jargon; explain things plainly
+
+LANGUAGE:
+- Detect and respond in the SAME language the {player_word_lower} uses
+- Support these languages: {language_list}
+
+CONSTRAINTS:
+- Keep responses under 1000 characters when possible
+- Do NOT give facilitation advice, session-planning guidance, or anything about managing other {player_word_plural_lower} — that's for the {coach_word_lower}, not you to give here
+- If asked something a {coach_word_lower} would normally handle, gently suggest they check with their {coach_word_lower}
+- Don't provide HR, legal, or performance-management advice — refer to HR or the appropriate department
+- Don't provide safeguarding-incident advice beyond general awareness — refer serious concerns to the organisation's designated safeguarding contact
+
+Remember: You're here to support {player_word_plural_lower}, not to run the sessions — keep it simple and encouraging.""",
+        },
     }
 
     @classmethod
     def _render_persona_template(cls, template, org_id):
         """Fill a DEFAULT_AI_PERSONA_PROMPTS template's {coach_word...}/
-        {country}/{language_list} placeholders from the org's own
-        terminology/locale config (FirebaseService.get_org_terminology/
-        get_org_locale), falling back to the sports/South-Africa defaults
-        for a missing org_id exactly like generate_response's role_word
-        resolution does. A template that doesn't reference a given
-        placeholder (sports/events don't use {coach_word_lower} — their
-        default wording is already correct) simply ignores the extra kwarg.
+        {player_word...}/{country}/{language_list} placeholders from the
+        org's own terminology/locale config
+        (FirebaseService.get_org_terminology/get_org_locale), falling back
+        to the sports/South-Africa defaults for a missing org_id exactly
+        like generate_response's role_word resolution does. A template
+        that doesn't reference a given placeholder (e.g. coach templates
+        don't use {player_word_lower}) simply ignores the extra kwarg.
         """
         terminology = (FirebaseService.get_org_terminology(org_id) if org_id
                        else FirebaseService.DEFAULT_TERMINOLOGY)
@@ -247,28 +372,36 @@ Remember: You're helping {coach_word_plural_lower} run effective sessions and su
             coach_word=terminology['coach_singular'],
             coach_word_lower=terminology['coach_singular'].lower(),
             coach_word_plural_lower=terminology['coach_plural'].lower(),
+            player_word_lower=terminology['player_singular'].lower(),
+            player_word_plural_lower=terminology['player_plural'].lower(),
             country=locale['country'],
             language_list=', '.join(locale['supported_languages']),
         )
 
     @classmethod
-    def get_ai_persona_prompt(cls, org_id):
-        """Resolve the AI system persona prompt to use for a given org.
+    def get_ai_persona_prompt(cls, org_id, person_type='coach'):
+        """Resolve the AI system persona prompt to use for a given org and
+        person_type ('coach' or 'participant').
 
         Priority:
         1. The org's own Organisation.ai_persona_prompt override, if set —
-           returned verbatim, exactly as the admin wrote it. Never passed
-           through _render_persona_template; that's only for filling in
-           the placeholders in OUR default templates above.
-        2. The default prompt for the org's Organisation.type, rendered
-           with that org's own terminology/country/language config (Phase
-           1's org-configurable terminology/persona system already
-           supported per-org overrides for everything else in this
-           prompt — this makes the default TEXT respect that too, instead
-           of hardcoding "coach" and "South Africa" regardless of the org).
-        3. The sports default, as a defensive fallback — this shouldn't be
-           reachable once every org has a valid type post-migration, so it's
-           logged as a warning if hit.
+           returned verbatim, exactly as the admin wrote it, for BOTH
+           person types. It's a single free-text field, not split by
+           person_type, so there's no separate participant override to
+           prefer — the org's own words win regardless of who's messaging.
+           Never passed through _render_persona_template; that's only for
+           filling in the placeholders in OUR default templates below.
+        2. The default prompt for the org's Organisation.type AND
+           person_type, rendered with that org's own terminology/country/
+           language config (Phase 1's org-configurable terminology/persona
+           system already supported per-org overrides for everything else
+           in this prompt — this makes the default TEXT respect that too,
+           instead of hardcoding "coach" and "South Africa" regardless of
+           the org — and Phase 2 step 4 adds a genuinely different
+           participant persona, not just a reworded coach one).
+        3. The sports default for this person_type, as a defensive
+           fallback — this shouldn't be reachable once every org has a
+           valid type post-migration, so it's logged as a warning if hit.
         """
         org = FirebaseService.get_organisation(org_id) if org_id else None
 
@@ -278,16 +411,18 @@ Remember: You're helping {coach_word_plural_lower} run effective sessions and su
                 return custom_prompt
 
             org_type = org.get('type')
-            default_prompt = cls.DEFAULT_AI_PERSONA_PROMPTS.get(org_type)
+            default_prompt = cls.DEFAULT_AI_PERSONA_PROMPTS.get(org_type, {}).get(person_type)
             if default_prompt:
                 return cls._render_persona_template(default_prompt, org_id)
 
         logger.warning(
             "No org/type found for org_id=%s when resolving AI persona prompt "
-            "(org=%s) — falling back to the sports default.",
-            org_id, 'found' if org else 'not found'
+            "(org=%s, person_type=%s) — falling back to the sports default.",
+            org_id, 'found' if org else 'not found', person_type
         )
-        return cls._render_persona_template(cls.DEFAULT_AI_PERSONA_PROMPTS['sports'], org_id)
+        sports_defaults = cls.DEFAULT_AI_PERSONA_PROMPTS['sports']
+        fallback_template = sports_defaults.get(person_type, sports_defaults['coach'])
+        return cls._render_persona_template(fallback_template, org_id)
 
     @classmethod
     def get_conversation_history(cls, coach_phone, limit=10):
@@ -612,10 +747,11 @@ Remember: You're helping {coach_word_plural_lower} run effective sessions and su
             role_word_lower = role_word.lower()
 
             # Build context for Gemini. The org's configured persona prompt
-            # (Phase 1's get_ai_persona_prompt — default-by-type or the
-            # org's own override) always comes first and is only ever
-            # appended to below, never replaced or reordered.
-            context = cls.get_ai_persona_prompt(org_id) + "\n\n"
+            # (Phase 1's get_ai_persona_prompt — default-by-type-and-
+            # person_type, or the org's own override) always comes first
+            # and is only ever appended to below, never replaced or
+            # reordered.
+            context = cls.get_ai_persona_prompt(org_id, person_type) + "\n\n"
 
             if rag_context:
                 context += rag_context + "\n"
@@ -1015,11 +1151,11 @@ Remember: You're helping {coach_word_plural_lower} run effective sessions and su
                 )
                 return
 
-            if person.get('person_type') != 'coach':
-                logger.info("Image from participant %s — not yet supported", person.get('id'))
+            if not cls._is_allowed('photo_upload', person.get('person_type')):
+                logger.info("Image from %s %s — declined (not permitted)", person.get('person_type'), person.get('id'))
                 WhatsAppService.send_message(
                     phone_number=from_number,
-                    message_text=cls.get_participant_not_supported_message(person.get('name'))
+                    message_text=cls._command_declined_message(person.get('name'), person.get('org_id'))
                 )
                 return
 
@@ -1167,11 +1303,11 @@ Remember: You're helping {coach_word_plural_lower} run effective sessions and su
                 )
                 return
 
-            if person.get('person_type') != 'coach':
-                logger.info("Location from participant %s — not yet supported", person.get('id'))
+            if not cls._is_allowed('location_checkin', person.get('person_type')):
+                logger.info("Location from %s %s — declined (not permitted)", person.get('person_type'), person.get('id'))
                 WhatsAppService.send_message(
                     phone_number=from_number,
-                    message_text=cls.get_participant_not_supported_message(person.get('name'))
+                    message_text=cls._command_declined_message(person.get('name'), person.get('org_id'))
                 )
                 return
 
@@ -1394,6 +1530,95 @@ Remember: You're helping {coach_word_plural_lower} run effective sessions and su
         lines.append(f"Total: {total_players} {player_plural_lower} across {len(coach_teams)} {team_plural_lower}")
         return '\n'.join(lines)
 
+    # ── Command permissions ──────────────────────────────────────────────
+    #
+    # Single source of truth for "who can do what". Both message routers
+    # below (the coach path in handle_incoming_message and the participant
+    # path in _handle_participant_message), plus handle_image_message and
+    # handle_location_check_in, all check COMMAND_PERMISSIONS instead of
+    # each keeping their own scattered person_type if-checks. To open an
+    # action up to a new person type later, edit ONE line here — nothing
+    # else in the file needs to change.
+    #
+    # COMMAND_TOKENS maps an action name to the literal text tokens that
+    # trigger it — the single place command spelling/aliases are defined
+    # (previously duplicated across two separate elif chains, one per
+    # person type, which is exactly the kind of drift this replaces).
+    COMMAND_TOKENS = {
+        'help': ['/help', 'help', '/start'],
+        'reset': ['/reset', 'reset'],
+        'attendance': ['/attendance', 'attendance'],
+        'attendance_redo': ['/attendance-redo', 'attendance-redo'],
+        'end_session': ['/end', 'end session'],
+        'players': ['/players', 'players'],
+    }
+
+    # action -> the set of person_types allowed to use it. 'qa' is the free
+    # -text AI Q&A fallback; 'attendance_reply' is a numeric reply to a
+    # pending /attendance request; 'photo_upload' and 'location_checkin'
+    # are triggered by WhatsApp message type, not a text token — see
+    # handle_image_message/handle_location_check_in. location_checkin
+    # stays coach-only here; participant self check-in is Phase 2 step 5.
+    COMMAND_PERMISSIONS = {
+        'help': {'coach', 'participant'},
+        'reset': {'coach', 'participant'},
+        'qa': {'coach', 'participant'},
+        'attendance': {'coach'},
+        'attendance_redo': {'coach'},
+        'attendance_reply': {'coach'},
+        'end_session': {'coach'},
+        'players': {'coach'},
+        'photo_upload': {'coach'},
+        'location_checkin': {'coach'},
+    }
+
+    # Preserves the exact original pending-attendance carve-out: while a
+    # coach has a pending /attendance request, only these exact tokens are
+    # treated as commands rather than as the absent-player-numbers reply.
+    # Deliberately NOT derived from COMMAND_TOKENS's full alias lists
+    # (which also include bare-word aliases like 'players'/'end session',
+    # and would add /reset) — widening this is a real behavioural change
+    # to message routing during an active attendance flow, out of scope
+    # for this step.
+    _PENDING_ATTENDANCE_EXEMPT_TOKENS = {'/help', '/start', '/attendance', '/attendance-redo', '/end', '/players'}
+
+    @classmethod
+    def _classify_command(cls, text_lower):
+        """Return the action name this text maps to. Free text (anything
+        that isn't a known command token or the player-intent phrasing)
+        always classifies as 'qa', the AI Q&A fallback."""
+        for action, tokens in cls.COMMAND_TOKENS.items():
+            if text_lower in tokens:
+                return action
+        if cls.PLAYER_INTENT_RE.search(text_lower):
+            return 'players'
+        return 'qa'
+
+    @classmethod
+    def _is_allowed(cls, action, person_type):
+        return person_type in cls.COMMAND_PERMISSIONS.get(action, set())
+
+    @classmethod
+    def _command_declined_message(cls, name, org_id):
+        """Friendly, org-terminology-driven decline for an action this
+        person type isn't permitted to use (see COMMAND_PERMISSIONS).
+
+        Deliberately generic rather than naming the specific command that
+        was attempted — a participant typing /attendance doesn't need to
+        be told "/attendance is a coach-only command", just that this
+        isn't something they can do, plus a plain pointer to who to ask.
+        Naming the exact command/feature would be the "leak facilitator
+        functions in a confusing way" failure mode this is written to
+        avoid; not mentioning it at all wouldn't read as unhelpful, either.
+        """
+        terminology = cls._terminology_for(org_id)
+        greeting = f"Hi {name}! " if name else "Hi! "
+        return greeting + (
+            "That's not something you're able to do here. If you think you "
+            f"should have access to this, please check with your "
+            f"{terminology['coach_singular'].lower()}."
+        )
+
     # ── Message handler ──────────────────────────────────────────────────
 
     @classmethod
@@ -1438,40 +1663,45 @@ Remember: You're helping {coach_word_plural_lower} run effective sessions and su
 
             # Check for pending attendance response first
             pending = cls.get_pending_attendance(from_number)
-            if pending and text_lower not in ['/help', '/start', '/attendance', '/attendance-redo', '/end', '/players']:
+            if pending and text_lower not in cls._PENDING_ATTENDANCE_EXEMPT_TOKENS:
                 logger.info("Routing to pending attendance response handler")
                 response = cls.handle_attendance_response(from_number, message_text, pending)
-            # Check for commands
-            elif text_lower in ['/help', 'help', '/start']:
-                response = cls.get_help_message(coach.get('name'), coach.get('org_id'))
-            elif text_lower in ['/reset', 'reset']:
-                cls.clear_pending_attendance(from_number)
-                response = "Your conversation has been reset. Feel free to ask me anything!"
-            elif text_lower in ['/attendance', 'attendance']:
-                logger.info("Matched /attendance command")
-                response = cls.handle_attendance_command(coach)
-            elif text_lower in ['/attendance-redo', 'attendance-redo']:
-                logger.info("Matched /attendance-redo command")
-                response = cls.handle_attendance_redo(coach)
-            elif text_lower in ['/end', 'end session']:
-                logger.info("Matched /end command")
-                response = cls.handle_end_session_command(coach)
-            elif text_lower in ['/players', 'players']:
-                logger.info("Matched /players command")
-                response = cls.handle_players_command(coach)
-            elif cls.PLAYER_INTENT_RE.search(text_lower):
-                logger.info("Detected player-related question, showing player list")
-                response = cls.handle_players_command(coach)
             else:
-                # Generate AI response
-                response = cls.generate_response(
-                    phone=from_number,
-                    user_message=message_text,
-                    org_id=coach.get('org_id'),
-                    person_name=coach.get('name'),
-                    person_id=coach.get('id'),
-                    person_type='coach',
-                )
+                action = cls._classify_command(text_lower)
+                logger.debug("Classified as action=%s", action)
+                # A coach is permitted for every coach-reachable action —
+                # COMMAND_PERMISSIONS is consulted here too (rather than
+                # skipped) so a future action that's opened up unevenly
+                # can't silently bypass the single source of truth.
+                if not cls._is_allowed(action, 'coach'):
+                    response = cls._command_declined_message(coach.get('name'), coach.get('org_id'))
+                elif action == 'help':
+                    response = cls.get_help_message(coach.get('name'), coach.get('org_id'))
+                elif action == 'reset':
+                    cls.clear_pending_attendance(from_number)
+                    response = "Your conversation has been reset. Feel free to ask me anything!"
+                elif action == 'attendance':
+                    logger.info("Matched /attendance command")
+                    response = cls.handle_attendance_command(coach)
+                elif action == 'attendance_redo':
+                    logger.info("Matched /attendance-redo command")
+                    response = cls.handle_attendance_redo(coach)
+                elif action == 'end_session':
+                    logger.info("Matched /end command")
+                    response = cls.handle_end_session_command(coach)
+                elif action == 'players':
+                    logger.info("Matched /players command")
+                    response = cls.handle_players_command(coach)
+                else:
+                    # action == 'qa' — generate an AI response
+                    response = cls.generate_response(
+                        phone=from_number,
+                        user_message=message_text,
+                        org_id=coach.get('org_id'),
+                        person_name=coach.get('name'),
+                        person_id=coach.get('id'),
+                        person_type='coach',
+                    )
 
             # Send response via WhatsApp
             result = WhatsAppService.send_message(
@@ -1495,7 +1725,7 @@ Remember: You're helping {coach_word_plural_lower} run effective sessions and su
                 )
             except Exception:
                 pass
-    
+
     # Sent when an inbound phone number doesn't resolve to any known person
     # (coach or participant). Deliberately person-type-neutral — it used to
     # say "you need to be registered as a coach", which actively misled
@@ -1517,18 +1747,8 @@ Remember: You're helping {coach_word_plural_lower} run effective sessions and su
     )
 
     @classmethod
-    def get_participant_not_supported_message(cls, name=None):
-        """Sent to a correctly-identified participant from the image and
-        location-check-in handlers — those stay coach-only in Phase 2 step 3
-        (see handle_image_message / handle_location_check_in). Text messages
-        no longer use this; see _handle_participant_message."""
-        greeting = f"Hi {name}! " if name else "Hi! "
-        return greeting + "You're on file, but this assistant doesn't support participants yet. Please check back soon."
-
-    @classmethod
     def get_participant_help_message(cls, name=None):
-        """Person-type-neutral /help reply for a participant. Deliberately
-        simple — real command gating is step 4."""
+        """Person-type-neutral /help reply for a participant."""
         greeting = f"Hi {name}! 👋\n\n" if name else "Hi! 👋\n\n"
         return greeting + (
             "I can answer questions — just ask me anything.\n\n"
@@ -1538,39 +1758,32 @@ Remember: You're helping {coach_word_plural_lower} run effective sessions and su
         )
 
     @classmethod
-    def get_participant_command_unavailable_message(cls, name=None):
-        """Polite decline for any recognised trainer-only command token sent
-        by a participant. Real command gating (trainer_only/participant_only
-        content flags) is step 4 — this is deliberately simple, not clever."""
-        greeting = f"Hi {name}! " if name else "Hi! "
-        return greeting + "That command isn't available to you yet. Feel free to ask me a question instead."
-
-    @classmethod
     def _handle_participant_message(cls, from_number, message_text, person):
-        """Route a text message from an identified participant.
-
-        /help and /reset get simple participant-appropriate replies, any
-        other recognised command token (the same tokens the coach elif
-        chain below matches) politely declines, and everything else reaches
-        the AI Q&A fallback exactly like a coach's free-text message would.
-        This never touches the coach elif chain in handle_incoming_message.
+        """Route a text message from an identified participant, using the
+        same COMMAND_PERMISSIONS map the coach path in
+        handle_incoming_message consults — see that map for the full
+        allocation. /help and /reset get simple participant-appropriate
+        replies; anything gated to coach-only gets a friendly decline via
+        _command_declined_message; everything else reaches the AI Q&A
+        fallback exactly like a coach's free-text message would.
         """
         text_lower = message_text.strip().lower()
         person_name = person.get('name')
+        org_id = person.get('org_id')
+        action = cls._classify_command(text_lower)
 
-        if text_lower in ['/help', 'help', '/start']:
+        if not cls._is_allowed(action, 'participant'):
+            response = cls._command_declined_message(person_name, org_id)
+        elif action == 'help':
             response = cls.get_participant_help_message(person_name)
-        elif text_lower in ['/reset', 'reset']:
+        elif action == 'reset':
             response = "Your conversation has been reset. Feel free to ask me anything!"
-        elif (text_lower in ['/attendance', 'attendance', '/attendance-redo', 'attendance-redo',
-                              '/end', 'end session', '/players', 'players']
-              or cls.PLAYER_INTENT_RE.search(text_lower)):
-            response = cls.get_participant_command_unavailable_message(person_name)
         else:
+            # action == 'qa' — generate an AI response
             response = cls.generate_response(
                 phone=from_number,
                 user_message=message_text,
-                org_id=person.get('org_id'),
+                org_id=org_id,
                 person_name=person_name,
                 person_id=person.get('id'),
                 person_type='participant',

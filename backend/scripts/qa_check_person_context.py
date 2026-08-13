@@ -307,16 +307,17 @@ def main():
               f"({'OK' if cleared_value == '' else 'CLEANUP FAILED — CHECK MANUALLY'})")
 
     subsection(f"{OVERRIDE_TEST_ORG} — coach, after clearing (should be back to ngo default)")
-    prompt_after_clear = ConversationService.get_ai_persona_prompt(OVERRIDE_TEST_ORG)
+    prompt_after_clear = ConversationService.get_ai_persona_prompt(OVERRIDE_TEST_ORG, 'coach')
     print(prompt_after_clear)
-    # Compare against the RENDERED ngo template (Phase 2 step 3d made the
-    # default prompts templates with {coach_word...}/{country}/
+    # Compare against the RENDERED ngo coach template (Phase 2 step 3d made
+    # the default prompts templates with {coach_word...}/{country}/
     # {language_list} placeholders filled in from org config at render
-    # time — see ConversationService._render_persona_template) rather than
-    # the raw template string, which no longer matches the assembled
-    # prompt literally even when everything is working correctly.
+    # time — see ConversationService._render_persona_template — and step 4
+    # split each org type's template into 'coach'/'participant' variants)
+    # rather than the raw template string, which no longer matches the
+    # assembled prompt literally even when everything is working correctly.
     ngo_default_rendered = ConversationService._render_persona_template(
-        ConversationService.DEFAULT_AI_PERSONA_PROMPTS['ngo'], OVERRIDE_TEST_ORG
+        ConversationService.DEFAULT_AI_PERSONA_PROMPTS['ngo']['coach'], OVERRIDE_TEST_ORG
     )
     ngo_default_restored = prompt_after_clear.startswith(ngo_default_rendered[:80])
     print(f"\nFell back to ngo type default: {'YES' if ngo_default_restored else 'NO — CHECK THIS'}")
