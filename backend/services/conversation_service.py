@@ -2,6 +2,7 @@ import logging
 from services.firebase_service import FirebaseService
 from services.gemini_service import GeminiService
 from services.whatsapp_service import WhatsAppService
+from services.person_service import PersonService
 from routes.sse import push_event
 from datetime import datetime, date, timezone
 import uuid
@@ -808,10 +809,24 @@ Remember: You're helping coaches run effective sessions and support their team's
         both the session and the team.
         """
         try:
-            coach = cls.get_coach_by_phone(from_number)
-            if not coach:
-                return  # unregistered — ignore silently
+            person = PersonService.resolve(from_number)
+            if not person:
+                logger.warning("Image from unrecognised number: %s", from_number)
+                WhatsAppService.send_message(
+                    phone_number=from_number,
+                    message_text=cls.UNRECOGNISED_SENDER_MESSAGE
+                )
+                return
 
+            if person.get('person_type') != 'coach':
+                logger.info("Image from participant %s — not yet supported", person.get('id'))
+                WhatsAppService.send_message(
+                    phone_number=from_number,
+                    message_text=cls.get_participant_not_supported_message(person.get('name'))
+                )
+                return
+
+            coach = person
             coach_name = coach.get('name', 'Coach')
             pending = cls.get_pending_photo(from_number)
 
@@ -939,14 +954,23 @@ Remember: You're helping coaches run effective sessions and support their team's
         try:
             logger.info("Location received from %s: lat=%s, lng=%s", from_number, latitude, longitude)
 
-            coach = cls.get_coach_by_phone(from_number)
-            if not coach:
+            person = PersonService.resolve(from_number)
+            if not person:
                 WhatsAppService.send_message(
                     phone_number=from_number,
-                    message_text="Hello! To use Teko check-in, you need to be registered as a coach. Please contact your administrator."
+                    message_text=cls.UNRECOGNISED_SENDER_MESSAGE
                 )
                 return
 
+            if person.get('person_type') != 'coach':
+                logger.info("Location from participant %s — not yet supported", person.get('id'))
+                WhatsAppService.send_message(
+                    phone_number=from_number,
+                    message_text=cls.get_participant_not_supported_message(person.get('name'))
+                )
+                return
+
+            coach = person
             coach_id = coach.get('id')
             org_id = coach.get('org_id')
             coach_name = coach.get('name', 'Coach')
@@ -1167,17 +1191,27 @@ Remember: You're helping coaches run effective sessions and support their team's
         try:
             logger.debug("Processing message from %s: %s...", from_number, message_text[:50])
 
-            # Check if this is from a registered coach
-            coach = cls.get_coach_by_phone(from_number)
+            # Resolve the sender to a person (coach or participant), across
+            # both collections — see PersonService for details.
+            person = PersonService.resolve(from_number)
 
-            if not coach:
-                logger.warning("Message from unregistered number: %s", from_number)
+            if not person:
+                logger.warning("Message from unrecognised number: %s", from_number)
                 WhatsAppService.send_message(
                     phone_number=from_number,
-                    message_text="Hello! To use the Teko Cricket Coaching Assistant, you need to be registered as a coach. Please contact your administrator. 🏏"
+                    message_text=cls.UNRECOGNISED_SENDER_MESSAGE
                 )
                 return
 
+            if person.get('person_type') != 'coach':
+                logger.info("Message from participant %s — not yet supported", person.get('id'))
+                WhatsAppService.send_message(
+                    phone_number=from_number,
+                    message_text=cls.get_participant_not_supported_message(person.get('name'))
+                )
+                return
+
+            coach = person
             coach_name = coach.get('name', 'Unknown')
             logger.info("Identified coach: %s", coach_name)
 
@@ -1284,6 +1318,23 @@ Remember: You're helping coaches run effective sessions and support their team's
             logger.error("Error finding coach: %s", e)
             return None
     
+    # Sent when an inbound phone number doesn't resolve to any known person
+    # (coach or participant). Deliberately person-type-neutral — it used to
+    # say "you need to be registered as a coach", which actively misled
+    # anyone who wasn't a coach.
+    UNRECOGNISED_SENDER_MESSAGE = (
+        "Hello! This number isn't registered with Teko. Please contact your "
+        "administrator to get set up. 🏏"
+    )
+
+    @classmethod
+    def get_participant_not_supported_message(cls, name=None):
+        """Sent to a correctly-identified participant. Phase 2 step 2 is
+        identity resolution only — no participant-facing behaviour exists
+        yet beyond recognising them."""
+        greeting = f"Hi {name}! " if name else "Hi! "
+        return greeting + "You're on file, but this assistant doesn't support participants yet. Please check back soon."
+
     @classmethod
     def get_help_message(cls, coach_name=None):
         """Generate help message"""
