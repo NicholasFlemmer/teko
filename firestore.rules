@@ -1,10 +1,12 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow all access for now (since backend uses Admin SDK which bypasses rules anyway)
-    // In production, you should implement proper authentication
+    // All application access goes through the Flask backend using the
+    // Firebase Admin SDK, which bypasses these rules entirely.
+    // No client ever connects to Firestore directly, so direct client
+    // access is denied outright.
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }
