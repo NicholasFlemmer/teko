@@ -1,10 +1,9 @@
-# Safeguarding Escalation Audit (Read-Only)
+# Safeguarding Escalation — Existing-System Audit
 
-**Branch:** `phase2-participant-identity`
-**Date:** 2026-08-14
-**Scope:** What exists today that a safeguarding escalation path (participant WhatsApp → real human) could build on. No code was changed to produce this report.
+**Read-only audit. No code was changed to produce this document.**
+Branch: `phase2-participant-identity`. Framework note: the backend is Flask (not FastAPI) — Blueprints, `jsonify`, `g` request context.
 
-Note: the audit brief assumed a FastAPI backend. It is actually **Flask** (`backend/routes/*.py` uses `flask.Blueprint`, plain dict validation — there are no Pydantic models anywhere in `backend/`). This changes how "validation" is described in section 4 below.
+Purpose: before designing a safeguarding escalation path (a participant's WhatsApp disclosure of harm should reach a real human, not end at the AI's reply), this documents exactly what already exists to build on, and what's genuinely missing.
 
 ---
 
@@ -12,30 +11,51 @@ Note: the audit brief assumed a FastAPI backend. It is actually **Flask** (`back
 
 ### Email
 
-- **Provider:** [Resend](https://resend.com), via the `resend` Python package.
-- **Service:** `backend/services/email_service.py` — the only file that sends email in this codebase.
-- **Config:** `backend/config.py:46-48` — `RESEND_API_KEY`, `RESEND_FROM_EMAIL` (default `noreply@tekohq.com`). Both read from environment.
-- **Send path:** all sends funnel through one private helper, `_send()` (`email_service.py:71-90`), which does `resend.Emails.send(...)` inside a `try/except`.
-- **Existing uses (all transactional, all admin-facing, none participant-facing):**
-  - `send_invite_email` (`email_service.py:93-109`) — called from `routes/auth.py:319-321` when a super_admin/location_admin invites a new admin/coach.
-  - `send_password_reset_email` (`email_service.py:112-127`) — called from `routes/auth.py:214`.
-  - `send_welcome_email` (`email_service.py:130-142`) — defined but not called from `routes/auth.py` in the ranges inspected; exists as an available primitive.
-- **Reliability:** it is already load-bearing for password reset and admin invites, so the provider integration itself is proven. But `_send()` (`email_service.py:88-90`) only logs on failure — see Section 5, this is the same silent-swallow pattern step 3b/3c fixed elsewhere in the codebase, and it is still present here, unfixed.
-- **No API key configured:** falls back to `logger.warning(...)` and does not send (`email_service.py:73-78`) — i.e., in an environment without `RESEND_API_KEY`, every email silently becomes a log line only.
+Email sending exists and is used today. `backend/services/email_service.py`:
 
-### Outbound WhatsApp (outside a live conversation reply)
+- Provider: **Resend** (`import resend`, `backend/services/email_service.py:8`).
+- Config: `Config.RESEND_API_KEY` and `Config.RESEND_FROM_EMAIL`, read from env vars at `backend/config.py:47-48` (`RESEND_API_KEY`, default `''`; `RESEND_FROM_EMAIL`, default `noreply@tekohq.com`).
+- Low-level sender: `_send(to_email, subject, html, fallback_detail=None)` at `backend/services/email_service.py:71-90`. This is the one function that actually calls `resend.Emails.send(...)` (line 82) — any new email type would call through this.
+- Three templated senders built on `_send`: `send_invite_email` (`:93`), `send_password_reset_email` (`:112`), `send_welcome_email` (`:130`). All three are transactional, admin-account-lifecycle emails only — no participant-facing or safeguarding-adjacent email exists today.
+- Callers: `backend/routes/auth.py:214` (password reset), `:322` (invite), `:388` (welcome). Nothing outside `routes/auth.py` sends email.
+- **Reliability**: if `RESEND_API_KEY` is unset, `_send` logs a warning and returns — it does not send, and does not raise (`email_service.py:73-78`). If the Resend API call itself throws, the exception is caught and logged at `ERROR`, again without re-raising (`email_service.py:89-90`). **A caller of `_send` can never observe an email failure** — see Section 5.
 
-- **Service:** `backend/services/whatsapp_service.py` — `WhatsAppService.send_message()` (`whatsapp_service.py:12-86`) and `send_template_message()` (`whatsapp_service.py:134-199`) are the two send primitives; both take a bare `phone_number` and are not scoped to any collection (coach, participant, or anything else) — either can be pointed at any phone number.
-- **Broadcasts:** `routes/broadcasts.py:70-` (`POST /` broadcast-send route) is admin-triggered, sends to `data['recipient_ids']`, which are **coach IDs only** — `routes/broadcasts.py:136-137` batch-fetches `FirebaseService.get_all_coaches(org_id)`, not participants. There is no broadcast-to-participants path today.
-- **Scheduler:** `backend/services/scheduler_service.py` runs periodically (registered as an APScheduler job in `app.py:79-101`, or callable via `POST /api/scheduler/mark-missed`, `app.py:179-188`). It sends **session check-in reminders to coaches** (`scheduler_service.py:108` via `send_check_in_reminder`, and `:202` via `send_message`) — again, coach-only, not participant-facing, and not a generic "notify a human" mechanism.
-- **Conclusion:** the underlying "send a WhatsApp message to an arbitrary phone number" primitive (`WhatsAppService.send_message`) is reusable and already proven reliable (it's the same function used for every AI reply), but nothing today calls it to notify an *admin*. There is no admin phone number stored anywhere to call it with (see Section 2).
+Conclusion: email is a real, working, already-wired channel, provider-backed (not a stub), and its low-level `_send` function is reusable for a new message type. But every existing use of it is fire-and-forget with no failure surfacing.
 
-### In-app / dashboard alert surface
+### Outbound WhatsApp outside a conversation reply
 
-- **The only real-time surface is the SSE live activity feed.** `backend/routes/sse.py` — `push_event()` (`sse.py:19-38`) appends to a process-local, **in-memory** list (`_event_list`, `sse.py:12`), capped at `_MAX_EVENTS * 2 = 400` before trimming (`sse.py:36-38`). No database backing, no persistence across a server restart, no multi-process fan-out.
-- Frontend consumer: `frontend/src/components/schedule/LiveActivityFeed.tsx` — an `EventSource` subscription (`LiveActivityFeed.tsx:34-46`) that only renders while the Schedule page is open, keeps at most 50 events client-side (`LiveActivityFeed.tsx:36`), and has **no unread counter, badge, or persistence** of any kind. A repo-wide search for `unread`, `alert_count`, `notificationCount` in `frontend/src` returned nothing.
-- `components/ui/badge.tsx` exists but is a generic styling primitive (used for status pills like role/active labels), not a notification-count badge — no code path feeds it a count.
-- **Critical gap found in the SSE feed itself:** `push_event()` is only called from the **coach** branch of `handle_incoming_message` (`backend/services/conversation_service.py:1659` `message_received`, `:1714`/`:1717` `response_sent`). `_handle_participant_message` (`conversation_service.py:1761-1795`, the entire participant-message path) **never calls `push_event`**. A grep of the whole file for `push_event` confirms all 7 call sites (`conversation_service.py:1028, 1235, 1423, 1659, 1714, 1717`) are coach-only or attendance/check-in/photo flows. **Participant messages do not appear on the Live Activity Feed at all today** — the one real-time surface that exists doesn't cover participants, let alone flag a disclosure of harm.
+Two independent send functions exist, both used outside of replying to an inbound message:
+
+- `WhatsAppService.send_message(phone_number, message_text, check_in_url=None)` — `backend/services/whatsapp_service.py:12-86`. Generic text send via the Meta WhatsApp Cloud API (`Config.WHATSAPP_API_URL`/`WHATSAPP_PHONE_NUMBER_ID`/`WHATSAPP_API_KEY`, `backend/config.py:36-39`). Returns `{"success": bool, ...}`, never raises on a failed send — see `whatsapp_service.py:68-86`.
+- `WhatsAppService.send_template_message(...)` — used for approved WhatsApp Business templates (referenced at `backend/routes/broadcasts.py:158-163`).
+
+Non-reply invocations:
+
+- **Broadcasts**: `POST /api/broadcasts` (`backend/routes/broadcasts.py:84-227`, function `send_broadcast`) loops recipients and calls `WhatsAppService.send_template_message` or `.send_message` per recipient (`broadcasts.py:158-168`). This is an admin-triggered, on-demand send, not scheduled.
+- **Scheduler** (`backend/services/scheduler_service.py`, started in `backend/app.py:81-107` via `BackgroundScheduler` from `apscheduler`, three jobs registered every 1/5/30 minutes):
+  - `SchedulerService.check_and_send_reminders` (`scheduler_service.py:24-150`) — calls `WhatsAppService.send_check_in_reminder` (`:108-114`), itself built on the same `send_message`/template path.
+  - `SchedulerService.send_end_session_prompts` (`:153-227`) — calls `WhatsAppService.send_message` directly (`:202-205`).
+  - `SchedulerService.mark_missed_sessions` (`:230-288`) — no send, status-only.
+  - A shared-secret-authenticated HTTP trigger also exists at `POST /api/scheduler/run-reminders` (`backend/app.py:142-155`), for Cloud Scheduler or manual admin triggering.
+
+**Reusability**: yes — `WhatsAppService.send_message` is a plain, stateless function taking a phone number and text. A safeguarding notification to an admin's WhatsApp number could call it directly with no new client code, provided the recipient has a WhatsApp number on record (see Section 2 — this is not guaranteed for admins).
+
+### In-app alerts / notifications / SSE
+
+There is **no notification bell, alert badge, toast-from-backend-event, or persisted notifications collection anywhere in this codebase.** Confirmed by direct inspection:
+
+- The only "Bell" icon in the frontend is the **Reminders** nav-sidebar entry (`frontend/src/components/layout/AppSidebar.tsx:12,75`) — it is a page icon, not a notification indicator.
+- The toast components under `frontend/src/components/ui/toast.tsx`, `toaster.tsx`, `sonner.tsx`, `use-toast.ts` are generic shadcn/ui toast primitives used for local form-submit feedback (e.g. "Saved successfully") — none are wired to a backend event stream or push channel.
+- No `notifications` Firestore collection exists (grep across `backend/services` and `backend/routes` found none).
+
+**The SSE live-activity feed is the only real-time surface in the app**, and it is ephemeral, in-memory, and coach-event-scoped:
+
+- Backend: `backend/routes/sse.py`. `push_event(event_type, coach_name=None, preview=None, extra=None)` (`sse.py:19-42`) appends to a process-local Python list `_event_list`, capped at `_MAX_EVENTS = 200` with hard trimming (`sse.py:16, 39-42`) — **nothing is persisted to Firestore or any durable store; a server restart or a second app instance loses the buffer entirely**, and it is not org-scoped (any authenticated viewer sees every org's events — no `.where('org_id', ...)` filter exists in `_stream_generator`).
+- Endpoint: `GET /api/sse/coach-activity` (`sse.py:78-102`), JWT-authenticated via query param (`?token=`) since `EventSource` can't send headers.
+- Event types actually pushed, all from `backend/services/conversation_service.py`: `attendance` (`:1028`), `photo_uploaded` (`:1235`), `check_in` (`:1423`), `message_received` (`:1659`), `response_sent` (`:1714` on success, `:1717` on send failure — preview literally `"[send failed]"`).
+- Frontend consumer: `frontend/src/components/schedule/LiveActivityFeed.tsx`, a `<EventSource>` hook rendering the last 50 events in a scrolling card on the Schedule page. It is a dashboard widget an admin must be actively looking at — there is no unread count, no persistence across page loads, no sound/desktop notification, and no participant-message events (only the coach path calls `push_event`; `_handle_participant_message`, `conversation_service.py:1761-1794`, never does).
+
+**Conclusion for Section 1**: nobody would be reliably alerted by anything that exists today if a participant disclosed harm over WhatsApp. Email and WhatsApp-send are both real, reusable, already-in-production channels — but nothing currently routes a participant message into either of them, and the one real-time surface (SSE) is ephemeral, not participant-aware, and requires an admin to be looking at the dashboard at that exact moment.
 
 ---
 
@@ -43,121 +63,168 @@ Note: the audit brief assumed a FastAPI backend. It is actually **Flask** (`back
 
 ### `admin_users` collection
 
-- CRUD lives in `backend/services/firebase_service.py:869-953`.
-- Fields actually stamped on create (`firebase_service.py:872-881`, docstring at `:873-876`): `name`, `email`, `password_hash`, `role`, `status`, `org_id` (passed via `data`), `created_at`.
-- **`email` is present and used as the lookup key** — `get_admin_by_email()` (`firebase_service.py:910-917`) does `.where('email', '==', email)`, and it's this method that both login (`routes/auth.py:91`) and the invite flow (`routes/auth.py:308`) rely on. So yes — every admin has a contactable email today, and the email-send infrastructure already targets it.
-- **No phone number field.** A repo-wide grep for `phone` near `admin` in `services/firebase_service.py` returned nothing. Admins cannot be reached by the WhatsApp channel today — only email.
-- **Roles in actual use** (per `routes/auth.py:288-296`, the invite endpoint): `super_admin`, `location_admin`, `coach`. Note `routes/admin.py:75` (`allowed_roles = ['admin', 'superadmin', 'viewer']`) uses a **different, inconsistent role vocabulary** in a separate admin-management route — worth flagging as a pre-existing inconsistency, out of scope to fix here.
-- `get_all_admins_by_org(org_id)` (`firebase_service.py:946-953`) already exists and would be the natural lookup for "who at this org should be notified" — it returns all admins for an org with passwords stripped, no role filter applied.
+Defined via `FirebaseService.create_admin` (`backend/services/firebase_service.py:872-881`, docstring: "Fields: name, email, password_hash, role, status, created_at") and constructed concretely at `backend/routes/admin.py:94-100`:
+
+```python
+user = FirebaseService.create_admin({
+    'name': data['name'].strip(),
+    'email': email,
+    'password': generate_password_hash(data['password']),
+    'role': data['role'],
+    'org_id': org_id,
+})
+```
+
+Fields actually present: `name`, `email`, `password` (hashed), `role`, `org_id`, `created_at` (server timestamp, `firebase_service.py:878`). **No `phone_number`/WhatsApp field on an admin user anywhere** — only `email` is contactable at the platform level, so any WhatsApp escalation to an admin is not currently possible without adding a field.
+
+Roles: **inconsistent across the codebase.** `routes/admin.py:75` validates `allowed_roles = ['admin', 'superadmin', 'viewer']` on create, but `routes/auth.py:301-305` and `routes/organisations.py:20,140` check for `'super_admin'`, `'location_admin'`, `'coach'` (note the underscore and the different vocabulary — `super_admin` vs `superadmin`). This is a pre-existing inconsistency, not something introduced by this audit; it matters here because "who is a super_admin" is not a single, consistently-enforced concept.
+
+`email` is a required, non-empty field on every admin user (`routes/admin.py:66-72`), so every admin record does have a contactable email address — that part is reliable.
 
 ### Organisation record
 
-- CRUD in `firebase_service.py:1051-1098+`; fields stamped on create per the docstring at `:1082-1088`: `name`, `slug`, `type`, `terminology`, `ai_persona_prompt`, `country`, `supported_languages`, `is_active`, `created_at`.
-- Admin-editable whitelist: `routes/organisations.py:79` — `allowed_fields = ['name', 'type', 'terminology', 'ai_persona_prompt', 'country', 'supported_languages']`.
-- **There is no contact-person or contact-email field on the Organisation record, anywhere, today.** Neither the create docstring nor the update whitelist mentions one.
+`FirebaseService.create_organisation` (`backend/services/firebase_service.py:1079-1094`, docstring: "Fields: name, slug, type, terminology, ai_persona_prompt, country, supported_languages, is_active, created_at") and the update whitelist at `backend/routes/organisations.py:79` (`allowed_fields = ['name', 'type', 'terminology', 'ai_persona_prompt', 'country', 'supported_languages']`).
+
+**There is no `contact_person`, `contact_email`, `contact_phone`, or any equivalent field on the Organisation record.** Stated plainly: it does not exist.
 
 ### Designated safeguarding contact
 
-- **Does not exist as data anywhere in this codebase.** It exists only as a **sentence the AI is told to say**. `backend/services/conversation_service.py` — the participant persona prompt for the `sports` org type instructs the AI: *"Don't provide legal or safeguarding-incident advice beyond general awareness — refer serious concerns to the organisation's designated safeguarding contact"* (`conversation_service.py:154`). The same sentence (worded slightly differently per org type) appears at `:194`, `:219`, `:284`, `:349`.
-- This is purely a **prompt instruction to the AI's reply text** — it tells the participant, in the chat, to go contact someone. It does not: look up who that contact is, notify anyone, flag the conversation, or persist any record that a safeguarding-relevant message occurred. The referenced "designated safeguarding contact" is not a field, a document, or a lookup anywhere in `backend/` — it is a phrase in a string constant, and the org never actually configured who it refers to.
-- `tests/test_participant_persona.py:88-94` (`test_participant_persona_has_safeguarding_line`) only asserts the word "safeguarding" appears in the generated prompt text — it does not (and cannot, since nothing exists) test that an actual contact is reachable.
+**Nothing resembling a "safeguarding contact," "designated safeguarding lead," "DSL," or "escalation contact" exists anywhere in the codebase** — confirmed by direct inspection of `backend/routes/`, `backend/services/`, and the `participants`/`players` schemas. It does not exist. Do not assume any such concept is half-built somewhere.
+
+However, one closely related and directly reusable precedent **does** exist, on a different collection: the legacy `players` collection (`backend/services/firebase_service.py:514-527`, docstring: "Fields: first_name, last_name, date_of_birth, guardian_name, guardian_email, guardian_primary_phone, guardian_secondary_phone, special_notes, team_ids, player_id, created_at") has a full guardian-contact block — `guardian_name`, `guardian_email`, `guardian_primary_phone`, `guardian_secondary_phone` — constructed on create at `backend/routes/players.py:108-119` and importable via CSV (`backend/routes/players.py:24-34`). This is explicitly a **different, older concept from `participants`**: the code comment at `firebase_service.py:150-151` states "A separate collection from 'players' — players stores a guardian's contact phone for a roster entry, not a self-owned WhatsApp identity." `players` is a guardian-holds-the-contact-details roster entry (no WhatsApp identity of its own); `participants` (Phase 2) is a self-owned WhatsApp identity with no guardian/contact fields at all today. These two collections are not currently linked (no cross-reference field observed in either schema).
+
+**Conclusion for Section 2**: every `admin_users` record has a reliable email (usable via the existing Resend integration), but no WhatsApp number, and no role reliably maps to "the person who handles safeguarding." The Organisation record has no contact field. There is no designated-safeguarding-contact concept anywhere — but the `players` collection's guardian-contact fields are a direct, already-proven precedent for the shape such a field would take, just attached to the wrong (legacy) collection today.
 
 ---
 
 ## 3. Where an escalation would be detected
 
-### Exact inbound trace, participant path (function names, in call order)
+### The inbound message path (participant, text message)
 
-1. `ConversationService.handle_incoming_message(from_number, message_text, message_id)` — `conversation_service.py:1625`
-2. `PersonService.resolve(from_number)` — called at `conversation_service.py:1633`, resolves the sender to a coach or participant record.
-3. Branch: `person.get('person_type') != 'coach'` (`:1650`) →
-4. `ConversationService._handle_participant_message(from_number, message_text, person)` — `conversation_service.py:1761`, called at `:1651`
-5. Inside `_handle_participant_message`: `ConversationService._classify_command(text_lower)` (`:1773`) and `ConversationService._is_allowed(action, 'participant')` (`:1775`) — routes `/help`, `/reset`, declined-command replies, or free text.
-6. For free text (the `qa` action, i.e. anything that isn't a slash command): `ConversationService.generate_response(phone, user_message, org_id, person_name, person_id, person_type='participant')` — called at `:1783`, defined at `:717`.
-7. Inside `generate_response`: `get_conversation_history` (`:729`) → `load_rag_context` (`:734`) → `load_person_context` → `load_participant_context`/`load_person_context` (`:738`) → `_terminology_for` (`:745`) → `get_ai_persona_prompt` (`:754`) → `GeminiService.generate_custom_message(context)` (`:790`, the actual AI call) → `strip_markdown` (`:793`) → `save_message` x2 (`:796-797`, saves both the participant's message and the AI's reply) → returns `clean_response`.
-8. Back in `_handle_participant_message` (`:1792`): `WhatsAppService.send_message(phone_number=from_number, message_text=response)` — the actual outbound send, the end of the reply path.
+Entry point (webhook): `POST /api/whatsapp-cloud-webhook`, function `whatsapp_webhook` (`backend/app.py:246-247`). For a text message it calls `ConversationService.handle_incoming_message(from_number, message_text, message_id)` at `backend/app.py:321-325`.
+
+Call chain, in order, for a **participant** (not a coach) sending free text:
+
+1. `whatsapp_webhook` (`backend/app.py:247`) — parses the Meta webhook payload, dedupes by `message_id` (`app.py:298-300`), marks the message read and shows a typing indicator (`app.py:307,312`), then calls `handle_incoming_message`.
+2. `ConversationService.handle_incoming_message` (`backend/services/conversation_service.py:1625-1727`) — resolves the sender:
+   - `PersonService.resolve(from_number)` (`backend/services/person_service.py:124`, called at `conversation_service.py:1633`) — looks up the phone across both the `coaches` and `participants` collections and returns a person dict with `person_type`.
+   - At `conversation_service.py:1650-1652`: `if person.get('person_type') != 'coach': cls._handle_participant_message(from_number, message_text, person); return` — **this is the actual participant branch**; everything below in `handle_incoming_message` (SSE push, command classification, coach-specific commands) is coach-only and is never reached for a participant.
+3. `ConversationService._handle_participant_message(from_number, message_text, person)` (`conversation_service.py:1761-1794`) — the real participant entry point:
+   - `cls._classify_command(text_lower)` (`:1670`/`:1773`, defined `:1586`) — checks for `/help`, `/reset`, etc.
+   - `cls._is_allowed(action, 'participant')` (`:1598`) — permission gate against `COMMAND_PERMISSIONS`.
+   - For ordinary free text (the safeguarding-disclosure case), falls to the `else` branch (`:1781-1790`) and calls `cls.generate_response(phone, user_message, org_id, person_name, person_id, person_type='participant')`.
+   - Immediately after, sends the reply: `WhatsAppService.send_message(phone_number=from_number, message_text=response)` (`:1792`).
+4. `ConversationService.generate_response` (`conversation_service.py:717-803`) — builds AI context and calls Gemini:
+   - `cls.get_conversation_history(phone, limit=5)` (`:729`, defined `:428`)
+   - `cls.load_rag_context(org_id)` (`:734`, defined `:538`)
+   - `cls.load_person_context(person_id, org_id, person_type)` (`:738`, defined `:690`)
+   - `cls._terminology_for(org_id)` (`:745`, defined `:699`)
+   - `cls.get_ai_persona_prompt(org_id, person_type)` (`:754`, defined `:382`)
+   - `GeminiService.generate_custom_message(context)` (`:790`) — **this is the actual AI call that produces the reply text.**
+   - `cls.strip_markdown(response)` (`:793`, defined `:471`)
+   - `cls.save_message(phone, 'user', user_message)` and `cls.save_message(phone, 'assistant', clean_response)` (`:796-797`, defined `:498`) — **the raw participant text is persisted here, after the AI reply has already been generated but before it is sent.**
 
 ### Best insertion point
 
-**Inside `_handle_participant_message` (`conversation_service.py:1761-1795`), specifically around the `generate_response` call at line 1783** — either immediately before it (on the raw `message_text`) or immediately after it (with both the participant's message and the AI's own reply available). At that point in the call stack you already have, in scope: the raw inbound text, `person_name`, `person_id`, `org_id`, and (after the call) the AI's reply text — everything needed to run a harm-disclosure check and fire an escalation, as a side call that does not touch or alter the existing `response` variable or the `WhatsAppService.send_message` call at line 1792. This is the one place participant messages are both fully resolved (org/person context known) and not yet irreversibly "just replied to and forgotten."
+**`ConversationService._handle_participant_message`, immediately after `text_lower`/`person_name`/`org_id` are resolved and before the `action`/`response` branching (`conversation_service.py:1770-1781`, i.e. right after line 1773's `_classify_command` call).**
 
-The alternative — inserting inside `generate_response` itself (`:717`) — would work equally well for content inspection but is shared code with the coach path, so a participant-specific check would need an extra `person_type == 'participant'` branch inside a function that today has no such branching.
+Why this point specifically:
+- It already has the raw, un-truncated `message_text`, the resolved `person` dict (name, `org_id`, `person_id`), and confirms `person_type == 'participant'` — everything a screening check would need, with zero additional lookups.
+- It runs synchronously and unconditionally for every participant text message, before the AI reply is generated or sent — a screening call placed here can run **alongside** the existing flow (e.g., fire off a classification and, on a hit, dispatch a notification) without touching the `response = cls.generate_response(...)` / `WhatsAppService.send_message(...)` lines at all. The existing reply path is completely undisturbed.
+- It is strictly better than instrumenting inside `generate_response` (`:717`) itself, because `generate_response` is shared by both coaches and participants (`person_type` is just a parameter) — inserting there means every call site needs a `person_type` guard, whereas `_handle_participant_message` is already participant-only by construction.
+- It is better than the webhook layer (`app.py:321`) because that layer doesn't yet know whether the sender is a coach or a participant — that resolution only happens inside `handle_incoming_message`.
 
 ### Message persistence
 
-- Yes — `ConversationService.save_message(coach_phone, role, content)` (`conversation_service.py:498-516`) writes to Firestore at `conversations/{phone_key}/messages` (`:513`), one document per message, called for both `'user'` and `'assistant'` roles (`:796-797`). This applies to participants exactly as it does coaches — `phone_key` is just the sender's own normalized number, and `_handle_participant_message` reaches `save_message` via the same `generate_response` call.
-- **Retention: indefinite, with no configured limit.** A repo-wide grep for `ttl`/`TTL`/`retention` in `backend/` found no Firestore TTL policy, no cleanup job, and no expiry logic touching the `conversations` collection. `firestore.rules` and `firestore.indexes.json` contain no reference to `conversations` or `messages` at all (see Section 5 — `firestore.rules` doesn't police any collection). There is nothing in this repository that ever deletes a stored message.
-- `save_message` itself silently swallows write failures — `except Exception as e: logger.error(...)` with no re-raise (`conversation_service.py:515-516`) — so a save failure is invisible to the caller (see Section 5).
+Yes — inbound participant text and the AI's outbound reply are both persisted, in Firestore, via `ConversationService.save_message` (`conversation_service.py:498-516`):
+
+```
+db.collection('conversations').document(phone_key).collection('messages').add(message_data)
+```
+
+`phone_key` is the sender's phone number with `+`, spaces, and `-` stripped (`:503`, same normalization as `get_conversation_history:443`) — **not** org-scoped or participant-ID-scoped, just phone-number-keyed. Stored fields: `role` (`'user'`/`'assistant'`), `content`, `timestamp` (`datetime.now(timezone.utc)`), `message_id` (a freshly generated UUID, unrelated to the WhatsApp message ID) — `conversation_service.py:506-511`.
+
+**There is no TTL, expiry, or retention policy of any kind on this collection.** No cleanup job references `conversations` anywhere in `backend/services/scheduler_service.py` or elsewhere. Messages are kept indefinitely until manually deleted. `get_conversation_history` only reads the most recent 5-10 for context (`:428`, `limit=10` default, called with `limit=5` at `:729`) — that's a read-side cap, not a retention policy; older messages remain in Firestore.
 
 ---
 
 ## 4. The participant age and consent fields
 
-### Current `participants` collection schema (as actually built)
+### Current `participants` collection schema
 
-From `firebase_service.py:150-173` (docstring + `create_participant`) and confirmed by the seed script (`backend/scripts/seed_staging_test_data.py:215-222`):
+Defined at `backend/services/firebase_service.py:148-154` (comment block) and constructed on create at `firebase_service.py:156-173`:
 
-```
-{
-  id,               # Firestore doc id
-  name,             # string, required
-  phone_number,     # string, normalized via normalize_phone_for_matching
-  org_id,           # stamped server-side from the request's org context, never client-supplied
-  active,           # bool, default True
-  created_at,       # server timestamp
-  updated_at,       # server timestamp
+```python
+participant_data = {
+    **data,
+    'org_id': org_id,
+    'active': data.get('active', True),
+    'created_at': now,
+    'updated_at': now,
 }
 ```
 
-**No age, date_of_birth, or consent-related field exists on `participants` anywhere in this codebase.** A repo-wide case-insensitive grep for `date_of_birth`, `dob`, `age`, `consent` across `backend/` found matches only on the unrelated `players` collection (`routes/players.py:28,111,156,310`, `firebase_service.py:70,77,124,129,518` — guardian-linked roster entries, a different collection from `participants`) and on `coaches` (`routes/coaches.py:132,177` — `dob` as an optional profile field). Neither `age` nor `consent` appears in the `participants` code path, in the seed script, or in any test.
+Fields actually present, confirmed end-to-end: **`org_id`, `name`, `phone_number`, `active`, `created_at`, `updated_at`.** That is the complete schema. **There is no `age`, `date_of_birth`, `dob`, or any consent-related field on `participants` today.** (Contrast with the unrelated legacy `players` collection, which does have `date_of_birth` and guardian-contact fields — see Section 2.)
 
-### Validation on create/update (`routes/participants.py`)
+### Validation on create/update — `backend/routes/participants.py` (full file, 204 lines)
 
-There are **no Pydantic models** — this is Flask, and validation is hand-written dict-checking directly in the route handlers.
+- **Create** (`POST`, `create_participant`, `:72-124`): only `name` is required and validated non-empty (`:81-89`). `phone_number`/`phone` is optional, normalized via `normalize_phone_for_matching` (`utils/phone.py`) with a permissive fallback for non-SA numbers if normalization fails (`:100-106`, comment explains this was a deliberate fix — SA numbers get canonical form, others get strip-only). `active` is optional, cast to bool if present (`:108-109`). Input is built into a plain dict (`:96-109`) and passed to `FirebaseService.create_participant(org_id, participant_data)` — **there is no Pydantic model or schema class; validation is manual, field-by-field, inline in the route function.**
+- **Update** (`PUT`, `update_participant`, `:126-175`): whitelist at `:141` — `allowed_fields = ['name', 'phone_number', 'phone', 'active']`. Phone fields get normalized the same way (`:144-147`). **This route-level whitelist is not the only enforcement point** — `FirebaseService.update_participant` (`firebase_service.py:208-224`) applies its own, authoritative whitelist at `:218`: `allowed_fields = ['name', 'phone_number', 'active']` (note: no bare `'phone'` here — it's normalized to `phone_number` before reaching this layer). Any field not in this second list is silently dropped even if it slipped past the route layer.
 
-- **Create** (`routes/participants.py:72-124`, `POST /`):
-  - Requires `data['name']` present and non-empty after `.strip()` (`:81-89`).
-  - `phone_number`/`phone` optional; if present, normalized via `normalize_phone_for_matching` (`:104-106`).
-  - `active` optional, coerced to `bool` if present (`:108-109`).
-  - Everything else in the request body is silently dropped — `participant_data` is built as an explicit dict literal (`:96-98`) plus the two conditional fields above; there is no passthrough of arbitrary request fields.
+### What would need to change to add `age`/`date_of_birth` and a consent record
 
-- **Update** (`routes/participants.py:126-175`, `PUT /<participant_id>`):
-  - Route-level whitelist: `allowed_fields = ['name', 'phone_number', 'phone', 'active']` — `routes/participants.py:141`.
-  - **Second, independent whitelist inside the service layer**: `firebase_service.py:218` — `allowed_fields = ['name', 'phone_number', 'active']` inside `update_participant()`. Note this one omits the bare `'phone'` alias that the route layer allows — the route normalizes `'phone'` into `'phone_number'` before calling the service (`routes/participants.py:145-147`), so the two lists are consistent in effect, but they are two separately-maintained lists that must be kept in sync by hand.
-  - No per-field validators (no regex, no length limit, no type-check beyond the `bool()` cast on `active`) beyond phone normalization.
+Concretely, four points, all in the two files above:
 
-### What would need to change to add `age`/`date_of_birth` + a consent record
+1. `backend/routes/participants.py:96-109` (`create_participant`) — add the new field(s) into the `participant_data` dict construction, with whatever validation (e.g. date parsing, minimum-age check) the design calls for.
+2. `backend/routes/participants.py:141` (`update_participant`'s `allowed_fields`) — add the new field name(s).
+3. `backend/services/firebase_service.py:218` (`update_participant`'s `allowed_fields`) — **this is the one that actually matters for whether an update sticks**; must be updated or the field will never persist via update, even if the route-level whitelist allows it through.
+4. A consent *record* (as opposed to a flat boolean field) would likely want its own sub-structure or subcollection (e.g. `consent_given_at`, `consent_given_by`, `consent_method`) — there is no existing precedent for a structured consent object anywhere in this codebase to model it on; the closest analog is the flat `guardian_*` fields on `players` (Section 2), which are flat strings, not a record with provenance/timestamp.
 
-Plainly, based on the above:
+There is no Pydantic/marshmallow schema class to update anywhere in this path — every validation and whitelist point above is a plain Python list or manual `if field in data` check.
 
-1. **`routes/participants.py`**: add the new field name(s) to the `create_participant` handler's field-building logic (currently `:96-109`) and to the update `allowed_fields` list at `:141`.
-2. **`firebase_service.py`**: add the same field name(s) to the `update_participant` `allowed_fields` list at `:218` (this is a **second, separate** list from the route-layer one — both need editing, or they will silently diverge again). `create_participant` (`:156-173`) itself needs no change since it already does `**data` passthrough (`:165`) — whatever the route builds into `participant_data` is stored as-is; only the route's explicit field-building block would need to add the new key(s).
-3. **No Pydantic model exists to update** — there is nothing else validating shape beyond the two whitelists above and the manual checks in the route handler.
-4. **`backend/scripts/seed_staging_test_data.py`**: yes, it would need updating. `seed_staging_test_data.py:215-222` builds participant documents with an explicit, fixed field set (`name`, `phone_number`, `active`, `org_id`, `created_at`, `updated_at`) — it does not read from a schema definition, so a new field would not appear in seeded data unless this literal dict is edited.
-5. **`backend/tests/test_org_isolation.py`** (14 tests total: 9 parametrized `get_all_*` cases + 3 parametrized single-doc-getter cases + `test_get_participant_blocks_cross_org_id_guess` + `test_load_rag_context_isolates_by_org` = 14, confirmed by counting `GET_ALL_METHODS`/`SINGLE_DOC_GETTERS` entries plus the two standalone `def test_...` functions):
-   - This file **does not construct participant documents itself** — it imports `_doc_ids` from `seed_staging_test_data.py` (`test_org_isolation.py:57`) and only reads already-seeded staging data through `FirebaseService` methods.
-   - It is **schema-agnostic with respect to any new field**: every assertion in it checks only `record.get('org_id')` and `record.get('id')` (e.g. `test_org_isolation.py:144-151`, `:225-227`) — it never inspects `name`, `phone_number`, or any other field content.
-   - **Conclusion: adding `age`/`date_of_birth`/consent would not require editing `test_org_isolation.py`** — it would only require editing `seed_staging_test_data.py` if you want the new field present in realistic seeded test data (not required for isolation tests to keep passing, since they don't look at it).
+**Seed script**: `backend/scripts/seed_staging_test_data.py:214-223` constructs participant documents directly against Firestore (`db.collection('participants').document(doc_id).set({...})`), with exactly the current field set (`name`, `phone_number`, `active`, `org_id`, `created_at`, `updated_at`, `:216-221`). It would need updating to include the new field(s) **only if** the field is meant to be required or the seed data is meant to exercise the new logic (e.g. an isolation test or age-gating check reading it) — nothing about the current schema forces the seed script to change for an optional field to work.
+
+**The 14 org-isolation tests** — `backend/tests/test_org_isolation.py`: `GET_ALL_METHODS` parametrize list has 9 cases (`:103-113`, includes `get_all_participants` at `:107`), `SINGLE_DOC_GETTERS` has 3 cases (`:175-179`, does not include participants — it uses the reversed-argument getters), plus two standalone tests: `test_get_participant_blocks_cross_org_id_guess` (`:205-228`) and `test_load_rag_context_isolates_by_org` (`:235`) — 9+3+1+1 = 14, matching. **None of these 14 tests assert an exact field set on a participant document** — they check `org_id` equality/presence (`:195,221`) and cross-org `None` returns (`:199,225`). Adding a new field to `participants` would **not** break any of these 14 tests; they would continue to pass unchanged. They would need updating only if the new escalation-detection logic itself needed an isolation proof (e.g. a new `safeguarding_escalations` collection — see Section 5).
 
 ---
 
 ## 5. Risks and constraints
 
-### If an escalation notification itself failed to send — would anyone find out? No, not with the current send primitives as they exist today.
+### If the escalation notification itself fails to send, would anyone find out?
 
-Every notification-sending function inspected in this audit follows the same pattern: **log the failure, swallow the exception, return normally.**
+**No — not with the patterns currently in place, unless the design deliberately breaks from them.** Concrete evidence from existing code, not speculation:
 
-- `email_service._send()` — `services/email_service.py:89-90`: `except Exception as e: logger.error(...)`. No re-raise, no return value indicating failure to a caller that might act on it, no alerting.
-- `ConversationService.save_message()` — `conversation_service.py:515-516`: identical pattern; a failed write to `conversations/{phone}/messages` is invisible to whatever called `save_message`.
-- `WhatsAppService.send_message()` (`whatsapp_service.py:68-86`) is the one exception in this group — it *does* return a structured `{"success": False, "error": ..., ...}` dict rather than swallowing silently, and both call sites checked in this audit (`conversation_service.py:1712-1717`, `:1793-1794`) do check `result.get('success')` and log at ERROR on failure. But even there, "log at ERROR" is the entire consequence — nothing pages a human or retries.
+- `email_service.py:_send` (`:71-90`): a missing API key logs a `WARNING` and returns; a failed Resend API call is caught and logged at `ERROR` (`:89-90`). **Neither path re-raises.** Every existing caller (`routes/auth.py:214,322,388`) has no idea whether the email actually sent — this is exactly the shape a new "send safeguarding escalation email" would inherit if built the same way.
+- `WhatsAppService.send_message` (`whatsapp_service.py:12-86`) never raises on failure; it returns `{"success": False, "error": ..., ...}` (`:80-86`). Callers must explicitly check `.get('success')`. In `_handle_participant_message` (`conversation_service.py:1792-1794`), a failed send is only `logger.error(...)`'d — no SSE push, no retry, no admin alert. Compare to the coach path (`handle_incoming_message:1712-1717`), which at least pushes an SSE event with preview `"[send failed]"` (`:1717`) — but that's only visible to an admin actively watching the Live Activity feed at that moment (Section 1), and the participant path doesn't even do that much.
+- `SchedulerService`'s three jobs (`scheduler_service.py`) accumulate failures into an in-memory `errors` list per run (e.g. `:41, 120, 209`), exposed only via `GET /api/admin/scheduler/status` (wired at `routes/admin.py:309`) — an admin has to know to check that endpoint; nothing pushes it to them.
 
-This is precisely the class of bug that **step 3b** (`99df2dc`) and **step 3c** (`ef1008d`) were written to eliminate elsewhere in this codebase. Their commit messages are explicit about the standard they set: failures must "log at ERROR," must be distinguishable from an empty/normal result (step 3c items 4-6, e.g. `PendingStateReadError` replacing a silent `None` return), and a degraded state must surface as a system-level signal rather than disappearing. Per `ef1008d`'s message: *"Six failures... that degraded silently instead of loudly."*
+**This is precisely the pattern that steps 3b and 3c (commits `99df2dc` and `ef1008d`) were fixing** — but only in the paths they touched (`load_coach_context`/`load_rag_context` for 3b; `PersonService` cache refresh, pricing read-merge-write, pending-attendance/photo reads, conversation history reads for 3c). Their fix pattern each time was the same: stop returning a value indistinguishable from success/empty-but-fine, and either raise a typed exception the caller must handle, or inject an explicit `[SYSTEM NOTE: ...]`/log-at-ERROR signal. **Neither commit touched `email_service.py` or `WhatsAppService.send_message`'s failure handling** — those two send paths still silently swallow failures today, on `phase2-participant-identity` as of this audit. A new escalation-send call built naively on top of either would reproduce the exact class of bug steps 3b/3c were created to eliminate, unless it's deliberately built to raise/alert on failure (e.g., a second, independent channel, or a persisted "escalation record" with a `delivered` status admins can audit — see below).
 
-**If a safeguarding escalation were built by directly reusing `email_service.send_*` or the existing WhatsApp/save patterns without change, it would reintroduce exactly the bug class 3b/3c fixed — except for the single highest-stakes notification in the system.** A failed escalation email today would produce one `logger.error()` line and nothing else: no retry, no fallback channel, no dashboard indicator, no second attempt. Given Section 1's finding that the SSE feed doesn't even cover participant messages, there is currently **no existing surface that would catch a silently-failed escalation** — not the live feed (participant-blind), not email (fire-and-forget), not WhatsApp (logged, not alerted).
+### Would a new Firestore collection need its own index, and does that collide with the Phase 0 org_id isolation pattern?
 
-### Would escalation records need their own Firestore collection and index — and does that collide with the org_id isolation pattern?
+**Isolation is enforced entirely in application code, not by Firestore security rules.** `firestore.rules:6-8`:
 
-- Yes, a new collection would be the natural fit (nothing in the existing schema — `conversations`, `participants`, `admin_users` — has a slot for "flagged incident" records).
-- **`firestore.rules` (repo root) grants unconditional access to every collection**: `match /{document=**} { allow read, write: if true; }` (`firestore.rules:6-8`), with the comment *"since backend uses Admin SDK which bypasses rules anyway."* This means **org isolation in this codebase is enforced entirely in application code**, not by Firestore security rules — every `get_all_*`/`get_*` method in `firebase_service.py` does its own `.where('org_id', '==', org_id)` filtering and/or post-fetch ownership check (e.g. `get_participant`, `firebase_service.py:176-191`, checks `data.get('org_id') != org_id` after fetching by bare doc ID).
-- **This means a new escalation collection would need to hand-implement the exact same discipline** every other collection does: stamp `org_id` server-side on write (never trust it from the request body — see the comment at `firebase_service.py:159-160` on `create_participant` making this explicit), filter by `org_id` on every list/get, and add itself to `test_org_isolation.py`'s `GET_ALL_METHODS` list (`test_org_isolation.py:103-113`) to get the same automated cross-org leak test the other 9 collections have. There is no shared enforcement layer to inherit this from automatically — it is a pattern to be manually replicated correctly, not a constraint imposed by the platform.
-- On the Firestore index side: `firestore.indexes.json` currently has no entries related to any escalation concept (checked — no `conversations`/`messages` entries either). A new collection queried by `org_id` alone would very likely not need a composite index (Firestore auto-indexes single-field equality), but if escalations need `org_id` + a status/severity ordering (e.g. "unresolved, most recent first"), that composite index would need to be added the same way the step-3b fix added one for `sessions` (`firestore.indexes.json`, per `99df2dc`'s diff) — including deploying it, which that commit's message notes required direct Admin API calls because the `firebase`/`gcloud` CLI auth had expired at the time.
+```
+match /{document=**} {
+  allow read, write: if true;
+}
+```
+
+— open read/write for everything, with the comment "Allow all access for now (since backend uses Admin SDK which bypasses rules anyway)." So the *only* thing preventing one org from reading another org's data is that every `FirebaseService` getter takes an explicit `org_id` and applies `.where('org_id', '==', org_id)` (e.g. `get_all_participants`, `firebase_service.py:194-205`) or, for single-doc getters, fetches by ID and then checks `data.get('org_id') != org_id` and returns `None` on mismatch (e.g. `get_participant`, `:176-191`). This is exactly the pattern `test_org_isolation.py` (Section 4) proves holds across every existing collection.
+
+**A new `safeguarding_escalations` collection would need to follow the identical pattern**: every read/write function in `FirebaseService` for it would need to take `org_id` as an explicit parameter (not trust a value from the request body — see the comment at `firebase_service.py:159-160` on `create_participant` making this exact point) and filter/verify by it, the same way every other collection does. There is nothing Firestore-security-rules-side to lean on; it is 100% on whichever new `FirebaseService` methods are written.
+
+**Composite index**: only one composite index exists at all today — `firestore.indexes.json:3-10`, `sessions` on `(org_id ASC, date ASC)`, needed because `get_sessions_for_reminder` filters by `org_id` *and* orders/range-filters by `date` in the same query. `get_all_participants` needs no composite index because it only ever applies a single equality filter (`org_id`) with no additional `order_by`/range clause. **A new `safeguarding_escalations` collection would need its own composite index entry in `firestore.indexes.json` if and only if its query combines `org_id` equality with an `order_by` on another field** (e.g., listing an org's escalations sorted by `created_at`, which is exactly the kind of query an escalations-review screen would want) — that is the same shape of requirement the `sessions` index already exists to satisfy, so there's a direct precedent to follow, but it does not exist automatically; it would need to be added.
+
+---
+
+## Summary of what plainly does not exist
+
+- No safeguarding-contact / DSL concept anywhere.
+- No `contact_email`/`contact_person` field on Organisation.
+- No `phone_number`/WhatsApp field on `admin_users`.
+- No notification bell, toast-from-backend, or persisted notifications collection.
+- No `age`/`date_of_birth`/consent field on `participants`.
+- No retention policy or TTL on the `conversations` collection.
+- No Firestore-security-rules-level org isolation — it is 100% application-code enforced.
+- No failure-surfacing on either existing send path (email or WhatsApp) — both silently swallow send failures today.
