@@ -430,7 +430,10 @@ class FirebaseService:
             existing_check_ins[coach_id] = True  # count this one
             if all(cid in existing_check_ins for cid in all_coach_ids):
                 update_data['status'] = 'checked_in'
-            # else leave status as-is (scheduled/reminded)
+            else:
+                # Not all coaches have checked in yet, but at least one has —
+                # this is a real check-in, not a missed session.
+                update_data['status'] = 'checked_in'
 
         doc_ref = db.collection('sessions').document(session_id)
         doc_ref.update(update_data)
