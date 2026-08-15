@@ -57,10 +57,20 @@ class Config:
     GEOLOCATION_RADIUS_METERS = int(os.getenv('GEOLOCATION_RADIUS_METERS', '500'))
     REMINDER_MINUTES_BEFORE = int(os.getenv('REMINDER_MINUTES_BEFORE', '30'))
     END_SESSION_PROMPT_MINUTES = int(os.getenv('END_SESSION_PROMPT_MINUTES', '10'))
+    # Upper bound on how stale a checked_in session can be and still get an
+    # end-of-session prompt. Without this, any session that ends up at
+    # status='checked_in' -- including via a data correction, not just a
+    # real check-in -- gets treated as "just finished" no matter how old it
+    # actually is.
+    END_PROMPT_MAX_AGE_HOURS = int(os.getenv('END_PROMPT_MAX_AGE_HOURS', '12'))
 
     # Reminder template (approved WhatsApp template name for session reminders)
     REMINDER_TEMPLATE_NAME = os.getenv('REMINDER_TEMPLATE_NAME', 'session_reminder')
     REMINDER_TEMPLATE_LANGUAGE = os.getenv('REMINDER_TEMPLATE_LANGUAGE', 'en_US')
-    
+
     # JWT
     JWT_EXPIRY_HOURS = int(os.getenv('JWT_EXPIRY_HOURS', '24'))
+
+    # Global outbound-messaging kill switch. Defaults to enabled so absence
+    # of the env var never silently breaks messaging.
+    WHATSAPP_SENDING_ENABLED = os.getenv('WHATSAPP_SENDING_ENABLED', 'true').strip().lower() not in ('false', '0', 'no')
