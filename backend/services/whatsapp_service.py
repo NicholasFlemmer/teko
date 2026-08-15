@@ -1,7 +1,7 @@
 import requests
 import logging
 from config import Config
-from utils.phone import normalize_sa_phone
+from utils.phone import normalize_sa_phone, mask_phone
 
 logger = logging.getLogger(__name__)
 
@@ -51,15 +51,16 @@ class WhatsAppService:
         }
         
         try:
-            logger.info("Sending WhatsApp message to: %s", formatted_phone)
-            logger.debug("Message preview: %s...", full_message[:50])
+            logger.info("Sending WhatsApp message to: %s", mask_phone(formatted_phone))
+            logger.debug("Message length: %d chars", len(full_message))
             response = requests.post(url, json=payload, headers=headers, timeout=15)
             response.raise_for_status()
             try:
                 response_data = response.json()
             except ValueError:
                 response_data = {}
-            logger.debug("WhatsApp API response: %s", response_data)
+            message_id = (response_data.get('messages') or [{}])[0].get('id')
+            logger.debug("WhatsApp API response: status=%s message_id=%s", response.status_code, message_id)
             return {
                 "success": True,
                 "data": response_data,
@@ -74,7 +75,7 @@ class WhatsAppService:
                 except Exception:
                     error_detail = e.response.text
             if status_code == 429:
-                logger.warning(f"WhatsApp API rate limited when sending to {formatted_phone}")
+                logger.warning(f"WhatsApp API rate limited when sending to {mask_phone(formatted_phone)}")
             else:
                 logger.error(f"WhatsApp API Error ({status_code}): {error_detail}")
             return {
