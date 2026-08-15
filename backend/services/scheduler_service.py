@@ -4,6 +4,9 @@ from datetime import datetime, timedelta, timezone
 from config import Config
 from utils.phone import normalize_sa_phone
 import uuid
+import logging
+
+logger = logging.getLogger(__name__)
 
 # South Africa Standard Time (UTC+2) — sessions are stored in local time
 SAST = timezone(timedelta(hours=2))
@@ -254,9 +257,21 @@ class SchedulerService:
                 except ValueError:
                     continue
 
-                # If session end time has passed, mark as missed
+                # If session end time has passed, mark as missed — unless the
+                # session already has check-in evidence, in which case a
+                # coach did check in and it must not be overwritten as missed.
                 if now > session_end_time:
-                    FirebaseService.update_session(session['id'], {'status': 'missed'})
+                    has_coach_check_ins = bool(session.get('coach_check_ins'))
+                    has_check_in_time = session.get('check_in_time') is not None
+                    if has_coach_check_ins or has_check_in_time:
+                        logger.info(
+                            "Rescuing session %s from being marked missed: "
+                            "check-in evidence found (coach_check_ins=%s, check_in_time=%s)",
+                            session['id'], has_coach_check_ins, has_check_in_time,
+                        )
+                        FirebaseService.update_session(session['id'], {'status': 'checked_in'})
+                    else:
+                        FirebaseService.update_session(session['id'], {'status': 'missed'})
                     updated += 1
 
             result = {
