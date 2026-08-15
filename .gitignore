@@ -25,12 +25,8 @@ wheels/
 
 # Environment variables
 .env
-.env.local
-.env.production
-backend/.env
-frontend/.env
-frontend/.env.local
-frontend/.env.production
+.env.*
+!.env.example
 
 # Firebase
 firebase-credentials.json
