@@ -264,10 +264,13 @@ class WhatsAppService:
             "Content-Type": "application/json"
         }
 
+        # Meta only accepts status "read" here; typing is requested via the
+        # typing_indicator object (also marks the message as read).
         payload = {
             "messaging_product": "whatsapp",
-            "status": "typing",
-            "message_id": message_id
+            "status": "read",
+            "message_id": message_id,
+            "typing_indicator": {"type": "text"}
         }
 
         try:
