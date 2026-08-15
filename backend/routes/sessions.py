@@ -569,8 +569,10 @@ def add_session_photo_via_token(token):
 
         expires_at = token_data.get('expires_at')
         if expires_at:
-            if hasattr(expires_at, 'tzinfo') and expires_at.tzinfo is not None:
-                expires_at = expires_at.replace(tzinfo=None)
+            if expires_at.tzinfo is None:
+                # Defensive: coerce a naive value to UTC rather than
+                # stripping awareness from datetime.now(timezone.utc) below.
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
             if datetime.now(timezone.utc) > expires_at:
                 return jsonify({'success': False, 'error': 'Check-in link has expired'}), 400
 
@@ -618,15 +620,16 @@ def get_check_in_info(token):
         # Check if token is expired
         expires_at = token_data.get('expires_at')
         if expires_at:
-            # Convert to naive datetime if it's timezone-aware (from Firestore)
-            if hasattr(expires_at, 'tzinfo') and expires_at.tzinfo is not None:
-                expires_at = expires_at.replace(tzinfo=None)
+            if expires_at.tzinfo is None:
+                # Defensive: coerce a naive value to UTC rather than
+                # stripping awareness from datetime.now(timezone.utc) below.
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
             if datetime.now(timezone.utc) > expires_at:
                 return jsonify({
                     'success': False,
                     'error': 'This check-in link has expired'
                 }), 400
-        
+
         # Get session details
         session_id = token_data.get('session_id')
         session = FirebaseService.get_session(session_id)
@@ -712,15 +715,16 @@ def check_in(token):
         # Check if token is expired
         expires_at = token_data.get('expires_at')
         if expires_at:
-            # Convert to naive datetime if it's timezone-aware (from Firestore)
-            if hasattr(expires_at, 'tzinfo') and expires_at.tzinfo is not None:
-                expires_at = expires_at.replace(tzinfo=None)
+            if expires_at.tzinfo is None:
+                # Defensive: coerce a naive value to UTC rather than
+                # stripping awareness from datetime.now(timezone.utc) below.
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
             if datetime.now(timezone.utc) > expires_at:
                 return jsonify({
                     'success': False,
                     'error': 'This check-in link has expired'
                 }), 400
-        
+
         # Get session
         session_id = token_data.get('session_id')
         session = FirebaseService.get_session(session_id)

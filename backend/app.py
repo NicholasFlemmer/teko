@@ -169,27 +169,6 @@ def normalize_phones():
         logger.exception("Error in normalize_phones")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/admin/cleanup-test-sessions', methods=['POST'])
-def cleanup_test_sessions():
-    """One-time cleanup: delete all sessions dated before a cutoff date."""
-    if not _check_scheduler_auth():
-        return jsonify({'error': 'Unauthorized'}), 401
-    try:
-        from flask import request as req
-        data = req.get_json() or {}
-        cutoff = data.get('before_date', '2025-03-16')
-        db = FirebaseService.get_db()
-        docs = db.collection('sessions').where('date', '<', cutoff).stream()
-        deleted = []
-        for doc in docs:
-            d = doc.to_dict()
-            deleted.append({'id': doc.id, 'date': d.get('date'), 'status': d.get('status')})
-            doc.reference.delete()
-        return jsonify({'success': True, 'deleted_count': len(deleted), 'deleted': deleted}), 200
-    except Exception as e:
-        logger.exception("Error in cleanup_test_sessions")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
 @app.route('/api/scheduler/mark-missed', methods=['POST'])
 def mark_missed():
     """Endpoint to mark missed sessions (called by Cloud Scheduler or admin)."""
