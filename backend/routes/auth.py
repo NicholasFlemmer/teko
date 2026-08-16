@@ -16,6 +16,10 @@ auth_bp = Blueprint('auth', __name__)
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
 
+# Canonical admin role vocabulary — matches the values already stored in
+# Firestore admin_users. Import this rather than hardcoding role strings.
+VALID_ROLES = ('super_admin', 'location_admin', 'coach')
+
 def token_required(f):
     """Decorator to require JWT token for protected routes"""
     @wraps(f)
@@ -37,7 +41,9 @@ def token_required(f):
             # Decode token
             data = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
             current_user = data['username']
-            g.current_user_role = data.get('role', 'admin')
+            # No default role string here: a token missing a role claim must
+            # fail role_required checks, not silently resolve to a working role.
+            g.current_user_role = data.get('role')
         except jwt.ExpiredSignatureError:
             return jsonify({'error': 'Token has expired'}), 401
         except jwt.InvalidTokenError:
@@ -53,8 +59,10 @@ def role_required(*allowed_roles):
     def decorator(f):
         @wraps(f)
         def decorated(*args, **kwargs):
-            user_role = getattr(g, 'current_user_role', 'admin')
-            if user_role not in allowed_roles:
+            user_role = getattr(g, 'current_user_role', None)
+            # A missing role claim must be denied explicitly, not by
+            # incidentally failing the membership check below.
+            if user_role is None or user_role not in allowed_roles:
                 return jsonify({'error': 'Insufficient permissions'}), 403
             return f(*args, **kwargs)
         return decorated
@@ -74,7 +82,10 @@ def login():
 
     authenticated = False
     display_name = username
-    user_role = 'admin'
+    # No default role string: this is always overwritten before a token is
+    # ever issued (or the request 401s first) — None keeps it that way rather
+    # than silently carrying a working role if that ever stops being true.
+    user_role = None
 
     # First, check Firestore admin_users by email (indexed query, not full scan)
     try:
@@ -96,7 +107,10 @@ def login():
                 return jsonify({'error': f'Account is {status}'}), 401
             authenticated = True
             display_name = admin.get('name', username)
-            user_role = admin.get('role', 'admin')
+            # No default role string: a Firestore admin record with no role
+            # field must issue a token that fails every role_required check,
+            # not one that silently passes as a working role.
+            user_role = admin.get('role')
     except Exception as e:
         logger.error(f"Firestore auth lookup failed: {e}")
         # Fail closed — don't fall through to env-var credentials on Firestore errors
@@ -105,7 +119,7 @@ def login():
     # Fallback to environment-variable credentials (only if explicitly configured)
     if not authenticated and ADMIN_USERNAME and ADMIN_PASSWORD and username == ADMIN_USERNAME and _hmac.compare_digest(ADMIN_PASSWORD, password):
         authenticated = True
-        user_role = 'superadmin'
+        user_role = VALID_ROLES[0]  # 'super_admin' — the break-glass account gets the top role
 
     if authenticated:
         token = jwt.encode({
@@ -137,7 +151,11 @@ def refresh_token(current_user):
     """Refresh JWT token, preserving the user's current role."""
     token = jwt.encode({
         'username': current_user,
-        'role': getattr(g, 'current_user_role', 'admin'),
+        # No default role string: token_required already denies entry here
+        # if the original token had no role, so this should never fire — but
+        # if it somehow does, the refreshed token must inherit that same
+        # denial rather than upgrading to a working role.
+        'role': getattr(g, 'current_user_role', None),
         'exp': datetime.now(timezone.utc) + timedelta(hours=Config.JWT_EXPIRY_HOURS)
     }, Config.SECRET_KEY, algorithm="HS256")
 
