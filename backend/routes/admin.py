@@ -4,7 +4,7 @@ from werkzeug.security import generate_password_hash
 from services.firebase_service import FirebaseService
 from services.scheduler_service import SchedulerService
 from config import Config
-from routes.auth import token_required, role_required
+from routes.auth import token_required, role_required, VALID_ROLES
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ def get_admin_users(current_user):
 
 @admin_bp.route('/users', methods=['POST'])
 @token_required
-@role_required('superadmin')
+@role_required('super_admin')
 def create_admin_user(current_user):
     """Create a new admin user"""
     try:
@@ -49,7 +49,7 @@ def create_admin_user(current_user):
                 }), 400
 
         # Validate role against allowed values
-        allowed_roles = ['admin', 'superadmin', 'viewer']
+        allowed_roles = VALID_ROLES
         if data['role'] not in allowed_roles:
             return jsonify({'success': False, 'error': f'Role must be one of: {", ".join(allowed_roles)}'}), 400
 
@@ -85,7 +85,7 @@ def create_admin_user(current_user):
 
 @admin_bp.route('/users/<admin_id>', methods=['PUT'])
 @token_required
-@role_required('superadmin')
+@role_required('super_admin')
 def update_admin_user(current_user, admin_id):
     """Update an admin user"""
     try:
@@ -140,7 +140,7 @@ def update_admin_user(current_user, admin_id):
 
 @admin_bp.route('/users/<admin_id>', methods=['DELETE'])
 @token_required
-@role_required('superadmin')
+@role_required('super_admin')
 def delete_admin_user(current_user, admin_id):
     """Delete an admin user"""
     try:
@@ -168,7 +168,7 @@ def delete_admin_user(current_user, admin_id):
 
 @admin_bp.route('/users/<admin_id>/toggle-status', methods=['PUT'])
 @token_required
-@role_required('superadmin')
+@role_required('super_admin')
 def toggle_admin_status(current_user, admin_id):
     """Toggle an admin user's active/suspended status"""
     try:
@@ -219,7 +219,7 @@ def get_settings(current_user):
 
 @admin_bp.route('/settings', methods=['PUT'])
 @token_required
-@role_required('superadmin', 'admin')
+@role_required('super_admin')
 def update_settings(current_user):
     """Save system settings"""
     try:
