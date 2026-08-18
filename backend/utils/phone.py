@@ -1,6 +1,29 @@
 import re
 
 
+def mask_phone(phone_number):
+    """Mask a phone number for logging, keeping only the last 4 digits.
+
+    Never log a raw phone number -- this is the only form that should
+    reach a log line. Handles None, empty, and malformed input safely.
+
+    Examples:
+      '+27821234567' -> '****4567'
+      '27821234567'  -> '****4567'
+      '123'          -> '****'  (too short to reveal any digits)
+      None / ''      -> '****'
+    """
+    if not phone_number:
+        return '****'
+
+    digits = re.sub(r'[^\d]', '', str(phone_number))
+
+    if len(digits) < 4:
+        return '****'
+
+    return '****' + digits[-4:]
+
+
 def normalize_sa_phone(phone_number):
     """Normalize a South African phone number to international format (27XXXXXXXXX).
 

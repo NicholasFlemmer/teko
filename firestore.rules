@@ -1,10 +1,15 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // All application access goes through the Flask backend using the
-    // Firebase Admin SDK, which bypasses these rules entirely.
-    // No client ever connects to Firestore directly, so direct client
-    // access is denied outright.
+    // Deny all direct client access.
+    // The Teko backend uses the Firebase Admin SDK, which bypasses these
+    // rules entirely. The frontend never talks to Firestore directly - every
+    // data call goes through the Flask API in frontend/src/services/api.ts.
+    // Verified 2026-08-14 and re-verified 2026-08-16: no Firebase client SDK
+    // is installed or imported in frontend/src or frontend-old/src, and the
+    // firebase package is absent from frontend/package.json.
+    // If a future feature genuinely needs direct client access, add a scoped
+    // rule for that path rather than reopening this one.
     match /{document=**} {
       allow read, write: if false;
     }

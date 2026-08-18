@@ -59,7 +59,7 @@ interface Admin {
   id: number;
   name: string;
   email: string;
-  role: "super_admin" | "location_admin";
+  role: "super_admin" | "location_admin" | "coach";
   status: "active" | "suspended";
   lastLogin: string;
   createdAt: string;
@@ -68,20 +68,22 @@ interface Admin {
 interface AdminForm {
   name: string;
   email: string;
-  role: "super_admin" | "location_admin";
+  role: "super_admin" | "location_admin" | "coach";
   password: string;
 }
 
-const emptyForm: AdminForm = { name: "", email: "", role: "location_admin", password: "" };
+const emptyForm: AdminForm = { name: "", email: "", role: "coach", password: "" };
 
 const roleLabels: Record<string, string> = {
   super_admin: "Super Admin",
   location_admin: "Location Admin",
+  coach: "Coach",
 };
 
 const roleBadgeClass: Record<string, string> = {
   super_admin: "bg-destructive/10 text-destructive border-destructive/20",
   location_admin: "bg-primary/10 text-primary border-primary/20",
+  coach: "bg-warning/10 text-warning border-warning/20",
 };
 
 export default function SuperAdmin() {
@@ -129,7 +131,7 @@ export default function SuperAdmin() {
               id: a.id,
               name: a.name,
               email: a.email,
-              role: a.role || "location_admin",
+              role: a.role || "coach",
               status: a.status || "active",
               lastLogin: a.last_login || a.lastLogin || "Never",
               createdAt: a.created_at || a.createdAt || "",
@@ -645,6 +647,7 @@ export default function SuperAdmin() {
                 <SelectContent>
                   <SelectItem value="super_admin">Super Admin</SelectItem>
                   <SelectItem value="location_admin">Location Admin</SelectItem>
+                  <SelectItem value="coach">Coach</SelectItem>
                 </SelectContent>
               </Select>
             </div>

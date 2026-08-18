@@ -4,6 +4,7 @@ from services.gemini_service import GeminiService
 from services.whatsapp_service import WhatsAppService
 from services.person_service import PersonService, PersonCacheUnavailableError
 from routes.sse import push_event
+from utils.phone import mask_phone
 from datetime import datetime, date, timezone
 import uuid
 import re
@@ -878,7 +879,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         org_id = coach.get('org_id')
         today_str = date.today().strftime('%Y-%m-%d')
         terminology = cls._terminology_for(org_id)
-        logger.info("Attendance command from coach %s (id=%s) for %s", coach.get('name'), coach_id, today_str)
+        logger.info("Attendance command from coach id=%s for %s", coach_id, today_str)
 
         # Query by coach_id only to avoid Firestore composite index requirement,
         # then filter by date in Python
@@ -1137,14 +1138,14 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
             try:
                 person = PersonService.resolve(from_number)
             except PersonCacheUnavailableError:
-                logger.error("Identity cache unavailable — cannot resolve image sender %s", from_number)
+                logger.error("Identity cache unavailable — cannot resolve image sender %s", mask_phone(from_number))
                 WhatsAppService.send_message(
                     phone_number=from_number,
                     message_text=cls.TRANSIENT_ERROR_MESSAGE
                 )
                 return
             if not person:
-                logger.warning("Image from unrecognised number: %s", from_number)
+                logger.warning("Image from unrecognised number: %s", mask_phone(from_number))
                 WhatsAppService.send_message(
                     phone_number=from_number,
                     message_text=cls.UNRECOGNISED_SENDER_MESSAGE
@@ -1239,7 +1240,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
                 phone_number=from_number,
                 message_text=f"📸 Group photo saved! Great work, {coach_name}!\nReply /end to mark this session as completed."
             )
-            logger.info("Group photo saved for session %s by %s", session_id, coach_name)
+            logger.info("Group photo saved for session %s by coach id=%s", session_id, coach.get('id'))
 
         except Exception as e:
             logger.error("Image handling error: %s", e, exc_info=True)
@@ -1285,12 +1286,12 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         """Handle a shared WhatsApp location for coach check-in"""
         from utils.geolocation import verify_location, format_location, extract_coords_from_maps_url, geocode_address
         try:
-            logger.info("Location received from %s: lat=%s, lng=%s", from_number, latitude, longitude)
+            logger.info("Location received from %s", mask_phone(from_number))
 
             try:
                 person = PersonService.resolve(from_number)
             except PersonCacheUnavailableError:
-                logger.error("Identity cache unavailable — cannot resolve location sender %s", from_number)
+                logger.error("Identity cache unavailable — cannot resolve location sender %s", mask_phone(from_number))
                 WhatsAppService.send_message(
                     phone_number=from_number,
                     message_text=cls.TRANSIENT_ERROR_MESSAGE
@@ -1320,7 +1321,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
             # Find today's sessions for this coach
             all_sessions = FirebaseService.get_all_sessions(org_id, coach_id=coach_id)
             sessions = [s for s in all_sessions if s.get('date') == today_str]
-            logger.info("Found %d session(s) for %s today", len(sessions), coach_name)
+            logger.info("Found %d session(s) for coach id=%s today", len(sessions), coach_id)
 
             if not sessions:
                 WhatsAppService.send_message(
@@ -1422,7 +1423,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
 
             push_event('check_in', coach_name=coach_name,
                        preview=f"{'✅' if within else '❌'} {dist_str} from venue")
-            logger.info("Check-in result for %s: within=%s, distance=%s", coach_name, within, distance)
+            logger.info("Check-in result for coach id=%s: within=%s", coach_id, within)
 
         except Exception as e:
             logger.error("Location check-in error: %s", e, exc_info=True)
@@ -1625,14 +1626,14 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
     def handle_incoming_message(cls, from_number, message_text, message_id):
         """Handle an incoming WhatsApp message from a coach"""
         try:
-            logger.debug("Processing message from %s: %s...", from_number, message_text[:50])
+            logger.debug("Processing message from %s: %d chars", mask_phone(from_number), len(message_text))
 
             # Resolve the sender to a person (coach or participant), across
             # both collections — see PersonService for details.
             try:
                 person = PersonService.resolve(from_number)
             except PersonCacheUnavailableError:
-                logger.error("Identity cache unavailable — cannot resolve message sender %s", from_number)
+                logger.error("Identity cache unavailable — cannot resolve message sender %s", mask_phone(from_number))
                 WhatsAppService.send_message(
                     phone_number=from_number,
                     message_text=cls.TRANSIENT_ERROR_MESSAGE
@@ -1640,7 +1641,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
                 return
 
             if not person:
-                logger.warning("Message from unrecognised number: %s", from_number)
+                logger.warning("Message from unrecognised number: %s", mask_phone(from_number))
                 WhatsAppService.send_message(
                     phone_number=from_number,
                     message_text=cls.UNRECOGNISED_SENDER_MESSAGE
@@ -1653,7 +1654,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
 
             coach = person
             coach_name = coach.get('name', 'Unknown')
-            logger.info("Identified coach: %s", coach_name)
+            logger.info("Identified coach id=%s", coach.get('id'))
 
             # Push SSE event for incoming message
             push_event('message_received', coach_name=coach_name, preview=message_text)
@@ -1710,7 +1711,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
             )
 
             if result.get('success'):
-                logger.info("Response sent successfully to %s", coach_name)
+                logger.info("Response sent successfully to coach id=%s", coach.get('id'))
                 push_event('response_sent', coach_name=coach_name, preview=response)
             else:
                 logger.error("Failed to send response: %s", result.get('error'))

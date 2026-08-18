@@ -2,7 +2,7 @@ import logging
 import time
 
 from services.firebase_service import FirebaseService
-from utils.phone import normalize_phone_for_matching
+from utils.phone import mask_phone, normalize_phone_for_matching
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +172,7 @@ class PersonService:
                 "(id=%s) — this is a data problem, returning the coach. "
                 "Investigate the duplicate phone_number value across the "
                 "coaches and participants collections.",
-                normalised, coach.get('id'), participant.get('id'),
+                mask_phone(normalised), coach.get('id'), participant.get('id'),
             )
             return {**coach, 'person_type': 'coach'}
 

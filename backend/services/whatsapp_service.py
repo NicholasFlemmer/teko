@@ -1,7 +1,7 @@
 import requests
 import logging
 from config import Config
-from utils.phone import normalize_sa_phone
+from utils.phone import normalize_sa_phone, mask_phone
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +20,11 @@ class WhatsAppService:
         Returns:
             dict: API response or error
         """
+        if not Config.WHATSAPP_SENDING_ENABLED:
+            logger.warning("WhatsApp sending disabled (WHATSAPP_SENDING_ENABLED=false); "
+                            "not sending to %s", mask_phone(phone_number))
+            return {"success": False, "error": "WhatsApp sending is disabled", "sending_disabled": True}
+
         url = f"{Config.WHATSAPP_API_URL}/{Config.WHATSAPP_PHONE_NUMBER_ID}/messages"
 
         token = Config.WHATSAPP_API_KEY
@@ -51,15 +56,16 @@ class WhatsAppService:
         }
         
         try:
-            logger.info("Sending WhatsApp message to: %s", formatted_phone)
-            logger.debug("Message preview: %s...", full_message[:50])
+            logger.info("Sending WhatsApp message to: %s", mask_phone(formatted_phone))
+            logger.debug("Message length: %d chars", len(full_message))
             response = requests.post(url, json=payload, headers=headers, timeout=15)
             response.raise_for_status()
             try:
                 response_data = response.json()
             except ValueError:
                 response_data = {}
-            logger.debug("WhatsApp API response: %s", response_data)
+            message_id = (response_data.get('messages') or [{}])[0].get('id')
+            logger.debug("WhatsApp API response: status=%s message_id=%s", response.status_code, message_id)
             return {
                 "success": True,
                 "data": response_data,
@@ -74,7 +80,7 @@ class WhatsAppService:
                 except Exception:
                     error_detail = e.response.text
             if status_code == 429:
-                logger.warning(f"WhatsApp API rate limited when sending to {formatted_phone}")
+                logger.warning(f"WhatsApp API rate limited when sending to {mask_phone(formatted_phone)}")
             else:
                 logger.error(f"WhatsApp API Error ({status_code}): {error_detail}")
             return {
@@ -111,12 +117,23 @@ class WhatsAppService:
                     ]
                 },
             ]
-            return cls.send_template_message(
+            # Rendered for callers that need to record what was actually
+            # communicated (e.g. saving to conversation history) -- Meta
+            # renders the approved template server-side, so this is our
+            # best-effort reconstruction of that body text, not a value
+            # echoed back by the API itself.
+            rendered_text = (
+                f"Hi {coach_name}! Your coaching session starts at {session_time} "
+                f"at {clean_location}. Please share your location in this chat to check in ..."
+            )
+            result = cls.send_template_message(
                 phone_number=coach_phone,
                 template_name=template_name,
                 language_code=Config.REMINDER_TEMPLATE_LANGUAGE,
                 components=components,
             )
+            result['rendered_text'] = rendered_text
+            return result
 
         # Fallback: plain-text via Gemini
         from services.gemini_service import GeminiService
@@ -125,10 +142,12 @@ class WhatsAppService:
             session_time=session_time,
             location_address=location_address,
         )
-        return cls.send_message(
+        result = cls.send_message(
             phone_number=coach_phone,
             message_text=message_text,
         )
+        result['rendered_text'] = message_text
+        return result
     
     @classmethod
     def send_template_message(cls, phone_number, template_name, language_code="en", components=None):
@@ -143,13 +162,18 @@ class WhatsAppService:
         Returns:
             dict: API response or error
         """
+        if not Config.WHATSAPP_SENDING_ENABLED:
+            logger.warning("WhatsApp sending disabled (WHATSAPP_SENDING_ENABLED=false); "
+                            "not sending template to %s", mask_phone(phone_number))
+            return {"success": False, "error": "WhatsApp sending is disabled", "sending_disabled": True}
+
         url = f"{Config.WHATSAPP_API_URL}/{Config.WHATSAPP_PHONE_NUMBER_ID}/messages"
-        
+
         headers = {
             "Authorization": f"Bearer {Config.WHATSAPP_API_KEY}",
             "Content-Type": "application/json"
         }
-        
+
         formatted_phone = normalize_sa_phone(phone_number)
         if not formatted_phone:
             logger.warning("Invalid phone number for template")
@@ -210,6 +234,10 @@ class WhatsAppService:
         """
         if not message_id:
             return {"success": False, "error": "No message_id provided"}
+        if not Config.WHATSAPP_SENDING_ENABLED:
+            logger.warning("WhatsApp sending disabled (WHATSAPP_SENDING_ENABLED=false); "
+                            "not marking message %s as read", message_id)
+            return {"success": False, "error": "WhatsApp sending is disabled", "sending_disabled": True}
         url = f"{Config.WHATSAPP_API_URL}/{Config.WHATSAPP_PHONE_NUMBER_ID}/messages"
 
         headers = {
@@ -257,6 +285,10 @@ class WhatsAppService:
         """
         if not message_id:
             return {"success": False, "error": "No message_id provided"}
+        if not Config.WHATSAPP_SENDING_ENABLED:
+            logger.warning("WhatsApp sending disabled (WHATSAPP_SENDING_ENABLED=false); "
+                            "not sending typing indicator for message %s", message_id)
+            return {"success": False, "error": "WhatsApp sending is disabled", "sending_disabled": True}
         url = f"{Config.WHATSAPP_TYPING_API_URL}/{Config.WHATSAPP_PHONE_NUMBER_ID}/messages"
 
         headers = {
@@ -264,10 +296,13 @@ class WhatsAppService:
             "Content-Type": "application/json"
         }
 
+        # Meta only accepts status "read" here; typing is requested via the
+        # typing_indicator object (also marks the message as read).
         payload = {
             "messaging_product": "whatsapp",
-            "status": "typing",
-            "message_id": message_id
+            "status": "read",
+            "message_id": message_id,
+            "typing_indicator": {"type": "text"}
         }
 
         try:

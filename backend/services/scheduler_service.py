@@ -119,6 +119,8 @@ class SchedulerService:
                             if result.get('success'):
                                 sent_any = True
                                 reminders_sent += 1
+                                from services.conversation_service import ConversationService
+                                ConversationService.save_message(phone, 'assistant', result.get('rendered_text', ''))
                             else:
                                 errors.append(f"Failed to send reminder to {coach_name} for session {session['id']}: {result.get('error')}")
 
@@ -167,6 +169,8 @@ class SchedulerService:
 
             sent = 0
             errors = []
+            stale_skipped = 0
+            stale_cutoff = now - timedelta(hours=Config.END_PROMPT_MAX_AGE_HOURS)
 
             for session in sessions:
                 if session.get('end_prompt_sent'):
@@ -190,10 +194,23 @@ class SchedulerService:
                 if now < prompt_after:
                     continue
 
+                # A session this old reaching status='checked_in' is not a
+                # session that "just finished" -- it's stale data (e.g. a
+                # correction), not a live check-in. Skip it entirely: no
+                # send, and no end_prompt_sent, since this isn't the guard
+                # that decided the session was handled. Do not log per
+                # session here -- this runs every 5 minutes and a
+                # long-lived stale backlog would spam the logs forever; the
+                # summary line below covers it.
+                if end_dt < stale_cutoff:
+                    stale_skipped += 1
+                    continue
+
                 session_org_id = session.get('org_id')
                 coach_word = (FirebaseService.get_org_terminology(session_org_id)['coach_singular']
                               if session_org_id else FirebaseService.DEFAULT_TERMINOLOGY['coach_singular'])
                 coach_ids = FirebaseService.get_session_coach_ids(session)
+                sent_any = False
                 for coach_id in coach_ids:
                     coach = FirebaseService.get_coach(coach_id, None)
                     if not coach:
@@ -202,18 +219,35 @@ class SchedulerService:
                     if not phone:
                         continue
                     coach_name = coach.get('name') or coach.get('first_name', '') or coach_word
+                    message_text = f"Hi {coach_name}! Has your session ended? Reply /end to mark it as complete."
                     result = WhatsAppService.send_message(
                         phone_number=phone,
-                        message_text=f"Hi {coach_name}! Has your session ended? Reply /end to mark it as complete."
+                        message_text=message_text,
                     )
                     if result.get('success'):
                         sent += 1
+                        sent_any = True
+                        from services.conversation_service import ConversationService
+                        ConversationService.save_message(phone, 'assistant', message_text)
                     else:
                         errors.append(f"Failed to send end prompt to {coach_name}: {result.get('error')}")
 
-                FirebaseService.update_session(session['id'], {'end_prompt_sent': True})
+                # Only mark as prompted if at least one send actually
+                # succeeded. Marking it unconditionally would silently
+                # lose the prompt forever the moment WHATSAPP_SENDING_ENABLED
+                # is off (or the WhatsApp API is genuinely down) -- every
+                # send fails, but end_prompt_sent would still flip to True,
+                # so the session is never retried once sending is back on.
+                if sent_any:
+                    FirebaseService.update_session(session['id'], {'end_prompt_sent': True})
 
-            result = {'success': True, 'prompts_sent': sent, 'errors': errors}
+            logger.info(
+                "send_end_session_prompts: skipped %d stale session(s) older than "
+                "END_PROMPT_MAX_AGE_HOURS=%s",
+                stale_skipped, Config.END_PROMPT_MAX_AGE_HOURS,
+            )
+
+            result = {'success': True, 'prompts_sent': sent, 'stale_skipped': stale_skipped, 'errors': errors}
             cls.last_run['end_prompts'] = {
                 'ran_at': datetime.now(timezone.utc).isoformat(),
                 **result,
@@ -221,6 +255,7 @@ class SchedulerService:
             return result
 
         except Exception as e:
+            logger.error("send_end_session_prompts failed: %s", e, exc_info=True)
             cls.last_run['end_prompts'] = {
                 'ran_at': datetime.now(timezone.utc).isoformat(),
                 'success': False,

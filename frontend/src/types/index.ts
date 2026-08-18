@@ -119,7 +119,7 @@ export interface Admin {
   id: string;
   name: string;
   email: string;
-  role: 'super_admin' | 'admin' | 'manager';
+  role: 'super_admin' | 'location_admin' | 'coach';
   status: 'active' | 'suspended';
   last_login?: string;
   created_at?: any;

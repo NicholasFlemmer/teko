@@ -1,13 +1,24 @@
+import logging
+
+# Logging must be configured before any other module is imported, since
+# several of them create module-level loggers and call logger.info()/
+# logger.error() during initialization (e.g. FirebaseService.initialize()
+# below). Without this, logger.info()/logger.debug() calls are silently
+# discarded everywhere in the app -- Python's default only surfaces
+# WARNING+ via a bare stderr handler with no timestamp/logger-name context.
+from utils.logging_config import configure_logging
+configure_logging()
+
 import os
 import atexit
 import hmac
 import hashlib
 import collections as _collections
-import logging
 from flask import Flask, jsonify
 from flask_cors import CORS
 from apscheduler.schedulers.background import BackgroundScheduler
 from config import Config
+from utils.phone import mask_phone
 
 logger = logging.getLogger(__name__)
 from routes.auth import auth_bp
@@ -299,7 +310,7 @@ def whatsapp_webhook():
                                         logger.debug("Skipping duplicate message %s", message_id)
                                         continue
 
-                                    logger.info("Received %s message from %s", message_type, from_number)
+                                    logger.info("Received %s message from %s", message_type, mask_phone(from_number))
 
                                     # Immediately mark as read (blue ticks) and show typing
                                     # Best-effort: failures must not block message processing
@@ -346,7 +357,7 @@ def whatsapp_webhook():
                                         else:
                                             logger.debug("Skipping %s message (not supported)", message_type)
                                     except Exception as e:
-                                        logger.exception("Error processing %s message from %s", message_type, from_number)
+                                        logger.exception("Error processing %s message from %s", message_type, mask_phone(from_number))
 
             return jsonify({'status': 'ok'}), 200
         except Exception as e:
