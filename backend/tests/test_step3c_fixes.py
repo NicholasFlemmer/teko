@@ -83,6 +83,13 @@ def test_attendance_sse_dashboard_name_now_resolved_via_person_service(monkeypat
     # Avoid a real Firestore delete() call from clear_pending_attendance —
     # irrelevant to what this test is verifying (the SSE coach_name source).
     monkeypatch.setattr(ConversationService, 'clear_pending_attendance', classmethod(lambda cls, phone: None))
+    # handle_attendance_response looks up the session by id (unscoped,
+    # org_id=None) twice: once to resolve org_id for the SSE event, once
+    # further down for team_id when queuing the pending photo state.
+    # Stub it so this stays a pure unit test rather than an implicit real
+    # Firestore call.
+    monkeypatch.setattr(FirebaseService, 'get_session',
+                         lambda session_id, org_id: {'id': session_id, 'org_id': 'org-a', 'team_id': 'team-1'})
 
     # conversation_service.py does `from routes.sse import push_event`, which
     # binds its own reference at import time — patching routes.sse.push_event
@@ -90,7 +97,7 @@ def test_attendance_sse_dashboard_name_now_resolved_via_person_service(monkeypat
     captured_events = []
     import services.conversation_service as cs_module
     monkeypatch.setattr(cs_module, 'push_event',
-                         lambda event_type, coach_name=None, preview=None, extra=None:
+                         lambda event_type, org_id=None, coach_name=None, preview=None, extra=None:
                              captured_events.append({'type': event_type, 'coach_name': coach_name}))
 
     monkeypatch.setattr(FirebaseService, 'get_all_coaches', lambda org_id: [
@@ -117,11 +124,17 @@ def test_attendance_sse_dashboard_name_falls_back_to_unknown_on_cache_unavailabl
     an attendance confirmation that has already been saved."""
     monkeypatch.setattr(FirebaseService, 'update_session', lambda session_id, data: None)
     monkeypatch.setattr(ConversationService, 'clear_pending_attendance', classmethod(lambda cls, phone: None))
+    # See test_attendance_sse_dashboard_name_now_resolved_via_person_service
+    # for why this is stubbed: handle_attendance_response looks up the
+    # session by id (unscoped, org_id=None) to resolve org_id for the SSE
+    # event and, further down, team_id for the pending photo state.
+    monkeypatch.setattr(FirebaseService, 'get_session',
+                         lambda session_id, org_id: {'id': session_id, 'org_id': 'org-a', 'team_id': 'team-1'})
 
     captured_events = []
     import services.conversation_service as cs_module
     monkeypatch.setattr(cs_module, 'push_event',
-                         lambda event_type, coach_name=None, preview=None, extra=None:
+                         lambda event_type, org_id=None, coach_name=None, preview=None, extra=None:
                              captured_events.append({'type': event_type, 'coach_name': coach_name}))
 
     monkeypatch.setattr(FirebaseService, 'get_all_coaches', lambda org_id: (_ for _ in ()).throw(Exception("down")))

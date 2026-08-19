@@ -1026,8 +1026,26 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
             _person = PersonService.resolve(coach_phone)
         except PersonCacheUnavailableError:
             _person = None
-        push_event('attendance', coach_name=(_person.get('name') if _person else None) or 'Unknown',
-                   preview=f"{len(attended_ids)}/{len(players)} present")
+
+        # This handler only has session_id (from `pending`), not an org_id
+        # in scope, so org_id=None here is a deliberate unscoped
+        # single-document lookup to resolve which org this event belongs
+        # to for the dashboard feed — it is not a scoping bug and not an
+        # authorization check (the attendance write above already
+        # happened by session doc id, same as everywhere else in this
+        # handler). Do not add an org_id filter to this call.
+        _session_for_event = FirebaseService.get_session(session_id, None)
+        _event_org_id = _session_for_event.get('org_id') if _session_for_event else None
+        if _event_org_id is None:
+            logger.warning(
+                "Skipping attendance dashboard event for session_id=%s: %s",
+                session_id,
+                "session not found" if not _session_for_event else "session has no org_id",
+            )
+        else:
+            push_event('attendance', org_id=_event_org_id,
+                       coach_name=(_person.get('name') if _person else None) or 'Unknown',
+                       preview=f"{len(attended_ids)}/{len(players)} present")
 
         # Build confirmation
         total = len(players)
@@ -1233,7 +1251,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
                     logger.warning("Failed to update team photo: %s", e)
 
             cls.clear_pending_photo(from_number)
-            push_event('photo_uploaded', coach_name=coach_name,
+            push_event('photo_uploaded', org_id=coach.get('org_id'), coach_name=coach_name,
                        preview=f"Group photo for session {today_str}")
 
             WhatsAppService.send_message(
@@ -1421,7 +1439,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
                     message_text=f"📍 You're {dist_str} from the venue (need to be within {radius_str}). Please try again when you're closer, or contact your administrator if this seems wrong.{venue_ref}"
                 )
 
-            push_event('check_in', coach_name=coach_name,
+            push_event('check_in', org_id=org_id, coach_name=coach_name,
                        preview=f"{'✅' if within else '❌'} {dist_str} from venue")
             logger.info("Check-in result for coach id=%s: within=%s", coach_id, within)
 
@@ -1657,7 +1675,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
             logger.info("Identified coach id=%s", coach.get('id'))
 
             # Push SSE event for incoming message
-            push_event('message_received', coach_name=coach_name, preview=message_text)
+            push_event('message_received', org_id=coach.get('org_id'), coach_name=coach_name, preview=message_text)
 
             text_lower = message_text.strip().lower()
             logger.debug("Command check: text_lower='%s'", text_lower)
@@ -1712,10 +1730,10 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
 
             if result.get('success'):
                 logger.info("Response sent successfully to coach id=%s", coach.get('id'))
-                push_event('response_sent', coach_name=coach_name, preview=response)
+                push_event('response_sent', org_id=coach.get('org_id'), coach_name=coach_name, preview=response)
             else:
                 logger.error("Failed to send response: %s", result.get('error'))
-                push_event('response_sent', coach_name=coach_name, preview="[send failed]")
+                push_event('response_sent', org_id=coach.get('org_id'), coach_name=coach_name, preview="[send failed]")
 
         except Exception as e:
             logger.error("Error handling incoming message: %s", e)
