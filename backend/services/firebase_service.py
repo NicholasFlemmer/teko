@@ -359,8 +359,12 @@ class FirebaseService:
     
     # Check-in token operations
     @classmethod
-    def create_check_in_token(cls, token, session_id, expires_at, coach_id=None):
-        """Create check-in token"""
+    def create_check_in_token(cls, token, session_id, expires_at, coach_id=None, org_id=None):
+        """Create check-in token, stamped with the session's own org_id.
+
+        Callers mint a token from an already-fetched session, so org_id is
+        the session's org_id -- not looked up again here.
+        """
         db = cls.get_db()
         data = {
             'token': token,
@@ -371,13 +375,21 @@ class FirebaseService:
         }
         if coach_id:
             data['coach_id'] = coach_id
+        if org_id:
+            data['org_id'] = org_id
         doc_ref = db.collection('check_in_tokens').document(token)
         doc_ref.set(data)
         return data
-    
+
     @classmethod
     def get_check_in_token(cls, token):
-        """Get check-in token"""
+        """Get check-in token.
+
+        Deliberately unscoped -- this serves a public magic-link endpoint
+        hit by an unauthenticated coach on their own phone, where the
+        single-use, time-limited token itself is the authorization, not
+        org membership. Do not add an org_id filter here.
+        """
         db = cls.get_db()
         doc = db.collection('check_in_tokens').document(token).get()
         if doc.exists:
@@ -392,11 +404,17 @@ class FirebaseService:
         return True
     
     @classmethod
-    def check_in_session(cls, session_id, check_in_data, coach_id=None):
+    def check_in_session(cls, session_id, check_in_data, coach_id=None, org_id=None):
         """Update session with check-in data.
 
         When coach_id is provided, stores per-coach check-in under
         coach_check_ins.{coach_id} so multi-coach sessions work correctly.
+
+        org_id defaults to None for callers that don't have one to pass
+        (e.g. the WhatsApp-native GPS check-in flow, which resolves the
+        session/coach through its own already-authenticated identity path,
+        not a check-in token). Callers coming from the check-in token flow
+        should pass the token's own org_id here.
         """
         db = cls.get_db()
         location_verified = check_in_data.get('location_verified', False)
@@ -416,9 +434,8 @@ class FirebaseService:
                 'distance': check_in_data.get('distance'),
             }
 
-        # Determine session-level status. Authorization here comes from the
-        # one-time check-in token, not org membership, so no org filter.
-        session = cls.get_session(session_id, None)
+        # Determine session-level status.
+        session = cls.get_session(session_id, org_id)
         all_coach_ids = cls.get_session_coach_ids(session) if session else []
 
         if len(all_coach_ids) <= 1 or not coach_id:
@@ -437,7 +454,7 @@ class FirebaseService:
 
         doc_ref = db.collection('sessions').document(session_id)
         doc_ref.update(update_data)
-        return cls.get_session(session_id, None)
+        return cls.get_session(session_id, org_id)
 
     # =========================================================================
     # Team operations

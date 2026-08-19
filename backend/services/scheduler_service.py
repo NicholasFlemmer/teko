@@ -105,7 +105,7 @@ class SchedulerService:
                             token = str(uuid.uuid4())
                             # Token expiry uses UTC (consistent with check-in verification)
                             expires_at = datetime.now(timezone.utc) + timedelta(minutes=Config.CHECK_IN_TOKEN_EXPIRY_MINUTES)
-                            FirebaseService.create_check_in_token(token, session['id'], expires_at, coach_id=coach_id)
+                            FirebaseService.create_check_in_token(token, session['id'], expires_at, coach_id=coach_id, org_id=session.get('org_id'))
                             check_in_url = f"{Config.FRONTEND_URL}/check-in/{token}"
 
                             result = WhatsAppService.send_check_in_reminder(

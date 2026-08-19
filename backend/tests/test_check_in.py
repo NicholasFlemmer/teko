@@ -63,14 +63,21 @@ SESSION = {
 COACH = {'name': 'Test Coach'}
 
 
-def _token_doc(expires_at, used=False, session_id='sess-1'):
-    return {
+def _token_doc(expires_at, used=False, session_id='sess-1', org_id='org-a'):
+    """org_id defaults to a real value: since the org_id-on-token-creation
+    fix, a token with no org_id at all is rejected before the used/expiry
+    checks even run (see test_token_org_id_scoping.py). Pass org_id=None
+    explicitly for tests that want to exercise that rejection itself."""
+    doc = {
         'token': 'tok-1',
         'session_id': session_id,
         'coach_id': 'coach-1',
         'used': used,
         'expires_at': expires_at,
     }
+    if org_id is not None:
+        doc['org_id'] = org_id
+    return doc
 
 
 def test_valid_unexpired_token_returns_session_info(client, monkeypatch):

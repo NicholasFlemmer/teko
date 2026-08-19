@@ -30,6 +30,24 @@ def _resolve_org_scope():
     return org_id, None
 
 
+def _token_org_id_or_reject(token_data):
+    """Resolve the org_id to scope downstream reads to, for a check-in-token
+    request. Returns (org_id, None) on success, or (None, error_response) to
+    return immediately.
+
+    A token minted before org_id was stamped onto check_in_tokens (every
+    token that exists as of this change) has no org_id at all -- that must
+    not fall through to an unscoped session/coach/location read. Every such
+    token is also already expired, but don't rely on that alone: reject
+    explicitly here, independent of the expiry check, rather than assume
+    expiry is what's protecting this.
+    """
+    org_id = token_data.get('org_id')
+    if org_id is None:
+        return None, (jsonify({'success': False, 'error': 'Invalid check-in token'}), 404)
+    return org_id, None
+
+
 def _generate_recurrence_dates(start, end, frequency):
     """Generate a list of dates from start to end based on frequency."""
     dates = []
@@ -421,7 +439,7 @@ def send_reminder(current_user, session_id):
 
             token = str(uuid.uuid4())
             expires_at = datetime.now(timezone.utc) + timedelta(minutes=Config.CHECK_IN_TOKEN_EXPIRY_MINUTES)
-            FirebaseService.create_check_in_token(token, session_id, expires_at, coach_id=cid)
+            FirebaseService.create_check_in_token(token, session_id, expires_at, coach_id=cid, org_id=session.get('org_id'))
             check_in_url = f"{Config.FRONTEND_URL}/check-in/{token}"
 
             result = WhatsAppService.send_check_in_reminder(
@@ -625,6 +643,10 @@ def add_session_photo_via_token(token):
         if not token_data:
             return jsonify({'success': False, 'error': 'Invalid token'}), 404
 
+        token_org_id, err = _token_org_id_or_reject(token_data)
+        if err:
+            return err
+
         expires_at = token_data.get('expires_at')
         if expires_at:
             if expires_at.tzinfo is None:
@@ -636,8 +658,9 @@ def add_session_photo_via_token(token):
 
         session_id = token_data.get('session_id')
         # Public endpoint: the check-in token is the authorization, not a
-        # JWT/org, so we look up the session directly without an org filter.
-        session = FirebaseService.get_session(session_id, None)
+        # JWT/org -- but the token itself now carries the session's org_id
+        # from creation, so the session lookup can and does use it.
+        session = FirebaseService.get_session(session_id, token_org_id)
         if not session:
             return jsonify({'success': False, 'error': 'Session not found'}), 404
 
@@ -669,14 +692,18 @@ def get_check_in_info(token):
                 'success': False,
                 'error': 'Invalid check-in token'
             }), 404
-        
+
+        token_org_id, err = _token_org_id_or_reject(token_data)
+        if err:
+            return err
+
         # Check if token is used
         if token_data.get('used'):
             return jsonify({
                 'success': False,
                 'error': 'This check-in link has already been used'
             }), 400
-        
+
         # Check if token is expired
         expires_at = token_data.get('expires_at')
         if expires_at:
@@ -691,10 +718,10 @@ def get_check_in_info(token):
                 }), 400
 
         # Get session details. Public endpoint: the check-in token is the
-        # authorization, not a JWT/org, so we look up records directly
-        # without an org filter.
+        # authorization, not a JWT/org -- but the token carries the
+        # session's own org_id from creation, so lookups below use it.
         session_id = token_data.get('session_id')
-        session = FirebaseService.get_session(session_id, None)
+        session = FirebaseService.get_session(session_id, token_org_id)
 
         if not session:
             return jsonify({
@@ -704,7 +731,7 @@ def get_check_in_info(token):
 
         # Get coach details
         coach_id = session.get('coach_id')
-        coach = FirebaseService.get_coach(coach_id, None) if coach_id else None
+        coach = FirebaseService.get_coach(coach_id, token_org_id) if coach_id else None
         coach_name = 'Unknown'
         if coach:
             coach_name = coach.get('name') or f"{coach.get('first_name', '')} {coach.get('last_name', '')}".strip() or 'Unknown'
@@ -714,7 +741,7 @@ def get_check_in_info(token):
         address = session.get('address', '')
         location_id = session.get('location_id')
         if location_id:
-            location_record = FirebaseService.get_location(location_id, None)
+            location_record = FirebaseService.get_location(location_id, token_org_id)
             if location_record:
                 address = location_record.get('address', address)
                 lat = location_record.get('latitude')
@@ -766,14 +793,18 @@ def check_in(token):
                 'success': False,
                 'error': 'Invalid check-in token'
             }), 404
-        
+
+        token_org_id, err = _token_org_id_or_reject(token_data)
+        if err:
+            return err
+
         # Check if token is used
         if token_data.get('used'):
             return jsonify({
                 'success': False,
                 'error': 'This check-in link has already been used'
             }), 400
-        
+
         # Check if token is expired
         expires_at = token_data.get('expires_at')
         if expires_at:
@@ -788,17 +819,17 @@ def check_in(token):
                 }), 400
 
         # Get session. Public endpoint: the check-in token is the
-        # authorization, not a JWT/org, so we look up the session directly
-        # without an org filter.
+        # authorization, not a JWT/org -- but the token carries the
+        # session's own org_id from creation, so lookups below use it.
         session_id = token_data.get('session_id')
-        session = FirebaseService.get_session(session_id, None)
+        session = FirebaseService.get_session(session_id, token_org_id)
 
         if not session:
             return jsonify({
                 'success': False,
                 'error': 'Session not found'
             }), 404
-        
+
         # Verify location
         actual_location = format_location(
             data['location']['latitude'],
@@ -810,7 +841,7 @@ def check_in(token):
         allowed_radius = Config.GEOLOCATION_RADIUS_METERS
         location_id = session.get('location_id')
         if location_id:
-            location_record = FirebaseService.get_location(location_id, None)
+            location_record = FirebaseService.get_location(location_id, token_org_id)
             if location_record:
                 lat = location_record.get('latitude')
                 lng = location_record.get('longitude')
@@ -834,7 +865,7 @@ def check_in(token):
         }
 
         coach_id = token_data.get('coach_id')
-        updated_session = FirebaseService.check_in_session(session_id, check_in_data, coach_id=coach_id)
+        updated_session = FirebaseService.check_in_session(session_id, check_in_data, coach_id=coach_id, org_id=token_org_id)
         
         return jsonify({
             'success': True,
