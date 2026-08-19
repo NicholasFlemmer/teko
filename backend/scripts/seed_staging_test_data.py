@@ -11,6 +11,7 @@ Creates test-org-a and test-org-b, each with:
   - 1 session
   - 1 broadcast
   - 1 content item and 1 content_url item (for RAG/knowledge-base checks)
+  - 1 reminder
 
 All data is obviously fake and clearly labeled — test-org-* document IDs,
 "Test Org A" / "Test Org B" names, *@test.invalid emails (a reserved TLD
@@ -91,6 +92,7 @@ _COLLECTION_FOR = {
     'broadcast': 'broadcasts',
     'content': 'content',
     'content_url': 'content_urls',
+    'reminder': 'reminders',
 }
 
 
@@ -300,6 +302,17 @@ def _seed_org(db, org_cfg):
     })
     created.append(('content_urls', ids['content_url']))
 
+    # Reminder
+    db.collection('reminders').document(ids['reminder']).set({
+        'type': 'check_in',
+        'timing': '30_min_before',
+        'enabled': True,
+        'description': f'FAKE test reminder — {label}. Isolation testing only.',
+        'org_id': org_id,
+        'created_at': now,
+    })
+    created.append(('reminders', ids['reminder']))
+
     return created
 
 
@@ -309,7 +322,7 @@ def _verify_org(db, org_cfg):
     expected = {
         'admin_users': 1, 'coaches': 2, 'teams': 1, 'players': 2,
         'participants': 2, 'locations': 1, 'sessions': 1, 'broadcasts': 1,
-        'content': 1, 'content_urls': 1,
+        'content': 1, 'content_urls': 1, 'reminders': 1,
     }
     print(f"  Verifying org_id='{org_id}' counts:")
     all_ok = True
