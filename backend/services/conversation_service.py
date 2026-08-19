@@ -1033,14 +1033,15 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         # to for the dashboard feed — it is not a scoping bug and not an
         # authorization check (the attendance write above already
         # happened by session doc id, same as everywhere else in this
-        # handler). Do not add an org_id filter to this call.
-        _session_for_event = FirebaseService.get_session(session_id, None)
-        _event_org_id = _session_for_event.get('org_id') if _session_for_event else None
+        # handler). Do not add an org_id filter to this call. Reused below
+        # for team_id (pending-photo state) so the session is fetched once.
+        session_data = FirebaseService.get_session(session_id, None)
+        _event_org_id = session_data.get('org_id') if session_data else None
         if _event_org_id is None:
             logger.warning(
                 "Skipping attendance dashboard event for session_id=%s: %s",
                 session_id,
-                "session not found" if not _session_for_event else "session has no org_id",
+                "session not found" if not session_data else "session has no org_id",
             )
         else:
             push_event('attendance', org_id=_event_org_id,
@@ -1062,9 +1063,6 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         lines.append("Reply /end to mark this session as completed.")
 
         # Set pending photo state so next image is linked to this session.
-        # session_id comes from our own server-side pending-attendance state
-        # for this coach, not user input, so no org filter is needed here.
-        session_data = FirebaseService.get_session(session_id, None)
         team_id = session_data.get('team_id', '') if session_data else ''
         cls.set_pending_photo(coach_phone, session_id, team_id)
 
