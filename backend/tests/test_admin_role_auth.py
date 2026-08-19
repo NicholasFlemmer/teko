@@ -63,10 +63,16 @@ def client(monkeypatch):
     return app.test_client()
 
 
-def _make_token(role, username='test-user'):
+def _make_token(role, username='test-user', org_id='test-org'):
+    """org_id defaults to a real value: these tests pin role_required's
+    behavior specifically, which now sits behind token_required's org_id
+    fail-closed check -- an org_id-less token would 401 before reaching
+    role_required at all, for a reason unrelated to what's under test here.
+    """
     payload = {
         'username': username,
         'role': role,
+        'org_id': org_id,
         'exp': datetime.now(timezone.utc) + timedelta(hours=1),
     }
     return _jwt.encode(payload, Config.SECRET_KEY, algorithm='HS256')

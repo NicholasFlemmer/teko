@@ -61,11 +61,20 @@ def client():
     return app.test_client()
 
 
-def _make_token(role=None, include_role_claim=True, username='test-user', expired=False):
+def _make_token(role=None, include_role_claim=True, username='test-user', expired=False,
+                 org_id='test-org', include_org_id_claim=True):
     """Mint a JWT the same way auth.py's login()/refresh_token() do.
 
     include_role_claim=False omits the 'role' key entirely, simulating a
     token minted before the role claim existed or a hand-crafted one.
+
+    org_id defaults to a real value (not None) and is included by default:
+    these tests exist to pin role_required's own behavior, which now sits
+    behind token_required's org_id fail-closed check -- a token missing
+    org_id would 401 before ever reaching role_required, which would make
+    every test below fail for a reason unrelated to what it's testing.
+    include_org_id_claim=False is for tests that specifically want to
+    exercise the missing-claim case itself.
     """
     payload = {
         'username': username,
@@ -73,6 +82,8 @@ def _make_token(role=None, include_role_claim=True, username='test-user', expire
     }
     if include_role_claim:
         payload['role'] = role
+    if include_org_id_claim:
+        payload['org_id'] = org_id
     return _jwt.encode(payload, Config.SECRET_KEY, algorithm='HS256')
 
 
