@@ -1,11 +1,40 @@
 import logging
 from flask import Blueprint, request, jsonify, g
 from services.firebase_service import FirebaseService
-from routes.auth import token_required
+from routes.auth import token_required, role_required
 
 logger = logging.getLogger(__name__)
 
 organisations_bp = Blueprint('organisations', __name__)
+
+
+def _resolve_org_scope():
+    """Resolve the org_id to filter by for the current request.
+
+    Returns (org_id, None) on success, or (None, error_response) if the
+    caller has no org context and isn't the intentional super_admin
+    cross-org case (role == 'super_admin' with no assigned org).
+    """
+    org_id = getattr(g, 'current_user_org_id', None)
+    role = getattr(g, 'current_user_role', None)
+    if org_id is None and role != 'super_admin':
+        return None, (jsonify({'success': False, 'error': 'Organisation context missing'}), 403)
+    return org_id, None
+
+
+def _forbid_cross_org(scope_org_id, url_org_id):
+    """None if the caller may act on url_org_id, else a 403 error response.
+
+    scope_org_id is None only for the intentional super_admin cross-org
+    case (see _resolve_org_scope) -- that caller may act on any org.
+    Every other caller may only act on their own org_id. Always 403, never
+    404, and identical regardless of whether url_org_id is a real
+    organisation -- varying the response would tell a caller which other
+    organisations exist.
+    """
+    if scope_org_id is None or scope_org_id == url_org_id:
+        return None
+    return jsonify({'success': False, 'error': 'Insufficient permissions'}), 403
 
 
 @organisations_bp.route('', methods=['GET'])
@@ -38,8 +67,16 @@ def get_organisations(current_user):
 @organisations_bp.route('/<org_id>', methods=['GET'])
 @token_required
 def get_organisation(current_user, org_id):
-    """Get a single organisation by ID."""
+    """Get a single organisation by ID. Callers may only read their own
+    organisation (or, for the intentional super_admin cross-org case, any)."""
     try:
+        scope_org_id, err = _resolve_org_scope()
+        if err:
+            return err
+        forbidden = _forbid_cross_org(scope_org_id, org_id)
+        if forbidden:
+            return forbidden
+
         org = FirebaseService.get_organisation(org_id)
         if not org:
             return jsonify({
@@ -60,10 +97,30 @@ def get_organisation(current_user, org_id):
 
 @organisations_bp.route('/<org_id>', methods=['PUT'])
 @token_required
+@role_required('super_admin')
 def update_organisation(current_user, org_id):
     """Update an organisation's name, type, terminology, ai_persona_prompt,
-    country, and/or supported_languages."""
+    country, and/or supported_languages.
+
+    Gated to super_admin only. Neither super_admin (the Triggr platform
+    role) nor location_admin (scoped to a single location within an org)
+    is an obviously correct owner of an organisation-wide record from the
+    existing role model alone, so this deliberately picks the narrower,
+    safer option for now rather than guessing at a location_admin-level
+    grant that isn't backed by anything in the current code.
+
+    A super_admin with an assigned org_id is still restricted to that org
+    by the ownership check below -- only a super_admin with no assigned
+    org (the intentional cross-org case) may update any organisation.
+    """
     try:
+        scope_org_id, err = _resolve_org_scope()
+        if err:
+            return err
+        forbidden = _forbid_cross_org(scope_org_id, org_id)
+        if forbidden:
+            return forbidden
+
         data = request.get_json()
         if not data:
             return jsonify({'success': False, 'error': 'Request body is required'}), 400
@@ -103,8 +160,17 @@ def update_organisation(current_user, org_id):
 @organisations_bp.route('/<org_id>/terminology', methods=['GET'])
 @token_required
 def get_organisation_terminology(current_user, org_id):
-    """Get just the terminology object for an organisation (with defaults)."""
+    """Get just the terminology object for an organisation (with defaults).
+    Callers may only read their own organisation's terminology (or, for the
+    intentional super_admin cross-org case, any)."""
     try:
+        scope_org_id, err = _resolve_org_scope()
+        if err:
+            return err
+        forbidden = _forbid_cross_org(scope_org_id, org_id)
+        if forbidden:
+            return forbidden
+
         terminology = FirebaseService.get_org_terminology(org_id)
         return jsonify({
             'success': True,
