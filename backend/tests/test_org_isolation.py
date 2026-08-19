@@ -176,7 +176,22 @@ SINGLE_DOC_GETTERS = [
     ('get_coach', FirebaseService.get_coach, 'coach_1'),
     ('get_session', FirebaseService.get_session, 'session'),
     ('get_player', FirebaseService.get_player, 'player_1'),
+    ('get_team', FirebaseService.get_team, 'team'),
+    ('get_location', FirebaseService.get_location, 'location'),
+    ('get_content', FirebaseService.get_content, 'content'),
+    ('get_url', FirebaseService.get_url, 'content_url'),
+    ('get_admin', FirebaseService.get_admin, 'admin'),
 ]
+
+# get_reminder is NOT included here: scripts/seed_staging_test_data.py has
+# no 'reminder' entry in _COLLECTION_FOR / _doc_ids at all, so there is no
+# seeded reminders document to test against under either org. get_reminder's
+# own scoping code in firebase_service.py is identical to every getter
+# above (fetch by id, then `if org_id is not None and data.get('org_id') !=
+# org_id: return None`) -- this is a seed-data gap, not an implementation
+# difference. Flagged rather than silently worked around: do not extend the
+# seed script or invent a different test shape for this one without saying
+# so first.
 
 
 @pytest.mark.parametrize('label,method,doc_key', SINGLE_DOC_GETTERS, ids=[m[0] for m in SINGLE_DOC_GETTERS])
