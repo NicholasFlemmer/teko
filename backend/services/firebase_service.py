@@ -404,17 +404,20 @@ class FirebaseService:
         return True
     
     @classmethod
-    def check_in_session(cls, session_id, check_in_data, coach_id=None, org_id=None):
-        """Update session with check-in data.
+    def check_in_session(cls, session_id, check_in_data, org_id, coach_id=None):
+        """Update session with check-in data, scoped to org_id.
 
         When coach_id is provided, stores per-coach check-in under
         coach_check_ins.{coach_id} so multi-coach sessions work correctly.
 
-        org_id defaults to None for callers that don't have one to pass
-        (e.g. the WhatsApp-native GPS check-in flow, which resolves the
-        session/coach through its own already-authenticated identity path,
-        not a check-in token). Callers coming from the check-in token flow
-        should pass the token's own org_id here.
+        org_id is threaded straight through to the internal get_session()
+        calls below, which determine session-level status and build the
+        return value -- it is not re-derived here. Every caller has one:
+        the check-in-token flow passes the token's own org_id; the
+        WhatsApp-native GPS flow passes the org_id of the already-resolved
+        coach. Pass org_id=None only for the intentional super_admin
+        cross-org case, matching every other org-scoped getter in this
+        class.
         """
         db = cls.get_db()
         location_verified = check_in_data.get('location_verified', False)

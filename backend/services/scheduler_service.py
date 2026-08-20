@@ -75,9 +75,11 @@ class SchedulerService:
                         location_address = ''
                         location_id = session.get('location_id')
                         if location_id:
-                            # Background cron job spanning all orgs by design
-                            # (get_sessions_for_reminder is itself global).
-                            loc = FirebaseService.get_location(location_id, None)
+                            # get_sessions_for_reminder is itself global (no org
+                            # filter) by design, but this location belongs to
+                            # this specific session, so scope the lookup to the
+                            # session's own org_id rather than reading unscoped.
+                            loc = FirebaseService.get_location(location_id, session.get('org_id'))
                             if loc:
                                 from services.conversation_service import format_maps_link
                                 maps_link = format_maps_link(loc.get('latitude'), loc.get('longitude'))
@@ -91,7 +93,7 @@ class SchedulerService:
 
                         sent_any = False
                         for coach_id in coach_ids:
-                            coach = FirebaseService.get_coach(coach_id, None)
+                            coach = FirebaseService.get_coach(coach_id, session.get('org_id'))
                             if not coach:
                                 errors.append(f"Coach {coach_id} not found for session {session['id']}")
                                 continue
@@ -212,7 +214,7 @@ class SchedulerService:
                 coach_ids = FirebaseService.get_session_coach_ids(session)
                 sent_any = False
                 for coach_id in coach_ids:
-                    coach = FirebaseService.get_coach(coach_id, None)
+                    coach = FirebaseService.get_coach(coach_id, session_org_id)
                     if not coach:
                         continue
                     phone = normalize_sa_phone(coach.get('phone_number', ''))

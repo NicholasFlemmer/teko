@@ -4,9 +4,10 @@ check-ins to be overwritten as 'missed'.
 Ported from fix-missed-status-overwrite (commit 258bcb0, off
 prod-reconcile) onto phase2-participant-identity, where get_session takes
 an org_id parameter. The two fixed code paths are otherwise identical on
-both branches -- check_in_session() calls get_session(session_id, None)
-(check-in-token flows are already authorized by the token, not org
-membership) and mark_missed_sessions() never took an org_id at all.
+both branches -- check_in_session() requires an org_id and threads it
+straight into get_session(session_id, org_id) (the tests below pass a
+fixed dummy org_id since the fake get_session ignores it), and
+mark_missed_sessions() never took an org_id at all.
 
 Bug 1 (services/firebase_service.py, check_in_session): on a multi-coach
 session, when some but not all assigned coaches had checked in, status was
@@ -183,9 +184,11 @@ def _install_check_in_fakes(monkeypatch, session):
     Captures the update_data written to sessions/{session_id} via
     doc_ref.update(...).
 
-    check_in_session() calls cls.get_session(session_id, None) on this
-    branch (check-in-token auth, not org-scoped), so the fake matches that
-    two-arg signature -- same convention as test_check_in.py.
+    check_in_session() now requires org_id and passes it straight into
+    cls.get_session(session_id, org_id), so the fake matches that two-arg
+    signature -- same convention as test_check_in.py. The tests below pass
+    a fixed dummy org_id; this file is about the status-transition logic,
+    not org scoping, and the fake get_session ignores the value anyway.
     """
     captured = []
 
@@ -219,7 +222,7 @@ def test_check_in_multi_coach_two_of_five_checked_in_sets_checked_in(monkeypatch
     }
     captured = _install_check_in_fakes(monkeypatch, session)
 
-    FirebaseService.check_in_session('sess-1', {'location_verified': True, 'location': {}}, coach_id='c2')
+    FirebaseService.check_in_session('sess-1', {'location_verified': True, 'location': {}}, org_id='org-1', coach_id='c2')
 
     assert len(captured) == 1
     _, update_data = captured[0]
@@ -235,7 +238,7 @@ def test_check_in_multi_coach_all_checked_in_sets_checked_in_unchanged(monkeypat
     }
     captured = _install_check_in_fakes(monkeypatch, session)
 
-    FirebaseService.check_in_session('sess-1', {'location_verified': True, 'location': {}}, coach_id='c2')
+    FirebaseService.check_in_session('sess-1', {'location_verified': True, 'location': {}}, org_id='org-1', coach_id='c2')
 
     assert len(captured) == 1
     _, update_data = captured[0]
@@ -250,7 +253,7 @@ def test_check_in_single_coach_location_verified_true_sets_checked_in(monkeypatc
     }
     captured = _install_check_in_fakes(monkeypatch, session)
 
-    FirebaseService.check_in_session('sess-1', {'location_verified': True, 'location': {}}, coach_id='c1')
+    FirebaseService.check_in_session('sess-1', {'location_verified': True, 'location': {}}, org_id='org-1', coach_id='c1')
 
     assert len(captured) == 1
     _, update_data = captured[0]
@@ -274,7 +277,7 @@ def test_check_in_single_coach_location_verified_false_sets_missed(monkeypatch):
     }
     captured = _install_check_in_fakes(monkeypatch, session)
 
-    FirebaseService.check_in_session('sess-1', {'location_verified': False, 'location': {}}, coach_id='c1')
+    FirebaseService.check_in_session('sess-1', {'location_verified': False, 'location': {}}, org_id='org-1', coach_id='c1')
 
     assert len(captured) == 1
     _, update_data = captured[0]
