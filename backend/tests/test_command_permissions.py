@@ -23,12 +23,9 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from dotenv import load_dotenv
-
-STAGING_ENV_PATH = os.path.join(os.path.dirname(__file__), '..', '.env.staging')
-if os.path.exists(STAGING_ENV_PATH):
-    load_dotenv(dotenv_path=STAGING_ENV_PATH, override=True)
-    os.environ['FIREBASE_CREDENTIALS_PATH'] = ''
+# Staging-project enforcement (FIREBASE_PROJECT_ID) now lives in
+# tests/conftest.py, which runs before any test module in this directory
+# is imported.
 
 import pytest  # noqa: E402
 from services.conversation_service import ConversationService  # noqa: E402

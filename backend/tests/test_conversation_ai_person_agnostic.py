@@ -25,33 +25,21 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from dotenv import load_dotenv
-
-STAGING_ENV_PATH = os.path.join(os.path.dirname(__file__), '..', '.env.staging')
-EXPECTED_PROJECT_ID = 'teko-staging-tgh'
-
-if not os.path.exists(STAGING_ENV_PATH):
-    raise RuntimeError(
-        f"{STAGING_ENV_PATH} not found. Create backend/.env.staging before running these tests."
-    )
-
-load_dotenv(dotenv_path=STAGING_ENV_PATH, override=True)
-os.environ['FIREBASE_CREDENTIALS_PATH'] = ''  # force ADC, never a service account key
-
-from config import Config  # noqa: E402
-
-if Config.FIREBASE_PROJECT_ID != EXPECTED_PROJECT_ID:
-    raise RuntimeError(
-        f"REFUSING TO RUN: FIREBASE_PROJECT_ID resolved to "
-        f"'{Config.FIREBASE_PROJECT_ID}', expected '{EXPECTED_PROJECT_ID}'. "
-        f"These tests read and must never touch anything but the staging project."
-    )
+# Staging-project enforcement (FIREBASE_PROJECT_ID) now lives in
+# tests/conftest.py, which runs before any test module in this directory
+# is imported.
 
 import pytest  # noqa: E402
 from services.conversation_service import ConversationService  # noqa: E402
 from services.firebase_service import FirebaseService  # noqa: E402
 from services.gemini_service import GeminiService  # noqa: E402
 from services.whatsapp_service import WhatsAppService  # noqa: E402
+
+# tests/conftest.py already refuses to run this session at all unless
+# FIREBASE_PROJECT_ID resolves to this value -- this local copy is only for
+# the belt-and-braces check below, which verifies the actually-connected
+# Firestore client (not just the environment variable) once initialized.
+EXPECTED_PROJECT_ID = 'teko-staging-tgh'
 
 ORG_A = 'test-org-a'  # sports — coach_singular="Coach", player_singular="Player"
 ORG_B = 'test-org-b'  # ngo    — coach_singular="Facilitator", player_singular="Participant"

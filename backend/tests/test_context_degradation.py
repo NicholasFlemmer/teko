@@ -11,19 +11,6 @@ Pure unit tests: FirebaseService's directory reads are stubbed via
 monkeypatch, so nothing here touches Firestore — same convention as
 test_person_service.py.
 
-This file still loads .env.staging before importing any services module,
-even though it never talks to Firestore. Reason: config.py reads
-FIREBASE_PROJECT_ID into a class attribute once, at first import, and
-never re-reads it — so whichever test file's imports run FIRST in a given
-`pytest tests/` session permanently decides Config.FIREBASE_PROJECT_ID for
-every other test file in that same session, regardless of any later
-load_dotenv(override=True) call. This file happens to sort alphabetically
-before the staging-guarded suites (test_conversation_ai_person_agnostic.py,
-test_org_isolation.py, test_person_resolution_e2e.py), so without this it
-would win that race with the wrong (dev) project id and make those files'
-own staging guard fail. Loading the same .env.staging here keeps every
-file consistent no matter what order pytest collects them in.
-
 Usage:
     cd backend
     pytest tests/test_context_degradation.py -v
@@ -33,12 +20,9 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from dotenv import load_dotenv
-
-STAGING_ENV_PATH = os.path.join(os.path.dirname(__file__), '..', '.env.staging')
-if os.path.exists(STAGING_ENV_PATH):
-    load_dotenv(dotenv_path=STAGING_ENV_PATH, override=True)
-    os.environ['FIREBASE_CREDENTIALS_PATH'] = ''
+# Staging-project enforcement (FIREBASE_PROJECT_ID) now lives in
+# tests/conftest.py, which runs before any test module in this directory
+# is imported.
 
 import pytest  # noqa: E402
 from services.conversation_service import ConversationService  # noqa: E402

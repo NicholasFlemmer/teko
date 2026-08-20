@@ -12,11 +12,6 @@ test_context_degradation.py. A minimal Flask app registers only
 sessions_bp, so importing this file never triggers app.py's module-level
 FirebaseService.initialize()/scheduler start.
 
-This file still loads .env.staging before importing any services module,
-even though it never talks to Firestore -- see test_context_degradation.py
-for why (config.py caches FIREBASE_PROJECT_ID at first import; whichever
-test file imports it first decides it for the whole pytest session).
-
 Usage:
     cd backend
     pytest tests/test_check_in.py -v
@@ -26,12 +21,9 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from dotenv import load_dotenv
-
-STAGING_ENV_PATH = os.path.join(os.path.dirname(__file__), '..', '.env.staging')
-if os.path.exists(STAGING_ENV_PATH):
-    load_dotenv(dotenv_path=STAGING_ENV_PATH, override=True)
-    os.environ['FIREBASE_CREDENTIALS_PATH'] = ''
+# Staging-project enforcement (FIREBASE_PROJECT_ID) now lives in
+# tests/conftest.py, which runs before any test module in this directory
+# is imported.
 
 from datetime import datetime, timedelta, timezone  # noqa: E402
 

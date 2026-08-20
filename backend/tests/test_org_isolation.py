@@ -13,7 +13,9 @@ fail with "expected N, got 0" style errors likely mean the seed data isn't
 present, not that isolation is broken; check that before concluding
 isolation itself has a gap.
 
-Refuses to run against anything other than teko-staging-tgh.
+Refuses to run against anything other than teko-staging-tgh -- enforced by
+tests/conftest.py, which runs before any test module in this directory is
+imported.
 
 Usage:
     cd backend
@@ -24,37 +26,16 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from dotenv import load_dotenv
-
-STAGING_ENV_PATH = os.path.join(os.path.dirname(__file__), '..', '.env.staging')
-EXPECTED_PROJECT_ID = 'teko-staging-tgh'
-
-if not os.path.exists(STAGING_ENV_PATH):
-    raise RuntimeError(
-        f"{STAGING_ENV_PATH} not found. Create backend/.env.staging before running these tests."
-    )
-
-# override=True so this always wins over backend/.env, which config.py's own
-# load_dotenv() would otherwise pick up (with override=False, so it can
-# never clobber a key already set here). This is what keeps these tests
-# pointed at staging even though backend/.env exists in this repo.
-load_dotenv(dotenv_path=STAGING_ENV_PATH, override=True)
-os.environ['FIREBASE_CREDENTIALS_PATH'] = ''  # force ADC, never a service account key
-
-from config import Config  # noqa: E402
-
-if Config.FIREBASE_PROJECT_ID != EXPECTED_PROJECT_ID:
-    raise RuntimeError(
-        f"REFUSING TO RUN: FIREBASE_PROJECT_ID resolved to "
-        f"'{Config.FIREBASE_PROJECT_ID}', expected '{EXPECTED_PROJECT_ID}'. "
-        f"These tests read and must never touch anything but the staging "
-        f"project."
-    )
-
 import pytest  # noqa: E402
 from services.firebase_service import FirebaseService  # noqa: E402
 from services.conversation_service import ConversationService  # noqa: E402
 from scripts.seed_staging_test_data import _doc_ids  # noqa: E402
+
+# tests/conftest.py already refuses to run this session at all unless
+# FIREBASE_PROJECT_ID resolves to this value -- this local copy is only for
+# the belt-and-braces check below, which verifies the actually-connected
+# Firestore client (not just the environment variable) once initialized.
+EXPECTED_PROJECT_ID = 'teko-staging-tgh'
 
 ORG_A = 'test-org-a'
 ORG_B = 'test-org-b'
