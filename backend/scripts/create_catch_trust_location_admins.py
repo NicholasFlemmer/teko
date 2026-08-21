@@ -1,4 +1,4 @@
-"""Create two location_admin accounts for CATCH Trust in `admin_users`.
+"""Create five location_admin accounts for CATCH Trust in `admin_users`.
 
 Written because the deployed POST /api/admin/users still gates on the
 pre-10a1974 role vocabulary (role_required('superadmin'), allowed_roles
@@ -46,12 +46,25 @@ TARGET_PROJECT_ID = "teko-236ad"
 ORG_NAME = "CATCH Trust"
 KNOWN_LEGACY_ORG_ID = "2I8r2Hb2q7pNgjDbcG8w"  # hardcoded in create_coach.py / create_location_admin.py / create_catch_admin.py — cross-check only, not trusted
 
-# Edit the 'name' values below to full names before running if you want more
-# than a given name stored (the script splits on the first space if the
-# resolved schema uses first_name/last_name rather than a single name field).
+# Reference admin_users doc has no 'name' field — first_name/last_name only.
+# last_name is left "" where no surname was given; do not invent one.
+#
+# Tim's role: he's the org owner, but 'org_owner' doesn't exist in the
+# deployed role vocabulary yet (deployed code only recognises super_admin,
+# location_admin, coach — see role_required() in auth.py). Writing
+# 'org_owner' now would give him a role no deployed check recognises, so
+# every role_required() gate would fail closed and he'd land on an empty
+# dashboard after logging in. He is deliberately given location_admin here
+# as an interim role, to be upgraded to org_owner once that role ships in
+# Stage 2. Do not read "Tim: location_admin" below as the intended
+# long-term role — it's a placeholder pinned to the current deploy's
+# vocabulary, not a decision that he's just another location admin.
 NEW_ADMINS = [
-    {"email": "tim@catchtrust.org", "name": "Tim"},
-    {"email": "siobhan@catchtrust.org", "name": "Siobhan"},
+    {"email": "tim@catchtrust.org", "first_name": "Tim", "last_name": "Human"},
+    {"email": "leanne@catchtrust.org", "first_name": "Leanne", "last_name": ""},
+    {"email": "lusindiso@catchtrust.org", "first_name": "Lusindiso", "last_name": ""},
+    {"email": "siobhan@catchtrust.org", "first_name": "Siobhan", "last_name": ""},
+    {"email": "lusanda@catchtrust.org", "first_name": "Lusanda", "last_name": ""},
 ]
 
 PASSWORD_ALPHABET = string.ascii_letters + string.digits + "!@#$%^&*()-_=+"
@@ -122,9 +135,19 @@ def _reference_schema(db):
     return keys
 
 
-def _build_fields(email, name, role, org_id, schema_keys, password_hash):
+def _build_fields(email, first_name, last_name, role, org_id, schema_keys, password_hash):
+    # No 'name' field by design — the reference admin_users doc uses
+    # first_name/last_name, confirmed against a live doc below, not assumed.
+    if "name" in schema_keys and "first_name" not in schema_keys:
+        print(
+            f"  WARNING: reference doc schema has 'name' but no 'first_name' — "
+            f"writing first_name/last_name anyway per explicit instruction. "
+            f"Re-check the schema output above before --commit."
+        )
     fields = {
         "email": email,
+        "first_name": first_name,
+        "last_name": last_name,
         "password": password_hash,
         "role": role,
         "org_id": org_id,
@@ -134,12 +157,6 @@ def _build_fields(email, name, role, org_id, schema_keys, password_hash):
         "status": "active",
         "created_at": firestore.SERVER_TIMESTAMP,
     }
-    if "name" in schema_keys and "first_name" not in schema_keys:
-        fields["name"] = name
-    else:
-        parts = name.split(" ", 1)
-        fields["first_name"] = parts[0]
-        fields["last_name"] = parts[1] if len(parts) > 1 else ""
     if "username" in schema_keys:
         fields["username"] = email.split("@")[0]
     if "is_active" in schema_keys:
@@ -194,7 +211,10 @@ def main():
             continue
 
         if not args.commit:
-            preview = _build_fields(email, admin["name"], "location_admin", org_id, schema_keys, password_hash="<generated at write time, not shown in dry run>")
+            preview = _build_fields(
+                email, admin["first_name"], admin["last_name"], "location_admin", org_id, schema_keys,
+                password_hash="<generated at write time, not shown in dry run>",
+            )
             print(f"Would create admin_users doc for {email}:")
             for k, v in preview.items():
                 print(f"    {k}: {v}")
@@ -203,7 +223,7 @@ def main():
 
         password = _generate_password()
         password_hash = generate_password_hash(password, method="pbkdf2:sha256")
-        fields = _build_fields(email, admin["name"], "location_admin", org_id, schema_keys, password_hash)
+        fields = _build_fields(email, admin["first_name"], admin["last_name"], "location_admin", org_id, schema_keys, password_hash)
 
         # New auto-ID document only — never .update()/.set() on an existing
         # doc_ref, so this code path structurally cannot overwrite anything.
