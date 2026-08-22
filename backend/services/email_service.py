@@ -1,8 +1,12 @@
 """Transactional email via Resend.
 
-Sends invite, password-reset and welcome emails. When RESEND_API_KEY is not
-configured it logs the email (including the action link) to the console so
-local development keeps working without an email provider.
+Sends invite, password-reset and welcome emails. Fails closed: if
+RESEND_API_KEY is not configured, or the Resend API call itself fails,
+_send() raises rather than returning silently, so a caller can never treat
+an email that was never sent as delivered. The email body -- which carries
+the invite/reset/login link -- is never written to logs, at any log level,
+under any condition. Only the subject, recipient, and (on failure) the
+exception type are logged.
 """
 import logging
 import resend
@@ -68,14 +72,21 @@ def _layout(body_html):
 </html>"""
 
 
-def _send(to_email, subject, html, fallback_detail=None):
-    """Send via Resend, or log to console when no API key is configured."""
+class EmailNotConfiguredError(RuntimeError):
+    """Raised by _send() when RESEND_API_KEY is not configured.
+
+    Fails closed: a caller must not be able to mistake an unconfigured
+    mailer for a successful send.
+    """
+
+
+def _send(to_email, subject, html):
+    """Send via Resend. Raises on any failure to send -- never returns
+    silently, and never logs `html` (or anything derived from it) at any
+    log level, so the invite/reset/login link inside it can't reach logs."""
     if not Config.RESEND_API_KEY:
-        msg = f"[email] RESEND_API_KEY not set — not sending '{subject}' to {to_email}."
-        if fallback_detail:
-            msg += f" {fallback_detail}"
-        logger.warning(msg)
-        return
+        logger.warning("[email] RESEND_API_KEY not set — cannot send '%s' to %s.", subject, to_email)
+        raise EmailNotConfiguredError(f"RESEND_API_KEY not configured; cannot send '{subject}' to {to_email}")
 
     try:
         resend.api_key = Config.RESEND_API_KEY
@@ -87,7 +98,11 @@ def _send(to_email, subject, html, fallback_detail=None):
         })
         logger.info("[email] Sent '%s' to %s", subject, to_email)
     except Exception as e:
-        logger.error("[email] Failed to send '%s' to %s: %s", subject, to_email, e)
+        # Log the exception TYPE only, never str(e) -- the Resend client's
+        # exception can embed the request body (i.e. `html`, i.e. the link)
+        # in its message, and that must not end up in logs either.
+        logger.error("[email] Failed to send '%s' to %s (%s)", subject, to_email, type(e).__name__)
+        raise
 
 
 def send_invite_email(to_email, invite_link, org_name, invited_by_name, role):
@@ -101,12 +116,7 @@ def send_invite_email(to_email, invite_link, org_name, invited_by_name, role):
 </p>
 <p style="margin:0 0 24px 0;">{_button("Accept Invitation", invite_link)}</p>
 <p style="margin:0;color:#71717a;font-size:13px;">This link expires in 48 hours.</p>"""
-    _send(
-        to_email,
-        subject,
-        _layout(body),
-        fallback_detail=f"invite link for {to_email}: {invite_link}",
-    )
+    _send(to_email, subject, _layout(body))
 
 
 def send_password_reset_email(to_email, reset_link, name):
@@ -119,12 +129,7 @@ def send_password_reset_email(to_email, reset_link, name):
 <p style="margin:0;color:#71717a;font-size:13px;">
   This link expires in 1 hour. If you didn't request this, you can ignore this email.
 </p>"""
-    _send(
-        to_email,
-        subject,
-        _layout(body),
-        fallback_detail=f"reset link for {to_email}: {reset_link}",
-    )
+    _send(to_email, subject, _layout(body))
 
 
 def send_welcome_email(to_email, name, org_name, login_url):
@@ -134,9 +139,4 @@ def send_welcome_email(to_email, name, org_name, login_url):
 <p style="margin:0 0 16px 0;font-size:18px;font-weight:700;">Welcome to Teko, {name}</p>
 <p style="margin:0 0 24px 0;">Your account for <strong>{org_name}</strong> is ready.</p>
 <p style="margin:0 0 24px 0;">{_button("Sign In", login_url)}</p>"""
-    _send(
-        to_email,
-        subject,
-        _layout(body),
-        fallback_detail=f"login url for {to_email}: {login_url}",
-    )
+    _send(to_email, subject, _layout(body))
