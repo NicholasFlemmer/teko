@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from config import Config
 from functools import wraps
 from werkzeug.security import check_password_hash
+from services.rate_limiter import is_rate_limited
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,19 @@ auth_bp = Blueprint('auth', __name__)
 # Fallback admin credentials from environment variables (no defaults — must be explicitly set)
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
+
+# Real usage is ~12 login attempts across 48h for 7 accounts, so both of
+# these are deliberately tight. Per-email: 5 attempts / 15 min covers a
+# legitimate user mistyping their password a few times in a row (and
+# resets fast enough not to lock anyone out for long) while capping
+# sustained online guessing against one account to 480/day. Per-IP: 20
+# attempts / 15 min is looser than per-email since one IP can be several
+# of the 7 admins on the same office network, but still caps how much an
+# attacker can spread across many guessed/enumerated emails from one
+# source. Both apply together (see login()) so neither alone is the only
+# thing standing between an attacker and unlimited attempts.
+LOGIN_EMAIL_RATE_LIMIT = (5, 15 * 60)  # (max_count, window_seconds)
+LOGIN_IP_RATE_LIMIT = (20, 15 * 60)
 
 # Canonical admin role vocabulary — matches the values already stored in
 # Firestore admin_users. Import this rather than hardcoding role strings.
@@ -103,6 +117,23 @@ def login():
     
     username = data.get('username')
     password = data.get('password')
+
+    # Rate limit BEFORE any Firestore admin lookup, and return the exact
+    # same response either way this fires -- the response must not reveal
+    # whether `username` is a real account. Checked (and recorded) even for
+    # a made-up email: an attacker enumerating emails is still making
+    # attempts against this endpoint and must still be throttled.
+    #
+    # Cloud Run sits behind Google's front end, which sets X-Forwarded-For;
+    # request.remote_addr is the fallback for local/dev runs where nothing
+    # sets that header. Not validating a trusted-proxy allowlist here --
+    # out of scope for this limiter, same as everywhere else this pattern
+    # is used unauthenticated.
+    client_ip = (request.headers.get('X-Forwarded-For') or request.remote_addr or 'unknown').split(',')[0].strip()
+    email_rate_limited = is_rate_limited(f"login:email:{username.strip().lower()}", *LOGIN_EMAIL_RATE_LIMIT)
+    ip_rate_limited = is_rate_limited(f"login:ip:{client_ip}", *LOGIN_IP_RATE_LIMIT)
+    if email_rate_limited or ip_rate_limited:
+        return jsonify({'error': 'Too many login attempts. Please try again later.'}), 429
 
     authenticated = False
     display_name = username
