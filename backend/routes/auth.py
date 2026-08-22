@@ -6,9 +6,18 @@ import os
 from datetime import datetime, timedelta, timezone
 from config import Config
 from functools import wraps
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 from services.rate_limiter import is_rate_limited
 from utils.request_ip import get_trusted_client_ip
+from services.auth_token_service import (
+    create_auth_token,
+    consume_auth_token,
+    TokenNotFound,
+    TokenExpired,
+    TokenAlreadyUsed,
+    TokenTypeMismatch,
+)
+from services.email_service import send_password_reset_email
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +39,30 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
 # thing standing between an attacker and unlimited attempts.
 LOGIN_EMAIL_RATE_LIMIT = (5, 15 * 60)  # (max_count, window_seconds)
 LOGIN_IP_RATE_LIMIT = (20, 15 * 60)
+
+# forgot-password sends real email and is a spam/enumeration target, so
+# tighter than login on both axes, over a longer window matching the
+# token's own lifetime: RESET_TOKEN_EXPIRY_MINUTES below is 60, so
+# there's rarely a legitimate reason to need more than a couple of
+# requests inside that same hour. Per-email: 3/hour covers "the first
+# email didn't arrive, try once more" without leaving room for using
+# this endpoint to hammer one real inbox. Per-IP: 10/hour, looser for
+# the same shared-office-network reason as login, still capping how many
+# different emails one source can probe per hour.
+FORGOT_PASSWORD_EMAIL_RATE_LIMIT = (3, 60 * 60)
+FORGOT_PASSWORD_IP_RATE_LIMIT = (10, 60 * 60)
+
+# reset-password has no email in its payload to rate-limit by (only a
+# token + new password) -- IP only, as specified. 10/15min: generous
+# enough for a legitimate retry (wrong password length, fat-fingered
+# paste of the token), tight enough to blunt automated abuse. Brute-
+# forcing the 256-bit token itself is already infeasible regardless of
+# this limit; this is about the endpoint, not the token space.
+RESET_PASSWORD_IP_RATE_LIMIT = (10, 15 * 60)
+
+# Matches what the password-reset email template already claims
+# ("This link expires in 1 hour" -- services/email_service.py).
+RESET_TOKEN_EXPIRY_MINUTES = 60
 
 # Canonical admin role vocabulary — matches the values already stored in
 # Firestore admin_users. Import this rather than hardcoding role strings.
@@ -207,6 +240,170 @@ def login():
         }), 200
 
     return jsonify({'error': 'Invalid credentials'}), 401
+
+
+@auth_bp.route('/forgot-password', methods=['POST'])
+def forgot_password():
+    """Request a password reset link.
+
+    The main security property: this MUST NOT reveal whether `email`
+    belongs to a real account. Every normal-path outcome below returns
+    the exact same `generic_response` object -- built once, before any
+    branch that depends on account existence, so it's provably the same
+    bytes regardless of which path is taken. A 429 (rate limited) or 503
+    (email service unconfigured) are a different axis, not an
+    email-existence leak -- both are checked, and fire identically,
+    before any account-specific lookup happens at all.
+
+    One asymmetry is accepted rather than eliminated: the outbound
+    Resend network call only happens for a real, found account, so
+    response TIMING differs between found and not-found by roughly that
+    call's latency. Closing that gap would mean sending a real "reset
+    your password" email to an address this endpoint has no reason to
+    believe is an admin account -- turning it into a vector for
+    harassing arbitrary strangers' inboxes, which is a worse trade than
+    the timing side-channel it would close. This is the "as far as
+    reasonably achievable" boundary, not an oversight.
+    """
+    data = request.get_json()
+    if not data or not data.get('email'):
+        return jsonify({'error': 'Email is required'}), 400
+
+    # get_admin_by_email does an exact string match, no normalisation of
+    # its own -- normalise here or a mixed-case/padded submission would
+    # silently never match the stored record.
+    email = data['email'].strip().lower()
+
+    client_ip = get_trusted_client_ip(request.headers, remote_addr=request.remote_addr, allow_remote_addr_fallback=Config.DEBUG)
+    email_rate_limited = is_rate_limited(f"forgot_password:email:{email}", *FORGOT_PASSWORD_EMAIL_RATE_LIMIT)
+    ip_rate_limited = is_rate_limited(f"forgot_password:ip:{client_ip}", *FORGOT_PASSWORD_IP_RATE_LIMIT)
+    if email_rate_limited or ip_rate_limited:
+        return jsonify({'error': 'Too many requests. Please try again later.'}), 429
+
+    # RESEND_API_KEY unconfigured is a deployment-wide state, not tied to
+    # any specific email -- checked here, before any account lookup, so
+    # this fires identically for every request regardless of whether
+    # `email` is real. Relying on send_password_reset_email()'s own
+    # raised EmailNotConfiguredError further down instead would only
+    # ever surface on the found-branch (only a real account reaches the
+    # send call), which would leak existence for as long as the
+    # misconfiguration lasts -- this avoids that by failing the same way
+    # for everyone, up front, rather than telling anyone to check an
+    # inbox that was never going to receive anything.
+    if not Config.RESEND_API_KEY:
+        logger.error("[forgot-password] RESEND_API_KEY not configured — cannot send any reset email.")
+        return jsonify({'error': 'Password reset is temporarily unavailable. Please try again later.'}), 503
+
+    generic_response = (
+        jsonify({'message': 'If an account exists for that email address, a password reset link has been sent.'}),
+        200,
+    )
+
+    try:
+        from services.firebase_service import FirebaseService
+        admin = FirebaseService.get_admin_by_email(email)
+    except Exception:
+        logger.exception("[forgot-password] Firestore admin lookup failed.")
+        # Fail closed on the lookup like login() does, but still the
+        # generic response -- a Firestore error here can't vary by
+        # email either, so returning anything else would only add a
+        # third distinguishable outcome for no reason.
+        return generic_response
+
+    if admin:
+        try:
+            reset_token = create_auth_token('password_reset', admin['id'], RESET_TOKEN_EXPIRY_MINUTES)
+            reset_link = f"{Config.FRONTEND_URL}/reset-password?token={reset_token}"
+            name = admin.get('name') or admin.get('first_name') or 'there'
+            send_password_reset_email(email, reset_link, name)
+        except Exception as e:
+            # A failure here (Resend configured but this specific send
+            # call errored -- the "unconfigured" case is already handled
+            # above and never reaches this branch) only happens for a
+            # real account, so returning anything other than the generic
+            # response would leak that. Logged for ops to notice and
+            # follow up with the affected admin directly; the user-facing
+            # response stays identical to every other outcome on this
+            # path. Deliberate tradeoff, see docstring.
+            #
+            # type(e).__name__ only, never logger.exception()/str(e): this
+            # exception originates from an email-send call, and Resend's
+            # own client can embed the request payload -- i.e. reset_link,
+            # i.e. the raw token -- in its exception's message, exactly
+            # the failure mode email_service.py's own _send() is already
+            # hardened against. logger.exception() would attach that
+            # message (and a traceback) to the log record regardless of
+            # what this call site's own format string says.
+            logger.error(
+                "[forgot-password] send_password_reset_email failed for an existing account (%s).",
+                type(e).__name__,
+            )
+
+    return generic_response
+
+
+@auth_bp.route('/reset-password', methods=['POST'])
+def reset_password():
+    """Consume a password reset token and set a new password.
+
+    Does not invalidate any session already issued before the reset --
+    and with the current setup, cannot. JWTs here are stateless: signed
+    with one global Config.SECRET_KEY, verified in token_required() by
+    signature and 'exp' alone, with no per-user claim (a token_version,
+    an issued-at-vs-password-changed-at comparison, anything) that a
+    reset could invalidate and no revocation list anywhere in this
+    codebase. A token issued five minutes before a reset stays valid
+    until its own natural expiry (Config.JWT_EXPIRY_HOURS, 24h default)
+    regardless of what happens here. Stating this plainly rather than
+    implying otherwise: shipping session invalidation would need the JWT
+    scheme itself to change (e.g. a stored per-admin token_version
+    claim, checked against admin_users on every request), which is out
+    of scope for this endpoint.
+    """
+    data = request.get_json()
+    if not data or not data.get('token') or not data.get('password'):
+        return jsonify({'error': 'Token and password are required'}), 400
+
+    token = data['token']
+    password = data['password']
+
+    # Matches what the SuperAdmin create/edit-user form already states
+    # ("Minimum 8 characters") and what POST /api/admin/users enforces.
+    if len(password) < 8:
+        return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+    client_ip = get_trusted_client_ip(request.headers, remote_addr=request.remote_addr, allow_remote_addr_fallback=Config.DEBUG)
+    if is_rate_limited(f"reset_password:ip:{client_ip}", *RESET_PASSWORD_IP_RATE_LIMIT):
+        return jsonify({'error': 'Too many attempts. Please try again later.'}), 429
+
+    # 400, not 401, for every token-validation failure below. api.ts's
+    # shared request() helper intercepts every 401 globally and discards
+    # the response body before ResetPassword.tsx's own message-mapping
+    # ever sees it (documented in LOGIN_BUGS_FOUND.md) -- a 401 here
+    # would silently break this endpoint's error messages exactly the
+    # same way it already breaks login()'s. ResetPassword.tsx matches on
+    # `message.includes('expired') || message.includes('Invalid')`
+    # (case-sensitive) for its friendly copy; matched below.
+    try:
+        record = consume_auth_token(token, expected_type='password_reset')
+    except TokenExpired:
+        return jsonify({'error': 'This reset link has expired.'}), 400
+    except TokenAlreadyUsed:
+        return jsonify({'error': 'Invalid or already used reset link.'}), 400
+    except (TokenNotFound, TokenTypeMismatch):
+        return jsonify({'error': 'Invalid reset link.'}), 400
+
+    admin_id = record.get('subject')
+    try:
+        from services.firebase_service import FirebaseService
+        new_hash = generate_password_hash(password, method='pbkdf2:sha256')
+        FirebaseService.update_admin(admin_id, {'password': new_hash})
+    except Exception:
+        logger.exception("[reset-password] Failed to write new password for admin_id=%s", admin_id)
+        return jsonify({'error': 'Could not reset your password. Please try again.'}), 503
+
+    return jsonify({'message': 'Your password has been reset successfully.'}), 200
+
 
 @auth_bp.route('/verify', methods=['GET'])
 @token_required
