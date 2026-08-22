@@ -8,6 +8,7 @@ from config import Config
 from functools import wraps
 from werkzeug.security import check_password_hash
 from services.rate_limiter import is_rate_limited
+from utils.request_ip import get_trusted_client_ip
 
 logger = logging.getLogger(__name__)
 
@@ -124,12 +125,14 @@ def login():
     # a made-up email: an attacker enumerating emails is still making
     # attempts against this endpoint and must still be throttled.
     #
-    # Cloud Run sits behind Google's front end, which sets X-Forwarded-For;
-    # request.remote_addr is the fallback for local/dev runs where nothing
-    # sets that header. Not validating a trusted-proxy allowlist here --
-    # out of scope for this limiter, same as everywhere else this pattern
-    # is used unauthenticated.
-    client_ip = (request.headers.get('X-Forwarded-For') or request.remote_addr or 'unknown').split(',')[0].strip()
+    # get_trusted_client_ip() only ever returns Google's own appended
+    # second-to-last X-Forwarded-For entry (or the fixed UNRESOLVED_IP_KEY
+    # sentinel), never the attacker-suppliable first entry -- see
+    # utils/request_ip.py. remote_addr fallback is opt-in via Config.DEBUG
+    # (local dev only, no Google front end in front of the process); it
+    # must never be used on Cloud Run, where it resolves to the GFE's own
+    # IP shared by every real user.
+    client_ip = get_trusted_client_ip(request.headers, remote_addr=request.remote_addr, allow_remote_addr_fallback=Config.DEBUG)
     email_rate_limited = is_rate_limited(f"login:email:{username.strip().lower()}", *LOGIN_EMAIL_RATE_LIMIT)
     ip_rate_limited = is_rate_limited(f"login:ip:{client_ip}", *LOGIN_IP_RATE_LIMIT)
     if email_rate_limited or ip_rate_limited:
