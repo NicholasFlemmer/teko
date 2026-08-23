@@ -17,7 +17,7 @@ from services.auth_token_service import (
     TokenAlreadyUsed,
     TokenTypeMismatch,
 )
-from services.email_service import send_password_reset_email
+from services.email_service import send_password_reset_email, send_invite_email, send_welcome_email
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,30 @@ RESET_TOKEN_EXPIRY_MINUTES = 60
 # Canonical admin role vocabulary — matches the values already stored in
 # Firestore admin_users. Import this rather than hardcoding role strings.
 VALID_ROLES = ('super_admin', 'location_admin', 'coach')
+
+# invite is authenticated (only super_admin/location_admin can call it),
+# not a public enumeration target the way login/forgot-password are --
+# but it still emails a real address on every successful call, so it's
+# rate limited on both axes for the same reason those are: an inviter
+# key (not the invitee's email, which is different on every call) stops
+# a compromised admin token from email-bombing an unbounded list of
+# addresses; an IP key stops the same abuse if the token itself somehow
+# leaks. Inviter: 20/hour comfortably covers onboarding a whole team in
+# one sitting. IP: looser (30/hour), same shared-office-network
+# reasoning as login()/forgot_password() above.
+INVITE_INVITER_RATE_LIMIT = (20, 60 * 60)
+INVITE_IP_RATE_LIMIT = (30, 60 * 60)
+
+# Matches what the invite email template already claims ("This link
+# expires in 48 hours." -- services/email_service.py send_invite_email).
+INVITE_TOKEN_EXPIRY_MINUTES = 48 * 60
+
+# accept-invite has no email in its payload to rate-limit by (token +
+# names + password only) -- IP only, identical reasoning to
+# RESET_PASSWORD_IP_RATE_LIMIT: generous enough for a legitimate retry,
+# tight enough to blunt automated abuse against the one endpoint in this
+# file where an anonymous request creates a user.
+ACCEPT_INVITE_IP_RATE_LIMIT = (10, 15 * 60)
 
 def token_required(f):
     """Decorator to require JWT token for protected routes"""
@@ -446,3 +470,193 @@ def refresh_token(current_user):
         'token': token,
         'expires_in': Config.JWT_EXPIRY_HOURS * 3600
     }), 200
+
+
+@auth_bp.route('/invite', methods=['POST'])
+@token_required
+@role_required('super_admin', 'location_admin')
+def invite(current_user):
+    """Invite a new admin/coach account by email.
+
+    role_required above already keeps a coach token out entirely (403
+    before this body runs). The one restriction enforced here on top of
+    that: a location_admin may not invite a super_admin -- letting a
+    single-org role mint the one role with unrestricted cross-org access
+    would be a straightforward privilege escalation.
+
+    org_id is never read from the request body. The invited account
+    always inherits the *inviter's own* org_id (g.current_user_org_id,
+    set by token_required from the inviter's own token). "A
+    location_admin can only invite into their own org" is therefore not
+    a check that could be bypassed -- there is no field in this payload
+    that could name a different org at all.
+
+    Whether `email` already has an account is treated the same way
+    forgot_password() treats it above: never revealed. Every normal-path
+    outcome returns the identical `generic_response`, built once, before
+    the account lookup. Unlike forgot_password(), an unconfigured mailer
+    or a failed send is also folded into that same generic response
+    (not a distinct 503) -- send only ever happens on the "no existing
+    account" branch here, so a distinct status code on that branch alone
+    would itself be an existence oracle, which forgot_password()'s own
+    up-front RESEND_API_KEY check deliberately avoids by checking before
+    any branch split. There's no equivalent safe place to check it here.
+    """
+    data = request.get_json()
+    if not data or not data.get('email') or not data.get('role'):
+        return jsonify({'error': 'Email and role are required'}), 400
+
+    # get_admin_by_email does an exact string match with no normalisation
+    # of its own -- same reasoning as login()/forgot_password() above.
+    email = data['email'].strip().lower()
+    role = data['role']
+
+    if role not in VALID_ROLES:
+        return jsonify({'error': f'Role must be one of: {", ".join(VALID_ROLES)}'}), 400
+
+    inviter_role = getattr(g, 'current_user_role', None)
+    if inviter_role == 'location_admin' and role == 'super_admin':
+        return jsonify({'error': 'You do not have permission to invite a super_admin'}), 403
+
+    client_ip = get_trusted_client_ip(request.headers, remote_addr=request.remote_addr, allow_remote_addr_fallback=Config.DEBUG)
+    inviter_rate_limited = is_rate_limited(f"invite:inviter:{current_user}", *INVITE_INVITER_RATE_LIMIT)
+    ip_rate_limited = is_rate_limited(f"invite:ip:{client_ip}", *INVITE_IP_RATE_LIMIT)
+    if inviter_rate_limited or ip_rate_limited:
+        return jsonify({'error': 'Too many invites sent. Please try again later.'}), 429
+
+    org_id = getattr(g, 'current_user_org_id', None)
+
+    generic_response = (
+        jsonify({'message': 'If that email does not already have an account, an invitation has been sent.'}),
+        200,
+    )
+
+    try:
+        from services.firebase_service import FirebaseService
+        existing = FirebaseService.get_admin_by_email(email)
+    except Exception:
+        logger.exception("[invite] Firestore admin lookup failed.")
+        # Fail the same way forgot_password() does on this same class of
+        # error: the generic response, not a distinct code -- a Firestore
+        # error here can't vary by email either.
+        return generic_response
+
+    if existing:
+        return generic_response
+
+    try:
+        invite_token = create_auth_token('invite', email, INVITE_TOKEN_EXPIRY_MINUTES, extra_fields={'role': role, 'org_id': org_id})
+        invite_link = f"{Config.FRONTEND_URL}/accept-invite?token={invite_token}"
+        org = FirebaseService.get_organisation(org_id) if org_id else None
+        org_name = (org or {}).get('name') or 'Teko'
+        send_invite_email(email, invite_link, org_name, current_user, role)
+    except Exception as e:
+        # type(e).__name__ only, never str(e)/logger.exception() -- same
+        # reasoning as forgot_password()'s send failure handling: the
+        # exception can embed invite_link (i.e. the raw token) in its
+        # message.
+        logger.error("[invite] send_invite_email failed for a new invite (%s).", type(e).__name__)
+
+    return generic_response
+
+
+@auth_bp.route('/accept-invite', methods=['POST'])
+def accept_invite():
+    """Consume an invite token and create the invited admin account.
+
+    Unauthenticated by design -- an invitee has no token yet. This is
+    the only endpoint in this file where an anonymous request creates a
+    user, so every value that determines WHAT gets created (email, role,
+    org_id) comes from the stored, server-issued token record, never
+    from the request body. A payload that includes 'role' or 'org_id' is
+    simply ignored: there is no code path below that reads those keys
+    off `data` at all.
+    """
+    data = request.get_json()
+    if not data or not data.get('token') or not data.get('first_name') or not data.get('last_name') or not data.get('password'):
+        return jsonify({'error': 'Token, first name, last name, and password are required'}), 400
+
+    token = data['token']
+    first_name = data['first_name'].strip()
+    last_name = data['last_name'].strip()
+    password = data['password']
+
+    if not first_name or not last_name:
+        return jsonify({'error': 'First name and last name are required'}), 400
+
+    # Matches what create_admin_user (routes/admin.py) already enforces.
+    if len(password) < 8:
+        return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+    client_ip = get_trusted_client_ip(request.headers, remote_addr=request.remote_addr, allow_remote_addr_fallback=Config.DEBUG)
+    if is_rate_limited(f"accept_invite:ip:{client_ip}", *ACCEPT_INVITE_IP_RATE_LIMIT):
+        return jsonify({'error': 'Too many attempts. Please try again later.'}), 429
+
+    # 400, not 401, for every token-validation failure below -- same
+    # reasoning as reset_password() above (api.ts's global 401
+    # interceptor; LOGIN_BUGS_FOUND.md). AcceptInvite.tsx matches on
+    # `message.includes('expired') || message.includes('Invalid') ||
+    # message.includes('already')` (case-sensitive) for its friendly
+    # copy; matched below.
+    try:
+        record = consume_auth_token(token, expected_type='invite')
+    except TokenExpired:
+        return jsonify({'error': 'This invite link has expired.'}), 400
+    except TokenAlreadyUsed:
+        return jsonify({'error': 'Invalid or already used invite link.'}), 400
+    except (TokenNotFound, TokenTypeMismatch):
+        return jsonify({'error': 'Invalid invite link.'}), 400
+
+    email = record.get('subject')
+    role = record.get('role')
+    org_id = record.get('org_id')
+
+    if role not in VALID_ROLES:
+        # A token minted before role validation existed, or corrupted
+        # some other way -- fail closed rather than create an account
+        # with an unrecognised role.
+        logger.error("[accept-invite] Consumed invite token has an invalid role %r; refusing to create the account.", role)
+        return jsonify({'error': 'This invite is no longer valid. Please ask for a new one.'}), 400
+
+    try:
+        from services.firebase_service import FirebaseService
+        existing = FirebaseService.get_admin_by_email(email)
+    except Exception:
+        logger.exception("[accept-invite] Firestore admin lookup failed for email=%s", email)
+        return jsonify({'error': 'Could not create your account. Please try again.'}), 503
+
+    if existing:
+        # Race: an account for this email was created after the invite
+        # was sent (a direct admin-creation call, or two invites accepted
+        # concurrently). The token is already consumed either way --
+        # this must not overwrite the account that now exists.
+        return jsonify({'error': 'An account with this email already exists.'}), 409
+
+    try:
+        password_hash = generate_password_hash(password, method='pbkdf2:sha256')
+        FirebaseService.create_admin({
+            'email': email,
+            'first_name': first_name,
+            'last_name': last_name,
+            'password': password_hash,
+            'role': role,
+            'org_id': org_id,
+            'status': 'active',
+            'is_active': True,
+        })
+    except Exception:
+        logger.exception("[accept-invite] Failed to create admin account for email=%s", email)
+        return jsonify({'error': 'Could not create your account. Please try again.'}), 503
+
+    # Best-effort: the account already exists at this point regardless of
+    # whether this send succeeds. Never roll back a successful signup
+    # because the welcome email bounced.
+    try:
+        org = FirebaseService.get_organisation(org_id) if org_id else None
+        org_name = (org or {}).get('name') or 'Teko'
+        login_url = f"{Config.FRONTEND_URL}/login"
+        send_welcome_email(email, first_name, org_name, login_url)
+    except Exception as e:
+        logger.error("[accept-invite] send_welcome_email failed after account creation (%s).", type(e).__name__)
+
+    return jsonify({'message': 'Your account has been created. You can now sign in.'}), 200
