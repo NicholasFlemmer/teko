@@ -5,6 +5,19 @@ const REQUEST_TIMEOUT_MS = 30_000; // 30 second timeout
 
 let isRedirectingTo401 = false;
 
+// A 401 from these endpoints is a failed attempt (bad credentials, bad/
+// expired token, bad invite), not an expired session -- the caller's own
+// error-message mapping needs the real response body, and there is no
+// active session to protect by redirecting. Every other endpoint keeps the
+// global redirect-on-401 behaviour below, where a 401 does mean "your
+// session expired."
+const AUTH_ENDPOINTS_EXEMPT_FROM_401_REDIRECT = new Set([
+  '/api/auth/login',
+  '/api/auth/forgot-password',
+  '/api/auth/reset-password',
+  '/api/auth/accept-invite',
+]);
+
 function getToken(): string | null {
   return localStorage.getItem('token');
 }
@@ -49,7 +62,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     clearTimeout(timeoutId);
   }
 
-  if (response.status === 401) {
+  if (response.status === 401 && !AUTH_ENDPOINTS_EXEMPT_FROM_401_REDIRECT.has(endpoint)) {
     removeToken();
     // Prevent multiple concurrent 401s from racing to redirect
     if (!isRedirectingTo401) {

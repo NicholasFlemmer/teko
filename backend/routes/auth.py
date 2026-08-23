@@ -152,6 +152,14 @@ def login():
     username = data.get('username')
     password = data.get('password')
 
+    # get_admin_by_email does an exact string match with no normalisation
+    # of its own (mirrors forgot_password() below) -- a capitalised or
+    # whitespace-padded email must still match the stored record. Only used
+    # for the Firestore lookup and its rate-limit key; the raw `username` is
+    # kept as-is for the ADMIN_USERNAME break-glass comparison below, which
+    # is a literal secret match, not an email lookup.
+    normalized_username = username.strip().lower()
+
     # Rate limit BEFORE any Firestore admin lookup, and return the exact
     # same response either way this fires -- the response must not reveal
     # whether `username` is a real account. Checked (and recorded) even for
@@ -166,7 +174,7 @@ def login():
     # must never be used on Cloud Run, where it resolves to the GFE's own
     # IP shared by every real user.
     client_ip = get_trusted_client_ip(request.headers, remote_addr=request.remote_addr, allow_remote_addr_fallback=Config.DEBUG)
-    email_rate_limited = is_rate_limited(f"login:email:{username.strip().lower()}", *LOGIN_EMAIL_RATE_LIMIT)
+    email_rate_limited = is_rate_limited(f"login:email:{normalized_username}", *LOGIN_EMAIL_RATE_LIMIT)
     ip_rate_limited = is_rate_limited(f"login:ip:{client_ip}", *LOGIN_IP_RATE_LIMIT)
     if email_rate_limited or ip_rate_limited:
         return jsonify({'error': 'Too many login attempts. Please try again later.'}), 429
@@ -186,7 +194,7 @@ def login():
     # First, check Firestore admin_users by email (indexed query, not full scan)
     try:
         from services.firebase_service import FirebaseService
-        admin = FirebaseService.get_admin_by_email(username, include_password=True)
+        admin = FirebaseService.get_admin_by_email(normalized_username, include_password=True)
         pw_match = False
         if admin:
             stored_pw = admin.get('password', '')
