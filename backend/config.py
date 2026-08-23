@@ -46,6 +46,10 @@ class Config:
     # Resend (transactional email)
     RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
     RESEND_FROM_EMAIL = os.environ.get('RESEND_FROM_EMAIL', 'noreply@tekohq.com')
+    # Domain shown in the transactional email footer. Placeholder default --
+    # not the confirmed production domain -- kept as one config value so it
+    # only needs updating in one place, not in every template.
+    EMAIL_FOOTER_DOMAIN = os.environ.get('EMAIL_FOOTER_DOMAIN', 'useteko.com')
 
     # Google Maps
     GOOGLE_MAPS_API_KEY = os.getenv('GOOGLE_MAPS_API_KEY')

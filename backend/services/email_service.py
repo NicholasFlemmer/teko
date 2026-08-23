@@ -22,7 +22,43 @@ ROLE_LABELS = {
     'player': 'Player',
 }
 
-BRAND = "#0D9488"
+# =============================================================================
+# Brand tokens (Teko brand guide). Presentation only -- none of these feed
+# into content or logic below.
+# =============================================================================
+COLOR_ORANGE = "#F78B29"   # Signal Orange -- accent, used sparingly
+COLOR_TEAL = "#2E9E8C"     # Field Teal -- accent, used sparingly
+COLOR_INK = "#23303F"      # Ink Navy -- neutral, also body text
+COLOR_INDIGO = "#516AF7"   # Action Indigo -- primary action / buttons
+COLOR_CANVAS = "#F6F7F9"   # page background (light mode)
+COLOR_SURFACE = "#FFFFFF"  # card background (light mode)
+COLOR_LINE = "#E7EAEE"     # 1px borders (light mode)
+COLOR_MUTED = "#727C8B"    # secondary text (light mode)
+
+RADIUS_CARD = "18px"
+RADIUS_CONTROL = "12px"
+SHADOW_CARD = "0 1px 2px rgba(23,48,63,.05)"
+
+# Dark-mode equivalents. Applied only inside the @media (prefers-color-scheme:
+# dark) block in _layout() -- the light tokens above remain the default for
+# any client that strips <style>, so legibility never depends on that block
+# actually running.
+_DARK_CANVAS = "#12181F"
+_DARK_SURFACE = "#1B222C"
+_DARK_TEXT = "#EDEFF2"
+_DARK_MUTED = "#97A1AF"
+_DARK_LINE = "#2B3542"
+
+# Wordmark font: Poppins requested, with a system fallback stack chosen to
+# still look like a wordmark when Gmail/Outlook strip the webfont request.
+_WORDMARK_FONT = "'Poppins','Segoe UI',-apple-system,BlinkMacSystemFont,Roboto,Helvetica,Arial,sans-serif"
+# Body font: Plus Jakarta Sans requested, same fallback approach.
+_BODY_FONT = "'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
+
+_GOOGLE_FONTS_HREF = (
+    "https://fonts.googleapis.com/css2?"
+    "family=Poppins:wght@700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+)
 
 
 def _role_label(role):
@@ -32,36 +68,65 @@ def _role_label(role):
 def _button(label, url):
     return (
         f'<a href="{url}" '
-        f'style="display:inline-block;background:{BRAND};color:#ffffff;'
-        'text-decoration:none;font-weight:600;font-size:15px;'
-        'padding:12px 28px;border-radius:8px;">'
+        f'style="display:inline-block;background:{COLOR_INDIGO};color:#ffffff;'
+        f'text-decoration:none;font-family:{_BODY_FONT};font-weight:700;font-size:15px;'
+        f'padding:13px 22px;border-radius:{RADIUS_CONTROL};">'
         f'{label}</a>'
     )
 
 
 def _layout(body_html):
-    """Wrap body content in the shared Teko email shell (logo + footer)."""
+    """Wrap body content in the shared teko email shell (wordmark + footer).
+
+    Table-based layout, inline styles throughout. The one <style> block
+    below is scoped to dark-mode colour overrides only -- never layout --
+    so a client that strips <style> entirely just falls back to the inline
+    (light-mode) styles, which are legible on their own.
+    """
+    footer_domain = Config.EMAIL_FOOTER_DOMAIN
     return f"""\
 <!DOCTYPE html>
-<html>
-  <body style="margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:32px 16px;">
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <meta name="supported-color-schemes" content="light dark">
+    <link rel="stylesheet" href="{_GOOGLE_FONTS_HREF}">
+    <style>
+      /* Colour only -- never layout. Ignored harmlessly by clients that
+         strip <style>; the inline styles on each element below are the
+         light-mode fallback in that case. */
+      @media (prefers-color-scheme: dark) {{
+        .bg-canvas {{ background-color: {_DARK_CANVAS} !important; }}
+        .bg-surface {{ background-color: {_DARK_SURFACE} !important; }}
+        .text-ink {{ color: {_DARK_TEXT} !important; }}
+        .text-muted {{ color: {_DARK_MUTED} !important; }}
+        .border-line {{ border-color: {_DARK_LINE} !important; }}
+      }}
+    </style>
+  </head>
+  <body style="margin:0;padding:0;background:{COLOR_CANVAS};font-family:{_BODY_FONT};">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="{COLOR_CANVAS}" class="bg-canvas" style="background:{COLOR_CANVAS};padding:32px 16px;">
       <tr>
         <td align="center">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border-radius:12px;border:1px solid #e4e4e7;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="{COLOR_SURFACE}" class="bg-surface border-line" style="max-width:600px;background:{COLOR_SURFACE};border-radius:{RADIUS_CARD};border:1px solid {COLOR_LINE};box-shadow:{SHADOW_CARD};">
+            <tr>
+              <td height="6" style="height:6px;line-height:6px;font-size:1px;background:{COLOR_TEAL};border-radius:{RADIUS_CARD} {RADIUS_CARD} 0 0;">&nbsp;</td>
+            </tr>
             <tr>
               <td style="padding:28px 32px 8px 32px;">
-                <span style="font-size:22px;font-weight:800;letter-spacing:-0.5px;color:{BRAND};">Teko</span>
+                <span class="text-ink" style="font-family:{_WORDMARK_FONT};font-size:22px;font-weight:700;letter-spacing:-0.3px;color:{COLOR_INK};">teko</span>
               </td>
             </tr>
             <tr>
-              <td style="padding:8px 32px 32px 32px;color:#27272a;font-size:15px;line-height:1.6;">
+              <td class="text-ink" style="padding:8px 32px 32px 32px;font-family:{_BODY_FONT};color:{COLOR_INK};font-size:15px;line-height:1.6;">
                 {body_html}
               </td>
             </tr>
             <tr>
-              <td style="padding:20px 32px;border-top:1px solid #e4e4e7;color:#a1a1aa;font-size:12px;">
-                Teko &middot; <a href="https://tekohq.com" style="color:#a1a1aa;">tekohq.com</a>
+              <td class="text-muted border-line" style="padding:20px 32px;border-top:1px solid {COLOR_LINE};font-family:{_BODY_FONT};color:{COLOR_MUTED};font-size:12px;">
+                teko &middot; <a href="https://{footer_domain}" class="text-muted" style="color:{COLOR_MUTED};">{footer_domain}</a>
               </td>
             </tr>
           </table>
@@ -115,7 +180,7 @@ def send_invite_email(to_email, invite_link, org_name, invited_by_name, role):
   {invited_by_name} has invited you to join <strong>{org_name}</strong> on Teko as a {role_label}.
 </p>
 <p style="margin:0 0 24px 0;">{_button("Accept Invitation", invite_link)}</p>
-<p style="margin:0;color:#71717a;font-size:13px;">This link expires in 48 hours.</p>"""
+<p style="margin:0;color:{COLOR_MUTED};font-size:13px;">This link expires in 48 hours.</p>"""
     _send(to_email, subject, _layout(body))
 
 
@@ -126,7 +191,7 @@ def send_password_reset_email(to_email, reset_link, name):
 <p style="margin:0 0 16px 0;font-size:18px;font-weight:700;">Reset your password</p>
 <p style="margin:0 0 24px 0;">Hi {name}, we received a request to reset your password.</p>
 <p style="margin:0 0 24px 0;">{_button("Reset Password", reset_link)}</p>
-<p style="margin:0;color:#71717a;font-size:13px;">
+<p style="margin:0;color:{COLOR_MUTED};font-size:13px;">
   This link expires in 1 hour. If you didn't request this, you can ignore this email.
 </p>"""
     _send(to_email, subject, _layout(body))

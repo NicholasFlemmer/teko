@@ -124,3 +124,41 @@ def test_send_password_reset_email_succeeds_when_resend_configured_and_ok(monkey
 
     assert RESET_LINK not in caplog.text
     assert "SUPER-SECRET-RESET-TOKEN" not in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Brand presentation: lowercase wordmark, no <img> anywhere (Gmail blocks
+# images by default; a broken icon on a password reset email reads as
+# phishing -- see the module docstring's constraints).
+# ---------------------------------------------------------------------------
+
+def _capture_sent_html(monkeypatch, send_fn, *args):
+    """Run one send_*_email call with Resend mocked, returning the html
+    payload that would have been sent -- without touching the network."""
+    monkeypatch.setattr(Config, "RESEND_API_KEY", "fake-key-for-test")
+    captured = {}
+
+    def _fake_send(payload):
+        captured["html"] = payload["html"]
+        return {"id": "fake-id"}
+
+    monkeypatch.setattr(email_service.resend.Emails, "send", _fake_send)
+    send_fn(*args)
+    return captured["html"]
+
+
+@pytest.mark.parametrize(
+    "send_fn, args",
+    [
+        (send_invite_email, ("tim@catchtrust.org", INVITE_LINK, "CATCH Trust", "Ricki", "location_admin")),
+        (send_password_reset_email, ("tim@catchtrust.org", RESET_LINK, "Tim")),
+        (send_welcome_email, ("tim@catchtrust.org", "Tim", "CATCH Trust", LOGIN_URL)),
+    ],
+    ids=["invite", "password_reset", "welcome"],
+)
+def test_wordmark_renders_lowercase_and_no_img_tag(monkeypatch, send_fn, args):
+    html = _capture_sent_html(monkeypatch, send_fn, *args)
+
+    assert '>teko<' in html, "wordmark must render as lowercase 'teko'"
+    assert '>Teko<' not in html, "wordmark must never render capitalised"
+    assert '<img' not in html.lower(), "no <img> tag allowed -- images are blocked by default and a broken icon reads as phishing"
