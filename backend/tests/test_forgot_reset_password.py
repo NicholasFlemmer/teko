@@ -137,6 +137,7 @@ def test_forgot_password_normalises_email_before_lookup(client, monkeypatch):
 def test_forgot_password_link_uses_frontend_url_and_the_raw_token(client, monkeypatch):
     monkeypatch.setattr(Config, 'RESEND_API_KEY', 'fake-key-for-test')
     monkeypatch.setattr(Config, 'FRONTEND_URL', 'https://app.example.com')
+    monkeypatch.setattr(Config, 'FRONTEND_BASE_URL', 'https://app.example.com')
     _allow_all(monkeypatch)
     monkeypatch.setattr(FirebaseService, 'get_admin_by_email', lambda email: {'id': 'admin-1', 'email': email, 'name': 'Tim'})
     monkeypatch.setattr(auth_module, 'create_auth_token', lambda token_type, subject, expires_in_minutes: 'RAW-TOKEN-VALUE')
@@ -152,6 +153,31 @@ def test_forgot_password_link_uses_frontend_url_and_the_raw_token(client, monkey
     assert captured['link'] == 'https://app.example.com/reset-password?token=RAW-TOKEN-VALUE'
 
 
+def test_reset_link_from_comma_separated_frontend_url_contains_no_comma(client, monkeypatch):
+    """Regression test for the bug FRONTEND_BASE_URL was added to fix:
+    FRONTEND_URL may be a comma-separated list (app.py's CORS setup splits
+    it into an allow-list), but the reset link must be built from a single
+    origin -- if routes/auth.py ever reverts to reading Config.FRONTEND_URL
+    directly here, this link would contain a comma."""
+    monkeypatch.setattr(Config, 'RESEND_API_KEY', 'fake-key-for-test')
+    monkeypatch.setattr(Config, 'FRONTEND_URL', 'https://app.useteko.com, https://staging-xyz.run.app')
+    monkeypatch.setattr(Config, 'FRONTEND_BASE_URL', 'https://app.useteko.com')
+    _allow_all(monkeypatch)
+    monkeypatch.setattr(FirebaseService, 'get_admin_by_email', lambda email: {'id': 'admin-1', 'email': email, 'name': 'Tim'})
+    monkeypatch.setattr(auth_module, 'create_auth_token', lambda token_type, subject, expires_in_minutes: 'RAW-TOKEN-VALUE')
+
+    captured = {}
+
+    def _fake_send(to_email, reset_link, name):
+        captured['link'] = reset_link
+
+    monkeypatch.setattr(auth_module, 'send_password_reset_email', _fake_send)
+
+    _forgot(client, email='tim@catchtrust.org')
+    assert ',' not in captured['link']
+    assert captured['link'] == 'https://app.useteko.com/reset-password?token=RAW-TOKEN-VALUE'
+
+
 def test_reset_link_never_appears_in_logs_even_when_send_fails(client, monkeypatch, caplog):
     """Pins the fix applied to routes/auth.py alongside these endpoints:
     the except block around send_password_reset_email logs
@@ -161,6 +187,7 @@ def test_reset_link_never_appears_in_logs_even_when_send_fails(client, monkeypat
     against."""
     monkeypatch.setattr(Config, 'RESEND_API_KEY', 'fake-key-for-test')
     monkeypatch.setattr(Config, 'FRONTEND_URL', 'https://app.example.com')
+    monkeypatch.setattr(Config, 'FRONTEND_BASE_URL', 'https://app.example.com')
     _allow_all(monkeypatch)
     monkeypatch.setattr(FirebaseService, 'get_admin_by_email', lambda email: {'id': 'admin-1', 'email': email, 'name': 'Tim'})
     monkeypatch.setattr(auth_module, 'create_auth_token', lambda *a, **kw: 'SUPER-SECRET-RAW-TOKEN-abc123')

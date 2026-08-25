@@ -345,7 +345,7 @@ def forgot_password():
     if admin:
         try:
             reset_token = create_auth_token('password_reset', admin['id'], RESET_TOKEN_EXPIRY_MINUTES)
-            reset_link = f"{Config.FRONTEND_URL}/reset-password?token={reset_token}"
+            reset_link = f"{Config.FRONTEND_BASE_URL}/reset-password?token={reset_token}"
             name = admin.get('name') or admin.get('first_name') or 'there'
             send_password_reset_email(email, reset_link, name)
         except Exception as e:
@@ -546,7 +546,7 @@ def invite(current_user):
 
     try:
         invite_token = create_auth_token('invite', email, INVITE_TOKEN_EXPIRY_MINUTES, extra_fields={'role': role, 'org_id': org_id})
-        invite_link = f"{Config.FRONTEND_URL}/accept-invite?token={invite_token}"
+        invite_link = f"{Config.FRONTEND_BASE_URL}/accept-invite?token={invite_token}"
         org = FirebaseService.get_organisation(org_id) if org_id else None
         org_name = (org or {}).get('name') or 'Teko'
         send_invite_email(email, invite_link, org_name, current_user, role)
@@ -654,7 +654,7 @@ def accept_invite():
     try:
         org = FirebaseService.get_organisation(org_id) if org_id else None
         org_name = (org or {}).get('name') or 'Teko'
-        login_url = f"{Config.FRONTEND_URL}/login"
+        login_url = f"{Config.FRONTEND_BASE_URL}/login"
         send_welcome_email(email, first_name, org_name, login_url)
     except Exception as e:
         logger.error("[accept-invite] send_welcome_email failed after account creation (%s).", type(e).__name__)

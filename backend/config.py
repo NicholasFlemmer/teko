@@ -59,7 +59,11 @@ class Config:
     
     # Frontend URL (for CORS)
     FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:8080')
-    
+    # Single-URL base for building links (emails, invites, check-in URLs).
+    # FRONTEND_URL may be a comma-separated list for CORS purposes, so this
+    # takes just the first entry rather than the raw (possibly multi-value) string.
+    FRONTEND_BASE_URL = FRONTEND_URL.split(",")[0].strip().rstrip("/") if FRONTEND_URL else ""
+
     # Check-in settings
     CHECK_IN_TOKEN_EXPIRY_MINUTES = int(os.getenv('CHECK_IN_TOKEN_EXPIRY_MINUTES', '30'))
     GEOLOCATION_RADIUS_METERS = int(os.getenv('GEOLOCATION_RADIUS_METERS', '500'))
