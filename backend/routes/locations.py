@@ -1,12 +1,26 @@
 import logging
 from flask import Blueprint, request, jsonify, g
+from config import Config
 from services.firebase_service import FirebaseService
+from services.rate_limiter import is_rate_limited
 from routes.auth import token_required
-from utils.geolocation import extract_coords_from_maps_url
+from utils.geolocation import extract_coords_from_maps_url, geocode_address
+from utils.request_ip import get_trusted_client_ip
 
 logger = logging.getLogger(__name__)
 
 locations_bp = Blueprint('locations', __name__)
+
+# Proxies a paid, per-request Google API call, so this needs its own limit
+# rather than riding on general request throughput. Keyed by the caller
+# (current_user) the same way invite() in routes/auth.py rate-limits an
+# authenticated action, plus IP as a second key for the same
+# shared-office-network reasoning used there -- either one tripping blocks
+# the request. 20/5min per user comfortably covers filling in several
+# locations in one sitting; 40/5min per IP is looser, same reasoning as
+# the other per-IP limits in routes/auth.py.
+GEOCODE_USER_RATE_LIMIT = (20, 5 * 60)
+GEOCODE_IP_RATE_LIMIT = (40, 5 * 60)
 
 
 def _resolve_org_scope():
@@ -214,6 +228,42 @@ def delete_location(current_user, location_id):
         }), 200
     except Exception as e:
         logger.exception("Error in delete_location")
+        return jsonify({
+            'success': False,
+            'error': 'An internal error occurred'
+        }), 500
+
+@locations_bp.route('/geocode', methods=['POST'])
+@token_required
+def geocode_location(current_user):
+    """Geocode a free-text address to coordinates server-side, so the
+    Google Maps API key never has to be exposed in the frontend bundle."""
+    try:
+        org_id, err = _resolve_org_scope()
+        if err:
+            return err
+
+        data = request.get_json()
+        if not data or not data.get('address'):
+            return jsonify({'success': False, 'error': 'Missing required field: address'}), 400
+
+        client_ip = get_trusted_client_ip(request.headers, remote_addr=request.remote_addr, allow_remote_addr_fallback=Config.DEBUG)
+        user_rate_limited = is_rate_limited(f"geocode:user:{current_user}", *GEOCODE_USER_RATE_LIMIT)
+        ip_rate_limited = is_rate_limited(f"geocode:ip:{client_ip}", *GEOCODE_IP_RATE_LIMIT)
+        if user_rate_limited or ip_rate_limited:
+            return jsonify({'success': False, 'error': 'Too many geocoding requests. Please try again later.'}), 429
+
+        coords = geocode_address(data['address'])
+        if not coords:
+            return jsonify({'success': False, 'error': 'Address could not be geocoded'}), 404
+
+        return jsonify({
+            'success': True,
+            'latitude': coords['latitude'],
+            'longitude': coords['longitude'],
+        }), 200
+    except Exception as e:
+        logger.exception("Error in geocode_location")
         return jsonify({
             'success': False,
             'error': 'An internal error occurred'

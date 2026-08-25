@@ -1,14 +1,12 @@
 // Geocoding helpers for resolving location coordinates used in check-in
 // distance verification. Coordinates are returned as { latitude, longitude }.
 
+import { locationsAPI } from "@/services/api";
+
 export interface Coords {
   latitude: number;
   longitude: number;
 }
-
-const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as
-  | string
-  | undefined;
 
 /**
  * Extract coordinates directly from a Google Maps URL without an API call.
@@ -44,35 +42,18 @@ export function extractCoordsFromMapsUrl(url?: string | null): Coords | null {
 }
 
 /**
- * Geocode a free-text address to coordinates using the Google Maps
- * Geocoding API. Returns null when geocoding fails or no API key is set.
+ * Geocode a free-text address to coordinates via the backend's
+ * /api/locations/geocode endpoint (which holds the Google Maps API key
+ * server-side, not the browser). Returns null when geocoding fails.
  */
 export async function geocodeAddress(address?: string | null): Promise<Coords | null> {
   if (!address?.trim()) return null;
 
-  if (!GOOGLE_MAPS_API_KEY) {
-    console.warn(
-      "VITE_GOOGLE_MAPS_API_KEY is not set — skipping address geocoding."
-    );
-    return null;
-  }
-
   try {
-    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
-      address
-    )}&key=${GOOGLE_MAPS_API_KEY}`;
-    const res = await fetch(url);
-    const data = await res.json();
-
-    if (data.status === "OK" && data.results?.length) {
-      const { lat, lng } = data.results[0].geometry.location;
-      return { latitude: lat, longitude: lng };
-    }
-
-    console.warn("Geocoding failed:", data.status, data.error_message ?? "");
-    return null;
+    const data = await locationsAPI.geocode(address);
+    return { latitude: data.latitude, longitude: data.longitude };
   } catch (err) {
-    console.error("Geocoding request error:", err);
+    console.warn("Geocoding failed:", err);
     return null;
   }
 }

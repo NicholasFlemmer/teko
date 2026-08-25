@@ -298,6 +298,11 @@ export const locationsAPI = {
   create: (data: any) => request<{ success: boolean; location: any }>('/api/locations', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: any) => request<{ success: boolean; location: any }>(`/api/locations/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) => request<{ success: boolean }>(`/api/locations/${id}`, { method: 'DELETE' }),
+  geocode: (address: string) =>
+    request<{ success: boolean; latitude: number; longitude: number }>('/api/locations/geocode', {
+      method: 'POST',
+      body: JSON.stringify({ address }),
+    }),
 };
 
 // Broadcasts
