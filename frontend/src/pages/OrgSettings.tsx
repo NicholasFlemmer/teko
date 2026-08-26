@@ -26,6 +26,25 @@ const ORG_TYPE_LABELS: Record<OrganisationType, string> = {
   corporate: "Corporate",
 };
 
+/** Bug 2 fix: the badge previously read "Configured" as soon as ANY one
+ * of the three safeguarding fields was set (e.g. a lead name alone).
+ * "Configured" now requires ALL three to hold a real value -- lead name
+ * and lead email both non-blank after trimming, and works_with_minors an
+ * actual true/false decision (not null/unset). Anything short of that
+ * reads as "Not configured", including a partial record. Exported so it
+ * can be unit-tested without rendering the page. */
+export function isSafeguardingFullyConfigured(
+  org:
+    | Pick<Organisation, "safeguarding_lead_name" | "safeguarding_lead_email" | "works_with_minors">
+    | null
+    | undefined
+): boolean {
+  const hasLeadName = Boolean(org?.safeguarding_lead_name && org.safeguarding_lead_name.trim());
+  const hasLeadEmail = Boolean(org?.safeguarding_lead_email && org.safeguarding_lead_email.trim());
+  const hasMinorsDecision = typeof org?.works_with_minors === "boolean";
+  return hasLeadName && hasLeadEmail && hasMinorsDecision;
+}
+
 // The five editable concepts, mapped to their terminology keys.
 const TERMINOLOGY_ROWS: {
   label: string;
@@ -57,8 +76,7 @@ export default function OrgSettings() {
   const [worksWithMinors, setWorksWithMinors] = useState<boolean | null>(null);
   const [savingSafeguarding, setSavingSafeguarding] = useState(false);
 
-  const isSafeguardingUnconfigured =
-    !org?.safeguarding_lead_name && !org?.safeguarding_lead_email && org?.works_with_minors == null;
+  const safeguardingConfigured = isSafeguardingFullyConfigured(org);
 
   useEffect(() => {
     if (!orgId) {
@@ -259,13 +277,13 @@ export default function OrgSettings() {
                     <ShieldAlert className="w-5 h-5 text-primary" />
                     <CardTitle>Safeguarding</CardTitle>
                   </div>
-                  {isSafeguardingUnconfigured ? (
+                  {safeguardingConfigured ? (
+                    <Badge variant="outline">Configured</Badge>
+                  ) : (
                     <Badge variant="outline" className="gap-1.5 border-amber-500 text-amber-600 dark:text-amber-400">
                       <AlertTriangle className="w-3.5 h-3.5" />
                       Not configured
                     </Badge>
-                  ) : (
-                    <Badge variant="outline">Configured</Badge>
                   )}
                 </div>
                 <CardDescription>

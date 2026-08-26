@@ -374,3 +374,186 @@ def test_unset_org_reads_back_as_unconfigured_not_false(client):
     assert org.get('works_with_minors') is None
     assert org.get('safeguarding_lead_name') is None
     assert org.get('safeguarding_lead_email') is None
+
+
+# ---------------------------------------------------------------------------
+# Production bug regression: the pair check used to compare key PRESENCE
+# ('field' in data), not the field's VALUE.
+#
+# The exact mechanism that shipped the partial record to production: the
+# real OrgSettings.tsx save handler sends `trimmedName || null` for a
+# blank field -- an explicit null, not "". The old pairing check
+# (`'field' in data`) treated a present-but-null key as "set," so
+# name="Ricki" + email=None passed the pair check as "both present." The
+# email-format guard was `if has_lead_email and value is not None`, so an
+# explicit None short-circuited it too (None is not "not None"). Nothing
+# ever validated the email, and the partial record saved with a 200.
+#
+# A raw API caller (Postman/curl, or a stale/different frontend build)
+# could hit the same gap with a literal "" instead of null -- "" was
+# actually already caught by the old code's `is not None` guard feeding
+# the regex (`_EMAIL_RE.match("")` fails), which is a narrower miss than
+# the task description's "empty string is falsy" framing suggests. Both
+# variants are tested below since both are real attack shapes; the fix
+# (value-based blank check) closes both identically, treating "", null,
+# and a missing key the same way throughout.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize('role', ['super_admin', 'location_admin'])
+def test_actual_production_incident_shape_name_set_email_explicit_null_rejected(client, role):
+    """The exact payload the real frontend sends for "lead name filled,
+    lead email left blank": trimmedEmail || null resolves to a literal
+    None, not "". This is the payload that actually produced the partial
+    record in production -- verified to return 200 against the
+    unpatched route before this fix (see conversation record)."""
+    token = _make_token(role=role, org_id=ORG_A)
+
+    resp = client.put(
+        f'/api/organisations/{ORG_A}',
+        headers=_auth_header(token),
+        json={
+            'safeguarding_lead_name': 'Ricki',
+            'safeguarding_lead_email': None,
+        },
+    )
+
+    assert resp.status_code == 400
+    org = FirebaseService.get_organisation(ORG_A)
+    assert org.get('safeguarding_lead_name') is None
+
+
+@pytest.mark.parametrize('role', ['super_admin', 'location_admin'])
+def test_frontend_shaped_payload_name_set_email_empty_string_rejected(client, role):
+    """A raw API caller sending literal "" instead of null for the blank
+    field -- must be a 400, not a silent partial save, exactly like the
+    null variant above."""
+    token = _make_token(role=role, org_id=ORG_A)
+
+    resp = client.put(
+        f'/api/organisations/{ORG_A}',
+        headers=_auth_header(token),
+        json={
+            'safeguarding_lead_name': 'Ricki',
+            'safeguarding_lead_email': '',
+            'works_with_minors': None,
+        },
+    )
+
+    assert resp.status_code == 400
+    # And nothing was written -- not even the name half of the pair.
+    org = FirebaseService.get_organisation(ORG_A)
+    assert org.get('safeguarding_lead_name') is None
+
+
+@pytest.mark.parametrize('role', ['super_admin', 'location_admin'])
+def test_frontend_shaped_payload_email_set_name_empty_string_rejected(client, role):
+    """Mirror case: email populated, name sent as "" (not omitted)."""
+    token = _make_token(role=role, org_id=ORG_A)
+
+    resp = client.put(
+        f'/api/organisations/{ORG_A}',
+        headers=_auth_header(token),
+        json={
+            'safeguarding_lead_name': '',
+            'safeguarding_lead_email': 'jane@example.com',
+            'works_with_minors': None,
+        },
+    )
+
+    assert resp.status_code == 400
+    org = FirebaseService.get_organisation(ORG_A)
+    assert org.get('safeguarding_lead_email') is None
+
+
+@pytest.mark.parametrize('role', ['super_admin', 'location_admin'])
+def test_frontend_shaped_payload_both_empty_strings_succeeds_and_stores_as_none(client, role):
+    """Both blank ("" for both) is the valid "not configured" case -- must
+    succeed, and must never persist "" to Firestore, only None."""
+    token = _make_token(role=role, org_id=ORG_A)
+
+    resp = client.put(
+        f'/api/organisations/{ORG_A}',
+        headers=_auth_header(token),
+        json={
+            'safeguarding_lead_name': '',
+            'safeguarding_lead_email': '',
+            'works_with_minors': None,
+        },
+    )
+
+    assert resp.status_code == 200
+    org = resp.get_json()['organisation']
+    assert org['safeguarding_lead_name'] is None
+    assert org['safeguarding_lead_email'] is None
+    assert org['safeguarding_lead_name'] != ''
+    assert org['safeguarding_lead_email'] != ''
+
+
+@pytest.mark.parametrize('role', ['super_admin', 'location_admin'])
+def test_frontend_shaped_payload_whitespace_only_treated_as_empty(client, role):
+    """"   " (whitespace-only) must be treated identically to "" -- after
+    trimming, both sides are blank, so this is the valid "not configured"
+    case, not a mismatched pair."""
+    token = _make_token(role=role, org_id=ORG_A)
+
+    resp = client.put(
+        f'/api/organisations/{ORG_A}',
+        headers=_auth_header(token),
+        json={
+            'safeguarding_lead_name': '   ',
+            'safeguarding_lead_email': '  \t ',
+            'works_with_minors': None,
+        },
+    )
+
+    assert resp.status_code == 200
+    org = resp.get_json()['organisation']
+    assert org['safeguarding_lead_name'] is None
+    assert org['safeguarding_lead_email'] is None
+
+
+@pytest.mark.parametrize('role', ['super_admin', 'location_admin'])
+def test_works_with_minors_empty_string_rejected_with_400(client, role):
+    """Audit requested alongside the pair-check fix: confirm "" never
+    becomes a stored value for works_with_minors either.
+
+    Implemented behaviour: 400, not stored-as-null. isinstance("", bool)
+    is False (an empty string is not a bool), so the existing type check
+    already rejects "" outright -- it never reaches Firestore in any
+    form, blank or otherwise. This test pins that behaviour explicitly
+    rather than leaving it as an accidental side effect of the type
+    check."""
+    token = _make_token(role=role, org_id=ORG_A)
+
+    resp = client.put(
+        f'/api/organisations/{ORG_A}',
+        headers=_auth_header(token),
+        json={'works_with_minors': ''},
+    )
+
+    assert resp.status_code == 400
+    org = FirebaseService.get_organisation(ORG_A)
+    assert org.get('works_with_minors') is None
+
+
+@pytest.mark.parametrize('role', ['super_admin', 'location_admin'])
+def test_frontend_shaped_payload_all_three_populated_succeeds(client, role):
+    """All three fields populated with real values, sent exactly as the
+    frontend sends them (every key present) -- must succeed."""
+    token = _make_token(role=role, org_id=ORG_A)
+
+    resp = client.put(
+        f'/api/organisations/{ORG_A}',
+        headers=_auth_header(token),
+        json={
+            'safeguarding_lead_name': 'Jane Doe',
+            'safeguarding_lead_email': 'jane@example.com',
+            'works_with_minors': True,
+        },
+    )
+
+    assert resp.status_code == 200
+    org = resp.get_json()['organisation']
+    assert org['safeguarding_lead_name'] == 'Jane Doe'
+    assert org['safeguarding_lead_email'] == 'jane@example.com'
+    assert org['works_with_minors'] is True

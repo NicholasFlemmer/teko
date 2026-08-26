@@ -22,6 +22,38 @@ _SAFEGUARDING_FIELDS = ['safeguarding_lead_name', 'safeguarding_lead_email', 'wo
 _EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
 
+def _is_blank(value):
+    """True for None, or a string that is empty/whitespace-only after
+    stripping. A non-string, non-None value (e.g. a number) is deliberately
+    never "blank" here -- it falls through to the type/format checks that
+    follow, which reject it on its own terms rather than this helper
+    silently treating it as absent.
+
+    This is the fix for the production bug where the pair check compared
+    key PRESENCE ('field' in data) instead of the field's VALUE -- the
+    frontend always sends both safeguarding_lead_name/_email keys, using
+    ""  for a blank field, so presence-only checking let name="Ricki" +
+    email="" through as "paired" and skipped email format validation
+    entirely (an empty string is falsy). Every check below must treat ""
+    identically to a missing key or an explicit null.
+    """
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip() == ''
+    return False
+
+
+def _normalize_blank_to_none(value):
+    """A blank string (or None) becomes None; anything else is trimmed if
+    it's a string. Used so a field is never stored as "" -- only a real
+    value or None, never an empty string, ever reaches Firestore."""
+    if isinstance(value, str):
+        trimmed = value.strip()
+        return trimmed if trimmed else None
+    return value
+
+
 def _resolve_org_scope():
     """Resolve the org_id to filter by for the current request.
 
@@ -151,17 +183,23 @@ def update_organisation(current_user, org_id):
         else:
             allowed_fields = _SUPER_ADMIN_ONLY_FIELDS + _SAFEGUARDING_FIELDS
 
-        has_lead_name = 'safeguarding_lead_name' in data
-        has_lead_email = 'safeguarding_lead_email' in data
-        if has_lead_name != has_lead_email:
+        # Pair check on VALUES, not key presence (see _is_blank docstring):
+        # "" and null and an absent key are all the same "not set" state.
+        name_in_data = 'safeguarding_lead_name' in data
+        email_in_data = 'safeguarding_lead_email' in data
+        name_has_value = name_in_data and not _is_blank(data.get('safeguarding_lead_name'))
+        email_has_value = email_in_data and not _is_blank(data.get('safeguarding_lead_email'))
+        if name_has_value != email_has_value:
             return jsonify({
                 'success': False,
                 'error': 'safeguarding_lead_name and safeguarding_lead_email must be set together'
             }), 400
 
-        if has_lead_email and data['safeguarding_lead_email'] is not None:
-            email_value = data['safeguarding_lead_email']
-            if not isinstance(email_value, str) or not _EMAIL_RE.match(email_value):
+        normalized_name = _normalize_blank_to_none(data.get('safeguarding_lead_name')) if name_in_data else None
+        normalized_email = _normalize_blank_to_none(data.get('safeguarding_lead_email')) if email_in_data else None
+
+        if email_has_value:
+            if not isinstance(normalized_email, str) or not _EMAIL_RE.match(normalized_email):
                 return jsonify({
                     'success': False,
                     'error': 'safeguarding_lead_email must be a valid email address'
@@ -169,6 +207,10 @@ def update_organisation(current_user, org_id):
 
         if 'works_with_minors' in data:
             minors_value = data['works_with_minors']
+            # A bool check alone would accept "" here too, since it's
+            # falsy but not a bool -- isinstance already rejects it (an
+            # empty string is not a bool), so "" is a 400, never silently
+            # stored. No separate blank-string carve-out needed.
             if minors_value is not None and not isinstance(minors_value, bool):
                 return jsonify({
                     'success': False,
@@ -184,7 +226,13 @@ def update_organisation(current_user, org_id):
 
         update_data = {}
         for field in allowed_fields:
-            if field in data:
+            if field not in data:
+                continue
+            if field == 'safeguarding_lead_name':
+                update_data[field] = normalized_name
+            elif field == 'safeguarding_lead_email':
+                update_data[field] = normalized_email
+            else:
                 update_data[field] = data[field]
 
         if not update_data:
