@@ -73,6 +73,38 @@ class PersonService:
         except Exception:
             return ''
 
+    @staticmethod
+    def _log_duplicate_phone(collection_label, normalised, existing_record, new_record):
+        """Log a normalised phone number about to overwrite an existing
+        cache entry. Detection only -- the caller still overwrites
+        unconditionally afterward, so last-write-wins is unchanged.
+
+        Different org_id: ERROR. This is the cross-org routing hazard —
+        the record being overwritten will never resolve for its own org
+        again once this refresh completes.
+
+        Same org_id: WARNING. Two records for the same person/number
+        inside one org is a data quality issue, not a routing hazard.
+        """
+        existing_org = existing_record.get('org_id')
+        new_org = new_record.get('org_id')
+        if existing_org != new_org:
+            logger.error(
+                "Duplicate %s phone number %s across orgs %s and %s — "
+                "the org_id=%s record will win in the identity cache; the "
+                "org_id=%s record will never resolve for its own org until "
+                "this is fixed.",
+                collection_label, mask_phone(normalised), existing_org, new_org,
+                new_org, existing_org,
+            )
+        else:
+            logger.warning(
+                "Duplicate %s phone number %s within org %s — two records "
+                "share the same phone number. Data quality issue, not a "
+                "cross-org routing hazard.",
+                collection_label, mask_phone(normalised), existing_org,
+            )
+
     @classmethod
     def _refresh_cache_if_stale(cls):
         """Refresh the cache if it's stale (or has never populated).
@@ -94,12 +126,18 @@ class PersonService:
             for coach in coaches:
                 normalised = cls._safe_normalize(coach.get('phone_number', ''))
                 if normalised:
+                    existing = coach_cache.get(normalised)
+                    if existing:
+                        cls._log_duplicate_phone('coach', normalised, existing, coach)
                     coach_cache[normalised] = coach
 
             participant_cache = {}
             for participant in participants:
                 normalised = cls._safe_normalize(participant.get('phone_number', ''))
                 if normalised:
+                    existing = participant_cache.get(normalised)
+                    if existing:
+                        cls._log_duplicate_phone('participant', normalised, existing, participant)
                     participant_cache[normalised] = participant
 
             cls._coach_cache = coach_cache

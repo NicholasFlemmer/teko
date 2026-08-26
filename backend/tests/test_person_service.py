@@ -240,3 +240,60 @@ def test_resolve_no_match_with_healthy_cache_still_returns_none(monkeypatch):
     ])
 
     assert PersonService.resolve('27000000000') is None
+
+
+# ---------------------------------------------------------------------------
+# Duplicate-phone detection at cache-build time. Detection only — the
+# overwritten record is still overwritten (last-write-wins is unchanged);
+# see PersonService._log_duplicate_phone.
+# ---------------------------------------------------------------------------
+
+def test_duplicate_phone_across_orgs_logs_error_naming_both_orgs(monkeypatch, caplog):
+    """Two coaches in different orgs sharing a phone number is the real
+    cross-org routing hazard the shared identity cache creates — this must
+    be an ERROR naming both org_ids, and must never log the raw number."""
+    _stub_directory(monkeypatch, coaches=[
+        {'id': 'coach-a', 'org_id': 'org-a', 'name': 'Alice', 'phone_number': '0821234567'},
+        {'id': 'coach-b', 'org_id': 'org-b', 'name': 'Beatriz', 'phone_number': '0821234567'},
+    ])
+
+    with caplog.at_level('WARNING'):
+        PersonService.resolve('27821234567')
+
+    error_records = [r for r in caplog.records if r.levelname == 'ERROR']
+    assert error_records, "Expected an ERROR log for a cross-org phone duplicate."
+    message = error_records[0].getMessage()
+    assert 'org-a' in message and 'org-b' in message
+    assert '0821234567' not in message, "Raw phone number must never be logged."
+
+
+def test_duplicate_phone_within_same_org_logs_warning_not_error(monkeypatch, caplog):
+    """Two coaches sharing a phone number inside ONE org is a data quality
+    issue, not a cross-org routing hazard — WARNING, not ERROR."""
+    _stub_directory(monkeypatch, coaches=[
+        {'id': 'coach-a', 'org_id': 'org-a', 'name': 'Alice', 'phone_number': '0821234567'},
+        {'id': 'coach-b', 'org_id': 'org-a', 'name': 'Alice Duplicate', 'phone_number': '0821234567'},
+    ])
+
+    with caplog.at_level('WARNING'):
+        PersonService.resolve('27821234567')
+
+    assert not any(r.levelname == 'ERROR' for r in caplog.records), "Same-org duplicate must not log an ERROR."
+    warning_records = [r for r in caplog.records if r.levelname == 'WARNING']
+    assert any('duplicate' in r.getMessage().lower() for r in warning_records), (
+        "Expected a WARNING log for a same-org phone duplicate."
+    )
+
+
+def test_no_duplicate_phone_logs_neither(monkeypatch, caplog):
+    """The normal case — no two records share a phone number — must not
+    trigger either the ERROR or WARNING duplicate-detection log."""
+    _stub_directory(monkeypatch, coaches=[
+        {'id': 'coach-a', 'org_id': 'org-a', 'name': 'Alice', 'phone_number': '0821234567'},
+        {'id': 'coach-b', 'org_id': 'org-b', 'name': 'Beatriz', 'phone_number': '0839876543'},
+    ])
+
+    with caplog.at_level('WARNING'):
+        PersonService.resolve('27821234567')
+
+    assert not any('duplicate' in r.getMessage().lower() for r in caplog.records)
