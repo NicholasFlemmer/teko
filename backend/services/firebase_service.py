@@ -1103,12 +1103,18 @@ class FirebaseService:
         """Create a new organisation document.
 
         Fields: name, slug, type, terminology, ai_persona_prompt, country,
-        supported_languages, is_active, created_at. ai_persona_prompt is
+        supported_languages, is_active, created_at, safeguarding_lead_name,
+        safeguarding_lead_email, works_with_minors. ai_persona_prompt is
         optional — when empty/absent, the AI system prompt falls back to
         the default for the org's type (see
         ConversationService.get_ai_persona_prompt). country/
         supported_languages are also optional and fall back to the South
         African defaults (see get_org_locale) — same shape as terminology.
+        safeguarding_lead_name/safeguarding_lead_email/works_with_minors
+        are configuration only (see routes/organisations.py for the
+        validation and permission rules on write) — nothing in this class
+        reads or acts on them; absent/null means not configured, never a
+        default of False for works_with_minors.
         """
         db = cls.get_db()
         data['created_at'] = firestore.SERVER_TIMESTAMP

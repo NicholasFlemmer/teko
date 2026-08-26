@@ -4,7 +4,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Building2, Loader2, Save } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Building2, Loader2, Save, ShieldAlert, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRefreshTerminology } from "@/contexts/TerminologyContext";
@@ -47,6 +49,17 @@ export default function OrgSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // Safeguarding section state. worksWithMinors is deliberately tri-state:
+  // null means "not declared" (never treat that as false), true/false means
+  // an admin actively made that choice.
+  const [leadName, setLeadName] = useState("");
+  const [leadEmail, setLeadEmail] = useState("");
+  const [worksWithMinors, setWorksWithMinors] = useState<boolean | null>(null);
+  const [savingSafeguarding, setSavingSafeguarding] = useState(false);
+
+  const isSafeguardingUnconfigured =
+    !org?.safeguarding_lead_name && !org?.safeguarding_lead_email && org?.works_with_minors == null;
+
   useEffect(() => {
     if (!orgId) {
       setLoading(false);
@@ -66,6 +79,13 @@ export default function OrgSettings() {
           ...getDefaultTerminology(orgRes.organisation.type),
           ...termRes.terminology,
         });
+        setLeadName(orgRes.organisation.safeguarding_lead_name ?? "");
+        setLeadEmail(orgRes.organisation.safeguarding_lead_email ?? "");
+        setWorksWithMinors(
+          typeof orgRes.organisation.works_with_minors === "boolean"
+            ? orgRes.organisation.works_with_minors
+            : null
+        );
       } catch (err) {
         toast({
           title: "Failed to load settings",
@@ -103,6 +123,33 @@ export default function OrgSettings() {
       });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveSafeguarding = async () => {
+    if (!orgId) return;
+    try {
+      setSavingSafeguarding(true);
+      const trimmedName = leadName.trim();
+      const trimmedEmail = leadEmail.trim();
+      const updated = await organisationsAPI.update(orgId, {
+        safeguarding_lead_name: trimmedName || null,
+        safeguarding_lead_email: trimmedEmail || null,
+        works_with_minors: worksWithMinors,
+      });
+      setOrg(updated.organisation);
+      toast({
+        title: "Safeguarding settings saved",
+        description: "Your safeguarding configuration has been updated.",
+      });
+    } catch (err: any) {
+      toast({
+        title: "Save failed",
+        description: err?.message || "Could not save your safeguarding settings. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingSafeguarding(false);
     }
   };
 
@@ -194,6 +241,83 @@ export default function OrgSettings() {
                 <div className="flex justify-end pt-2">
                   <Button onClick={handleSave} disabled={saving} className="gap-2">
                     {saving ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Save className="w-4 h-4" />
+                    )}
+                    Save changes
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Section 3: Safeguarding */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <ShieldAlert className="w-5 h-5 text-primary" />
+                    <CardTitle>Safeguarding</CardTitle>
+                  </div>
+                  {isSafeguardingUnconfigured ? (
+                    <Badge variant="outline" className="gap-1.5 border-amber-500 text-amber-600 dark:text-amber-400">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      Not configured
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline">Configured</Badge>
+                  )}
+                </div>
+                <CardDescription>
+                  Who to contact for safeguarding concerns, and whether this organisation works
+                  with minors.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="safeguarding-lead-name">Safeguarding lead name</Label>
+                    <Input
+                      id="safeguarding-lead-name"
+                      value={leadName}
+                      onChange={(e) => setLeadName(e.target.value)}
+                      placeholder="e.g. Jane Doe"
+                      disabled={savingSafeguarding}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="safeguarding-lead-email">Safeguarding lead email</Label>
+                    <Input
+                      id="safeguarding-lead-email"
+                      type="email"
+                      value={leadEmail}
+                      onChange={(e) => setLeadEmail(e.target.value)}
+                      placeholder="e.g. jane@example.com"
+                      disabled={savingSafeguarding}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 sm:max-w-xs">
+                  <Label htmlFor="works-with-minors">Does this organisation work with minors?</Label>
+                  <Select
+                    value={worksWithMinors === null ? undefined : String(worksWithMinors)}
+                    onValueChange={(v) => setWorksWithMinors(v === "true")}
+                    disabled={savingSafeguarding}
+                  >
+                    <SelectTrigger id="works-with-minors" aria-label="Does this organisation work with minors?">
+                      <SelectValue placeholder="Select an option" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="true">Yes</SelectItem>
+                      <SelectItem value="false">No</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <Button onClick={handleSaveSafeguarding} disabled={savingSafeguarding} className="gap-2">
+                    {savingSafeguarding ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
                       <Save className="w-4 h-4" />

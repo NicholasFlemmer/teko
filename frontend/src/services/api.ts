@@ -137,7 +137,20 @@ export const organisationsAPI = {
   getAll: () => request<{ success: boolean; organisations: Organisation[] }>('/api/organisations'),
   getById: (orgId: string) =>
     request<{ success: boolean; organisation: Organisation }>(`/api/organisations/${orgId}`),
-  update: (orgId: string, data: Partial<Pick<Organisation, 'name' | 'type' | 'terminology'>>) =>
+  update: (
+    orgId: string,
+    data: Partial<
+      Pick<
+        Organisation,
+        | 'name'
+        | 'type'
+        | 'terminology'
+        | 'safeguarding_lead_name'
+        | 'safeguarding_lead_email'
+        | 'works_with_minors'
+      >
+    >
+  ) =>
     request<{ success: boolean; organisation: Organisation }>(`/api/organisations/${orgId}`, {
       method: 'PUT',
       body: JSON.stringify(data),

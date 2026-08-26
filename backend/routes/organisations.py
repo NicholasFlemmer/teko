@@ -1,4 +1,5 @@
 import logging
+import re
 from flask import Blueprint, request, jsonify, g
 from services.firebase_service import FirebaseService
 from routes.auth import token_required, role_required
@@ -6,6 +7,19 @@ from routes.auth import token_required, role_required
 logger = logging.getLogger(__name__)
 
 organisations_bp = Blueprint('organisations', __name__)
+
+# Fields only a super_admin may write. location_admin is restricted to
+# _SAFEGUARDING_FIELDS below -- never these, even for their own org.
+_SUPER_ADMIN_ONLY_FIELDS = ['name', 'type', 'terminology', 'ai_persona_prompt', 'country', 'supported_languages']
+
+# Org-level safeguarding configuration. Deliberately writable by
+# location_admin (unlike every other org field) because a location_admin
+# is the role actually running day-to-day operations at a location and is
+# the realistic owner of "who is our safeguarding lead" -- super_admin can
+# still write these too.
+_SAFEGUARDING_FIELDS = ['safeguarding_lead_name', 'safeguarding_lead_email', 'works_with_minors']
+
+_EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
 
 def _resolve_org_scope():
@@ -97,21 +111,24 @@ def get_organisation(current_user, org_id):
 
 @organisations_bp.route('/<org_id>', methods=['PUT'])
 @token_required
-@role_required('super_admin')
+@role_required('super_admin', 'location_admin')
 def update_organisation(current_user, org_id):
-    """Update an organisation's name, type, terminology, ai_persona_prompt,
-    country, and/or supported_languages.
+    """Update an organisation's fields.
 
-    Gated to super_admin only. Neither super_admin (the Triggr platform
-    role) nor location_admin (scoped to a single location within an org)
-    is an obviously correct owner of an organisation-wide record from the
-    existing role model alone, so this deliberately picks the narrower,
-    safer option for now rather than guessing at a location_admin-level
-    grant that isn't backed by anything in the current code.
+    super_admin may write any of _SUPER_ADMIN_ONLY_FIELDS or
+    _SAFEGUARDING_FIELDS. location_admin may write ONLY
+    _SAFEGUARDING_FIELDS (safeguarding_lead_name, safeguarding_lead_email,
+    works_with_minors), and only for their own org -- name, type,
+    terminology, ai_persona_prompt, country, and supported_languages
+    remain super_admin-only, same as before this route accepted
+    location_admin at all.
 
     A super_admin with an assigned org_id is still restricted to that org
     by the ownership check below -- only a super_admin with no assigned
-    org (the intentional cross-org case) may update any organisation.
+    org (the intentional cross-org case) may update any organisation. That
+    ownership check runs before any Firestore read or write, so a
+    location_admin targeting another org's safeguarding fields is
+    rejected with 403 without ever touching Firestore.
     """
     try:
         scope_org_id, err = _resolve_org_scope()
@@ -125,6 +142,39 @@ def update_organisation(current_user, org_id):
         if not data:
             return jsonify({'success': False, 'error': 'Request body is required'}), 400
 
+        role = getattr(g, 'current_user_role', None)
+        if role == 'location_admin':
+            disallowed = [field for field in data if field in _SUPER_ADMIN_ONLY_FIELDS]
+            if disallowed:
+                return jsonify({'success': False, 'error': 'Insufficient permissions'}), 403
+            allowed_fields = _SAFEGUARDING_FIELDS
+        else:
+            allowed_fields = _SUPER_ADMIN_ONLY_FIELDS + _SAFEGUARDING_FIELDS
+
+        has_lead_name = 'safeguarding_lead_name' in data
+        has_lead_email = 'safeguarding_lead_email' in data
+        if has_lead_name != has_lead_email:
+            return jsonify({
+                'success': False,
+                'error': 'safeguarding_lead_name and safeguarding_lead_email must be set together'
+            }), 400
+
+        if has_lead_email and data['safeguarding_lead_email'] is not None:
+            email_value = data['safeguarding_lead_email']
+            if not isinstance(email_value, str) or not _EMAIL_RE.match(email_value):
+                return jsonify({
+                    'success': False,
+                    'error': 'safeguarding_lead_email must be a valid email address'
+                }), 400
+
+        if 'works_with_minors' in data:
+            minors_value = data['works_with_minors']
+            if minors_value is not None and not isinstance(minors_value, bool):
+                return jsonify({
+                    'success': False,
+                    'error': 'works_with_minors must be true, false, or null'
+                }), 400
+
         org = FirebaseService.get_organisation(org_id)
         if not org:
             return jsonify({
@@ -133,7 +183,6 @@ def update_organisation(current_user, org_id):
             }), 404
 
         update_data = {}
-        allowed_fields = ['name', 'type', 'terminology', 'ai_persona_prompt', 'country', 'supported_languages']
         for field in allowed_fields:
             if field in data:
                 update_data[field] = data[field]

@@ -24,6 +24,11 @@ export interface Organisation {
   ai_persona_prompt?: string;
   created_at?: any;
   is_active: boolean;
+  // Safeguarding configuration. Absent/null means not configured -- never
+  // treat a missing works_with_minors as false, it means "not declared".
+  safeguarding_lead_name?: string | null;
+  safeguarding_lead_email?: string | null;
+  works_with_minors?: boolean | null;
 }
 
 // Default terminology per org type, shown until an org customises its own
