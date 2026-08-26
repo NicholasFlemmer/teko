@@ -80,6 +80,10 @@ export default function Locations() {
       location.address.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const sortedLocations = [...filteredLocations].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+  );
+
   return (
     <MainLayout>
       <div className="space-y-6">
@@ -118,7 +122,7 @@ export default function Locations() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredLocations.map((location) => (
+            {sortedLocations.map((location) => (
               <div key={location.id} className="entity-card cursor-pointer" onClick={() => navigate(`/locations/${location.id}`)}>
                 <div className="flex items-start gap-3">
                   <div className="w-10 h-10 rounded-lg bg-info/10 flex items-center justify-center flex-shrink-0">
@@ -161,7 +165,7 @@ export default function Locations() {
           </div>
         )}
 
-        {!loading && filteredLocations.length === 0 && (
+        {!loading && sortedLocations.length === 0 && (
           <div className="text-center py-12">
             <MapPin className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
             <p className="text-muted-foreground">No {locationPlural.toLowerCase()} found</p>
