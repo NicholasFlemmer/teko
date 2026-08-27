@@ -18,17 +18,16 @@ likely" category when more than one matches. That is a deliberate
 constraint from the brief, not an oversight -- it is not this system's
 job to decide whether a concern is real.
 
-KNOWN LIMITATION, not silently patched over: because "hit me" and "my
-bruise" are unqualified two-word/two-word phrases in the client's own
-starter keyword list, they will also fire on genuinely benign sentences
-that happen to contain those same words in sequence -- e.g. "coach hit
-me a great throwdown today" and "my bruise from batting is sore" (both
-real cricket-context sentences). See
-tests/test_safeguarding_detection.py for these pinned as expected
-failures (xfail), not silently suppressed -- suppressing them would mean
-writing confidence/exception logic, which the brief explicitly forbids.
-This is a keyword-list precision issue for the client to decide on, not
-a bug in the matching implementation.
+KNOWN LIMITATION, not silently patched over: because "hit me" is an
+unqualified two-word phrase in the client's own starter keyword list, it
+will also fire on genuinely benign sentences that happen to contain
+those same words in sequence -- e.g. "coach hit me a great throwdown
+today" (a real cricket-context sentence). This false positive is
+accepted deliberately: "hit me" is the highest-value phrase on the
+list. See tests/test_safeguarding_detection.py for this pinned as an
+expected failure (xfail), not silently suppressed -- suppressing it
+would mean writing confidence/exception logic, which the brief
+explicitly forbids.
 """
 import logging
 import re

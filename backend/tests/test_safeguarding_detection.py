@@ -19,19 +19,20 @@ Three groups of tests:
      can never break message delivery even when it throws.
 
 IMPORTANT -- read before treating any test here as a regression:
-Two of the three required benign-message tests below are marked
+One of the three required benign-message tests below is marked
 `xfail(strict=True)`, not asserted as passing. "coach hit me a great
-throwdown today" and "my bruise from batting is sore" are real,
-literal false positives against the client's own starter keyword list
-("hit me", "my bruise") under correct word-boundary matching -- the
-words really do appear in that sequence. The brief explicitly forbids
-adding confidence/suppression logic to make these NOT fire ("Do not add
-any confidence threshold or suppression logic... every match is
-recorded"), so this is not something the implementation can fix without
-violating that constraint. xfail pins this as a known, reported
-limitation of the CURRENT keyword list -- not something silently
-swallowed, and not a test quietly rewritten to pass. See the module
-docstring in safeguarding_service.py for the same note.
+throwdown today" is a real, literal false positive against the client's
+own starter keyword list ("hit me") under correct word-boundary
+matching -- the words really do appear in that sequence. The brief
+explicitly forbids adding confidence/suppression logic to make this NOT
+fire ("Do not add any confidence threshold or suppression logic...
+every match is recorded"), so this is not something the implementation
+can fix without violating that constraint. This false positive is
+accepted deliberately: "hit me" is the highest-value phrase on the
+list. xfail pins this as a known, reported limitation of the CURRENT
+keyword list -- not something silently swallowed, and not a test
+quietly rewritten to pass. See the module docstring in
+safeguarding_service.py for the same note.
 
 Usage:
     cd backend
@@ -116,6 +117,24 @@ def test_hit_me_fires_as_whole_words():
     assert 'hit me' in matches['physical_abuse']
 
 
+@pytest.mark.parametrize('phrase,text', [
+    ('hit me at home', "he hit me at home last night"),
+    ('hits me at home', "he hits me at home when he's angry"),
+    ('he hits me', "he hits me all the time"),
+    ('she hits me', "she hits me when I'm late"),
+    ('they hit me', "they hit me after the game"),
+    ('my dad hits me', "my dad hits me a lot"),
+    ('my mom hits me', "my mom hits me when I'm bad"),
+    ('my mum hits me', "my mum hits me sometimes"),
+    ('my uncle hit me', "my uncle hit me yesterday"),
+    ('beats me at home', "he beats me at home every week"),
+])
+def test_new_physical_abuse_phrases_fire(phrase, text):
+    matches = detect_safeguarding_matches(text)
+    assert 'physical_abuse' in matches, f"expected a match for {text!r}, got {matches}"
+    assert phrase in matches['physical_abuse']
+
+
 def test_a_word_merely_containing_the_letters_does_not_fire():
     """The classic word-boundary ("Scunthorpe") case: "draped" contains
     "raped" as a literal substring but is not the word "raped" -- naive
@@ -186,8 +205,10 @@ def test_benign_cricket_message_beat_them_by_20_runs_does_not_fire():
         "literally, as consecutive whole words, in this genuinely benign "
         "cricket sentence ('...hit me a great throwdown...'). The brief "
         "forbids confidence/suppression logic to prevent this, so it "
-        "currently fires on physical_abuse. Flagged to the client as a "
-        "keyword-list precision issue, not fixed here."
+        "currently fires on physical_abuse. This is accepted deliberately "
+        "because 'hit me' is the highest-value phrase on the list -- "
+        "flagged to the client as a keyword-list precision issue, not "
+        "fixed here."
     ),
 )
 def test_benign_cricket_message_hit_me_a_great_throwdown_does_not_fire():
@@ -195,17 +216,10 @@ def test_benign_cricket_message_hit_me_a_great_throwdown_does_not_fire():
     assert not matches, f"expected no matches, got {matches}"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "KNOWN FALSE POSITIVE, reported not suppressed: 'my bruise' "
-        "appears literally, as consecutive whole words, in this genuinely "
-        "benign cricket sentence. Same reasoning as the 'hit me' xfail "
-        "above -- the brief forbids suppression logic that would prevent "
-        "this from firing."
-    ),
-)
 def test_benign_cricket_message_my_bruise_from_batting_does_not_fire():
+    """'my bruise' was removed from the keyword list -- a bruise mention
+    alone is not a disclosure and it false-positived constantly in a
+    cricket context. Now a genuine true negative, not an xfail."""
     matches = detect_safeguarding_matches("my bruise from batting is sore")
     assert not matches, f"expected no matches, got {matches}"
 
