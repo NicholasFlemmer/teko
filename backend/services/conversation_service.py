@@ -3,7 +3,7 @@ from services.firebase_service import FirebaseService
 from services.gemini_service import GeminiService
 from services.whatsapp_service import WhatsAppService
 from services.person_service import PersonService, PersonCacheUnavailableError
-from services.safeguarding_service import detect_safeguarding_matches, record_safeguarding_flag
+from services.safeguarding_service import detect_safeguarding_matches, record_safeguarding_flag, send_safeguarding_alert
 from routes.sse import push_event
 from utils.phone import mask_phone
 from datetime import datetime, date, timezone
@@ -1673,10 +1673,18 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
             # can never block the reply (constraint 1) but is never
             # swallowed silently either -- logged at ERROR with enough
             # context to investigate (constraint 2).
+            #
+            # safeguarding_flag holds record_safeguarding_flag()'s return
+            # value (or None) -- the only way a flag can ever reach
+            # send_safeguarding_alert(), which is dispatched below AFTER
+            # the reply is sent, in both the coach and participant
+            # branches. See send_safeguarding_alert()'s docstring for why
+            # this also means a pre-existing flag can never be alerted on.
+            safeguarding_flag = None
             try:
                 safeguarding_matches = detect_safeguarding_matches(message_text)
                 if safeguarding_matches:
-                    record_safeguarding_flag(
+                    safeguarding_flag = record_safeguarding_flag(
                         org_id=person.get('org_id'),
                         person_id=person.get('id'),
                         person_type=person.get('person_type'),
@@ -1695,7 +1703,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
                 )
 
             if person.get('person_type') != 'coach':
-                cls._handle_participant_message(from_number, message_text, person)
+                cls._handle_participant_message(from_number, message_text, person, safeguarding_flag)
                 return
 
             coach = person
@@ -1763,6 +1771,11 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
                 logger.error("Failed to send response: %s", result.get('error'))
                 push_event('response_sent', org_id=coach.get('org_id'), coach_name=coach_name, preview="[send failed]")
 
+            # Safeguarding alert -- deliberately after the reply above,
+            # win or lose, so a slow/failing send can never delay or
+            # block it. See _dispatch_safeguarding_alert().
+            cls._dispatch_safeguarding_alert(safeguarding_flag)
+
         except Exception as e:
             logger.error("Error handling incoming message: %s", e)
             try:
@@ -1805,7 +1818,32 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         )
 
     @classmethod
-    def _handle_participant_message(cls, from_number, message_text, person):
+    def _dispatch_safeguarding_alert(cls, safeguarding_flag):
+        """Fire the safeguarding alert email for a just-recorded flag, if
+        any — called AFTER the participant/coach's normal reply has
+        already been sent (both call sites), so a slow or failing send
+        can never delay or block it.
+
+        send_safeguarding_alert() is documented to never raise on its
+        own, but this is still wrapped: it runs after the reply in the
+        coach path too, inside the same try/except as the rest of
+        handle_incoming_message, and an uncaught exception there would
+        hit that method's outer except block and send the caller a
+        spurious "Sorry, I encountered an error" WhatsApp message *after*
+        they already got their real, successful reply.
+        """
+        if not safeguarding_flag:
+            return
+        try:
+            send_safeguarding_alert(safeguarding_flag)
+        except Exception:
+            logger.error(
+                "Safeguarding alert dispatch raised unexpectedly for flag_id=%s",
+                safeguarding_flag.get('id'), exc_info=True,
+            )
+
+    @classmethod
+    def _handle_participant_message(cls, from_number, message_text, person, safeguarding_flag=None):
         """Route a text message from an identified participant, using the
         same COMMAND_PERMISSIONS map the coach path in
         handle_incoming_message consults — see that map for the full
@@ -1839,6 +1877,10 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         result = WhatsAppService.send_message(phone_number=from_number, message_text=response)
         if not result.get('success'):
             logger.error("Failed to send response to participant: %s", result.get('error'))
+
+        # Safeguarding alert -- deliberately after the reply above, win or
+        # lose, so a slow/failing send can never delay or block it.
+        cls._dispatch_safeguarding_alert(safeguarding_flag)
 
     @classmethod
     def get_help_message(cls, coach_name=None, org_id=None):

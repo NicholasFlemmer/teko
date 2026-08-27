@@ -1,11 +1,19 @@
-"""Safeguarding keyword detection on inbound WhatsApp messages.
+"""Safeguarding keyword detection, recording, and alerting on inbound
+WhatsApp messages.
 
-DETECTION AND RECORDING ONLY. This module never sends an email, never
-alters what a coach/participant receives in reply, and never changes
-conversation flow -- it only decides whether an inbound message's text
-matches a safeguarding keyword and, if so, writes a record of that match.
-Alerting (step 4) is a separate, later piece of work; alert_sent on the
-written record defaults to False for that step to pick up.
+record_safeguarding_flag() never sends an email, never alters what a
+coach/participant receives in reply, and never changes conversation flow
+-- it only decides whether an inbound message's text matches a
+safeguarding keyword and, if so, writes a record of that match.
+
+send_safeguarding_alert() closes the loop: it is called exactly once,
+by ConversationService.handle_incoming_message, with the flag dict that
+record_safeguarding_flag() just returned -- AFTER that message's normal
+reply has already been sent, so a slow or failing send can never block
+or delay it. It is never called any other way and never queries
+Firestore for existing/unsent flags -- see its docstring below for the
+scope guarantee this gives against ever picking up a flag that predates
+this feature.
 
 Matching: whole-word-boundary, case-insensitive, tolerant of surrounding
 punctuation -- deliberately NOT naive substring matching. A multi-word
@@ -31,9 +39,11 @@ explicitly forbids.
 """
 import logging
 import re
+from datetime import datetime, timezone
 
 from firebase_admin import firestore
 
+from services.email_service import send_safeguarding_alert_email
 from services.firebase_service import FirebaseService
 from services.safeguarding_keywords import SAFEGUARDING_KEYWORDS
 from utils.phone import mask_phone
@@ -112,6 +122,16 @@ def record_safeguarding_flag(org_id, person_id, person_type, person_name, phone_
     into the coaches/participants collection, which does hold the full
     number) -- the flag record itself doesn't need the raw number to
     identify who sent it, so it doesn't carry one.
+
+    detected_at is captured locally (not firestore.SERVER_TIMESTAMP) so
+    the exact value written is immediately available to the caller for
+    the alert email, without a network read-back after the write.
+
+    Returns the written flag as a plain dict, with the new document's id
+    under 'id' -- this is the ONLY way a flag ever reaches
+    send_safeguarding_alert(); see that function's docstring for why that
+    guarantees a flag created before this feature shipped can never
+    trigger an alert.
     """
     if not org_id:
         raise ValueError(
@@ -121,10 +141,9 @@ def record_safeguarding_flag(org_id, person_id, person_type, person_name, phone_
 
     matched_categories = sorted(matches.keys())
     matched_terms = sorted({term for terms in matches.values() for term in terms})
+    detected_at = datetime.now(timezone.utc)
 
-    db = FirebaseService.get_db()
-    doc_ref = db.collection(COLLECTION).document()
-    doc_ref.set({
+    flag_data = {
         'org_id': org_id,
         'person_id': person_id,
         'person_type': person_type,
@@ -134,12 +153,149 @@ def record_safeguarding_flag(org_id, person_id, person_type, person_name, phone_
         'matched_category': matched_categories,
         'matched_terms': matched_terms,
         'message_id': message_id,
-        'detected_at': firestore.SERVER_TIMESTAMP,
+        'detected_at': detected_at,
         'status': 'new',
         'alert_sent': False,
-    })
+    }
+
+    db = FirebaseService.get_db()
+    doc_ref = db.collection(COLLECTION).document()
+    doc_ref.set(flag_data)
 
     logger.info(
         "Safeguarding flag recorded: org_id=%s person_id=%s categories=%s",
         org_id, person_id, matched_categories,
+    )
+
+    return {'id': doc_ref.id, **flag_data}
+
+
+def _recipients_for_org(org_id, org):
+    """Resolve alert recipients for org_id, strictly from that org's own
+    Firestore records.
+
+    1. org.safeguarding_lead_email, if set -- the sole recipient.
+    2. Otherwise every active location_admin account on that org
+       (status != 'active' -- e.g. 'suspended' -- is excluded, same
+       convention as the login check in routes/auth.py).
+
+    There is deliberately no platform-level fallback and no hardcoded
+    address anywhere in this function -- Teko/Triggr must never receive a
+    client's safeguarding data (hard rule from the brief). The org_id
+    equality check inside the location_admin loop is defence in depth:
+    FirebaseService.get_all_admins_by_org already scopes its own Firestore
+    query to org_id, but a safeguarding alert recipient list is exactly
+    the kind of thing that must never leak cross-org even if that query
+    were ever loosened later. super_admin accounts (the Triggr platform
+    role -- see routes/auth.py) are never eligible; only role ==
+    'location_admin' is considered.
+
+    Returns [] if neither resolves -- the caller decides what to do with
+    an empty result (log ERROR, leave alert_sent False); this function
+    only resolves addresses, it never sends anything and never touches
+    alert_sent itself.
+    """
+    lead_email = (org or {}).get('safeguarding_lead_email')
+    if lead_email:
+        return [lead_email]
+
+    admins = FirebaseService.get_all_admins_by_org(org_id)
+    recipients = []
+    for admin in admins:
+        if admin.get('org_id') != org_id:
+            continue
+        if admin.get('role') != 'location_admin':
+            continue
+        if admin.get('status', 'active') != 'active':
+            continue
+        email = admin.get('email')
+        if email:
+            recipients.append(email)
+    return recipients
+
+
+def send_safeguarding_alert(flag):
+    """Send the alert email(s) for one just-created safeguarding flag.
+
+    MUST be called only from ConversationService.handle_incoming_message,
+    exactly once, immediately with the dict record_safeguarding_flag()
+    just returned -- and only after that message's normal reply has
+    already been sent, so a slow or failing send here can never block or
+    delay it.
+
+    SCOPE GUARANTEE against ever alerting on a pre-existing flag: this
+    function takes the flag to alert on as a plain argument -- it never
+    runs a Firestore query of its own to find flags (no `.where(...)`,
+    no `.stream()` over the safeguarding_flags collection anywhere in
+    this module). The only write it performs against an existing
+    document is a single `.document(flag['id']).update(...)` once sending
+    succeeds. A flag created before this feature shipped is therefore
+    structurally unreachable here: nothing ever iterates the collection
+    looking for alert_sent == False, so nothing can ever pick one up.
+
+    Never raises -- every failure path (org/recipient resolution failure,
+    no recipients, send failure) is caught here and logged at ERROR with
+    the flag ID; alert_sent is simply left False (its value from
+    record_safeguarding_flag) for that to be investigated manually. Not
+    retried inline, per the brief.
+    """
+    flag_id = flag['id']
+    org_id = flag['org_id']
+
+    try:
+        org = FirebaseService.get_organisation(org_id)
+        recipients = _recipients_for_org(org_id, org)
+    except Exception:
+        logger.error(
+            "Safeguarding alert: failed to resolve recipients for flag_id=%s org_id=%s",
+            flag_id, org_id, exc_info=True,
+        )
+        return
+
+    if not recipients:
+        logger.error(
+            "Safeguarding alert: no recipients resolved for flag_id=%s org_id=%s -- "
+            "no safeguarding_lead_email set and no active location_admin accounts "
+            "found. alert_sent left False.",
+            flag_id, org_id,
+        )
+        return
+
+    org_name = (org or {}).get('name') or 'your organisation'
+    detected_at_display = flag['detected_at'].strftime('%Y-%m-%d %H:%M:%S UTC')
+
+    sent_to = []
+    try:
+        for recipient in recipients:
+            send_safeguarding_alert_email(
+                to_email=recipient,
+                org_name=org_name,
+                flag_id=flag_id,
+                person_name=flag.get('person_name'),
+                person_type=flag.get('person_type'),
+                phone_masked=flag.get('phone_number'),
+                message_text=flag.get('message_text'),
+                matched_categories=flag.get('matched_category', []),
+                matched_terms=flag.get('matched_terms', []),
+                detected_at_display=detected_at_display,
+            )
+            sent_to.append(recipient)
+    except Exception:
+        logger.error(
+            "Safeguarding alert: send failed for flag_id=%s org_id=%s after sending "
+            "to %d/%d resolved recipients -- alert_sent left False, not retried inline",
+            flag_id, org_id, len(sent_to), len(recipients), exc_info=True,
+        )
+        return
+
+    db = FirebaseService.get_db()
+    db.collection(COLLECTION).document(flag_id).update({
+        'alert_sent': True,
+        'sent_at': firestore.SERVER_TIMESTAMP,
+        'alert_recipients': recipients,
+    })
+
+    logger.info(
+        "Safeguarding alert sent: flag_id=%s org_id=%s recipients=%d",
+        flag_id, org_id, len(recipients),
     )

@@ -229,6 +229,11 @@ def test_benign_cricket_message_my_bruise_from_batting_does_not_fire():
 # ---------------------------------------------------------------------------
 
 class _FakeDocRef:
+    # record_safeguarding_flag() now returns {'id': doc_ref.id, ...} (the
+    # flag dict send_safeguarding_alert() is later called with) -- a real
+    # Firestore auto-id doc_ref always has .id, so the fake needs one too.
+    id = 'fake-flag-doc-id'
+
     def __init__(self, captured):
         self._captured = captured
 

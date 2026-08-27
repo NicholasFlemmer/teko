@@ -8,6 +8,7 @@ the invite/reset/login link -- is never written to logs, at any log level,
 under any condition. Only the subject, recipient, and (on failure) the
 exception type are logged.
 """
+import html
 import logging
 import resend
 
@@ -204,4 +205,66 @@ def send_welcome_email(to_email, name, org_name, login_url):
 <p style="margin:0 0 16px 0;font-size:18px;font-weight:700;">Welcome to Teko, {name}</p>
 <p style="margin:0 0 24px 0;">Your account for <strong>{org_name}</strong> is ready.</p>
 <p style="margin:0 0 24px 0;">{_button("Sign In", login_url)}</p>"""
+    _send(to_email, subject, _layout(body))
+
+
+_PERSON_TYPE_LABELS = {
+    'participant': 'Participant',
+    'coach': 'Coach',
+}
+
+
+def send_safeguarding_alert_email(to_email, org_name, flag_id, person_name, person_type,
+                                   phone_masked, message_text, matched_categories,
+                                   matched_terms, detected_at_display):
+    """Email one safeguarding alert recipient about a single flagged message.
+
+    FACTUAL RECORD ONLY, per the client's safeguarding policy: every field
+    below is an identifier, a masked phone number, the matched keyword
+    data, or the inbound message text reproduced EXACTLY as received --
+    no paraphrasing, no summarising, no AI-generated interpretation, no
+    severity rating, no recommended action. See
+    services/safeguarding_service.py's record_safeguarding_flag for the
+    same verbatim-storage rule this mirrors.
+
+    Subject is deliberately neutral -- it names only the organisation,
+    never the message, category, or person's name, because subjects
+    render on lock screens where anyone nearby can read them.
+
+    Called once per resolved recipient (see
+    services/safeguarding_service.py's send_safeguarding_alert) --
+    recipients are always sent to individually, one call per address,
+    never CC'd/BCC'd together.
+
+    Dynamic values are HTML-escaped (quotes left alone, so the
+    message/name text a test compares byte-for-byte still matches unless
+    it contains literal '<', '>' or '&') to stop an inbound message from
+    ever being interpreted as markup by an HTML email client.
+    """
+    subject = f"Safeguarding alert - {org_name}"
+
+    person_label = _PERSON_TYPE_LABELS.get(person_type, person_type or 'Person')
+    categories_display = ", ".join(matched_categories) or "(none)"
+    terms_display = ", ".join(matched_terms) or "(none)"
+
+    esc = lambda s: html.escape(s or '', quote=False)  # noqa: E731
+
+    body = f"""\
+<p style="margin:0 0 16px 0;font-size:18px;font-weight:700;">Safeguarding alert</p>
+<p style="margin:0 0 20px 0;">
+  A keyword match was detected in an inbound WhatsApp message for <strong>{esc(org_name)}</strong>.
+</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px 0;font-size:14px;">
+  <tr><td style="padding:4px 0;color:{COLOR_MUTED};width:140px;vertical-align:top;">From</td><td style="padding:4px 0;">{esc(person_name) or 'Unknown'} ({esc(person_label)})</td></tr>
+  <tr><td style="padding:4px 0;color:{COLOR_MUTED};vertical-align:top;">Phone</td><td style="padding:4px 0;">{esc(phone_masked) or '****'}</td></tr>
+  <tr><td style="padding:4px 0;color:{COLOR_MUTED};vertical-align:top;">Categories</td><td style="padding:4px 0;">{esc(categories_display)}</td></tr>
+  <tr><td style="padding:4px 0;color:{COLOR_MUTED};vertical-align:top;">Matched terms</td><td style="padding:4px 0;">{esc(terms_display)}</td></tr>
+  <tr><td style="padding:4px 0;color:{COLOR_MUTED};vertical-align:top;">Detected at</td><td style="padding:4px 0;">{esc(detected_at_display)}</td></tr>
+  <tr><td style="padding:4px 0;color:{COLOR_MUTED};vertical-align:top;">Flag ID</td><td style="padding:4px 0;">{esc(flag_id)}</td></tr>
+</table>
+<p style="margin:0 0 8px 0;color:{COLOR_MUTED};font-size:13px;">Message (verbatim, as received):</p>
+<div style="margin:0 0 20px 0;padding:12px 14px;background:{COLOR_CANVAS};border:1px solid {COLOR_LINE};border-radius:{RADIUS_CONTROL};white-space:pre-wrap;font-size:14px;">{esc(message_text)}</div>
+<p style="margin:0;color:{COLOR_MUTED};font-size:12px;">
+  This is an automated keyword detection. It has not been assessed by a person and may be a false positive.
+</p>"""
     _send(to_email, subject, _layout(body))
