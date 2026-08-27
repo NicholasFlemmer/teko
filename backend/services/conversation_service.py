@@ -3,6 +3,7 @@ from services.firebase_service import FirebaseService
 from services.gemini_service import GeminiService
 from services.whatsapp_service import WhatsAppService
 from services.person_service import PersonService, PersonCacheUnavailableError
+from services.safeguarding_service import detect_safeguarding_matches, record_safeguarding_flag
 from routes.sse import push_event
 from utils.phone import mask_phone
 from datetime import datetime, date, timezone
@@ -1663,6 +1664,35 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
                     message_text=cls.UNRECOGNISED_SENDER_MESSAGE
                 )
                 return
+
+            # Safeguarding keyword detection -- runs on every inbound
+            # coach/participant message, before any command classification
+            # or AI call, so it covers both branches below identically.
+            # Detection-only: never touches `response`, never runs on the
+            # AI's outbound text. Wrapped so a detection/recording failure
+            # can never block the reply (constraint 1) but is never
+            # swallowed silently either -- logged at ERROR with enough
+            # context to investigate (constraint 2).
+            try:
+                safeguarding_matches = detect_safeguarding_matches(message_text)
+                if safeguarding_matches:
+                    record_safeguarding_flag(
+                        org_id=person.get('org_id'),
+                        person_id=person.get('id'),
+                        person_type=person.get('person_type'),
+                        person_name=person.get('name'),
+                        phone_number=from_number,
+                        message_text=message_text,
+                        message_id=message_id,
+                        matches=safeguarding_matches,
+                    )
+            except Exception as safeguarding_error:
+                logger.error(
+                    "Safeguarding detection/recording failed for org_id=%s person_id=%s "
+                    "message_id=%s: %s",
+                    person.get('org_id'), person.get('id'), message_id, safeguarding_error,
+                    exc_info=True,
+                )
 
             if person.get('person_type') != 'coach':
                 cls._handle_participant_message(from_number, message_text, person)
