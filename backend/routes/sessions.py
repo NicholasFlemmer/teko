@@ -4,7 +4,7 @@ from services.firebase_service import FirebaseService
 from services.whatsapp_service import WhatsAppService
 from routes.auth import token_required
 from utils.geolocation import verify_location, format_location
-from utils.phone import normalize_sa_phone
+from utils.phone import normalize_phone_for_sending
 from datetime import datetime, timedelta, timezone, date as _date
 from config import Config
 import uuid
@@ -432,7 +432,7 @@ def send_reminder(current_user, session_id):
                 continue
 
             coach_name = coach.get('name') or f"{coach.get('first_name', '')} {coach.get('last_name', '')}".strip() or 'Coach'
-            phone = normalize_sa_phone(coach.get('phone_number', ''))
+            phone = normalize_phone_for_sending(coach.get('phone_number', ''))
             if not phone:
                 results.append({'coach_id': cid, 'error': f'Invalid phone for {coach_name}'})
                 continue

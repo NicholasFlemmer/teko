@@ -2,7 +2,7 @@ from services.firebase_service import FirebaseService
 from services.whatsapp_service import WhatsAppService
 from datetime import datetime, timedelta, timezone
 from config import Config
-from utils.phone import normalize_sa_phone
+from utils.phone import normalize_phone_for_sending
 import uuid
 import logging
 
@@ -99,7 +99,7 @@ class SchedulerService:
                                 continue
 
                             coach_name = coach.get('name') or f"{coach.get('first_name', '')} {coach.get('last_name', '')}".strip() or 'Coach'
-                            phone = normalize_sa_phone(coach.get('phone_number', ''))
+                            phone = normalize_phone_for_sending(coach.get('phone_number', ''))
                             if not phone:
                                 errors.append(f"Invalid/missing phone for coach {coach_name} (session {session['id']})")
                                 continue
@@ -217,7 +217,7 @@ class SchedulerService:
                     coach = FirebaseService.get_coach(coach_id, session_org_id)
                     if not coach:
                         continue
-                    phone = normalize_sa_phone(coach.get('phone_number', ''))
+                    phone = normalize_phone_for_sending(coach.get('phone_number', ''))
                     if not phone:
                         continue
                     coach_name = coach.get('name') or coach.get('first_name', '') or coach_word

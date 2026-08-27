@@ -1,7 +1,7 @@
 import requests
 import logging
 from config import Config
-from utils.phone import normalize_sa_phone, mask_phone
+from utils.phone import normalize_phone_for_sending, mask_phone
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +34,14 @@ class WhatsAppService:
             "Content-Type": "application/json"
         }
 
-        formatted_phone = normalize_sa_phone(phone_number)
+        formatted_phone = normalize_phone_for_sending(phone_number)
         if not formatted_phone:
-            logger.warning("Invalid phone number provided")
+            logger.warning(
+                "Refusing to send: invalid phone number %s (must be 8-15 digits after stripping)",
+                mask_phone(phone_number),
+            )
             return {"success": False, "error": f"Invalid phone number: {phone_number}"}
-        
+
         # Construct message body
         full_message = message_text
         if check_in_url:
@@ -174,9 +177,12 @@ class WhatsAppService:
             "Content-Type": "application/json"
         }
 
-        formatted_phone = normalize_sa_phone(phone_number)
+        formatted_phone = normalize_phone_for_sending(phone_number)
         if not formatted_phone:
-            logger.warning("Invalid phone number for template")
+            logger.warning(
+                "Refusing to send template: invalid phone number %s (must be 8-15 digits after stripping)",
+                mask_phone(phone_number),
+            )
             return {"success": False, "error": f"Invalid phone number: {phone_number}"}
 
         payload = {

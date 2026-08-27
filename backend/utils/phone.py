@@ -56,6 +56,43 @@ def normalize_sa_phone(phone_number):
     return ''
 
 
+def normalize_phone_for_sending(phone_number):
+    """Normalize a phone number for outbound WhatsApp sends — international,
+    not SA-only.
+
+    Unlike normalize_sa_phone(), this applies no country-specific allowlist
+    beyond the one SA-specific convenience below: it accepts any number
+    whose digit count falls in the E.164 range (8-15 digits), so a UAE,
+    Brazilian, or UK number is sent as-is rather than refused outright.
+    normalize_sa_phone() itself is unchanged and still used wherever strict
+    SA validation is required (identity storage/migration); this function
+    exists only for the outbound send path.
+
+    Rules:
+      1. Strip everything that isn't a digit.
+      2. If exactly 10 digits and starts with '0', treat as a locally
+         formatted SA number and replace the leading 0 with 27 (preserves
+         normalize_sa_phone()'s existing behaviour for that one shape).
+      3. Accept the result if it's 8-15 digits (E.164 range).
+      4. Otherwise return ''.
+
+    Returns empty string if the input is empty/None or outside the E.164
+    digit-count range.
+    """
+    if not phone_number:
+        return ''
+
+    cleaned = re.sub(r'[^\d]', '', str(phone_number))
+
+    if len(cleaned) == 10 and cleaned.startswith('0'):
+        cleaned = '27' + cleaned[1:]
+
+    if 8 <= len(cleaned) <= 15:
+        return cleaned
+
+    return ''
+
+
 def normalize_phone_for_matching(phone_number):
     """Normalize a phone number for identity-matching comparisons only.
 
