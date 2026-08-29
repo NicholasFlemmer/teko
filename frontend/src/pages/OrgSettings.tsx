@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Building2, Loader2, Save, ShieldAlert, AlertTriangle } from "lucide-react";
+import { Building2, Loader2, Save, ShieldAlert, AlertTriangle, Clock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRefreshTerminology } from "@/contexts/TerminologyContext";
@@ -76,6 +76,11 @@ export default function OrgSettings() {
   const [worksWithMinors, setWorksWithMinors] = useState<boolean | null>(null);
   const [savingSafeguarding, setSavingSafeguarding] = useState(false);
 
+  // Timezone section state. Plain text IANA zone name (e.g.
+  // "Africa/Johannesburg") -- no default, "" means not configured.
+  const [timezone, setTimezone] = useState("");
+  const [savingTimezone, setSavingTimezone] = useState(false);
+
   const safeguardingConfigured = isSafeguardingFullyConfigured(org);
 
   useEffect(() => {
@@ -104,6 +109,7 @@ export default function OrgSettings() {
             ? orgRes.organisation.works_with_minors
             : null
         );
+        setTimezone(orgRes.organisation.timezone ?? "");
       } catch (err) {
         toast({
           title: "Failed to load settings",
@@ -168,6 +174,30 @@ export default function OrgSettings() {
       });
     } finally {
       setSavingSafeguarding(false);
+    }
+  };
+
+  const handleSaveTimezone = async () => {
+    if (!orgId) return;
+    try {
+      setSavingTimezone(true);
+      const trimmedTimezone = timezone.trim();
+      const updated = await organisationsAPI.update(orgId, {
+        timezone: trimmedTimezone || null,
+      });
+      setOrg(updated.organisation);
+      toast({
+        title: "Timezone saved",
+        description: "Your organisation's timezone has been updated.",
+      });
+    } catch (err: any) {
+      toast({
+        title: "Save failed",
+        description: err?.message || "Could not save your timezone. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingTimezone(false);
     }
   };
 
@@ -336,6 +366,44 @@ export default function OrgSettings() {
                 <div className="flex justify-end pt-2">
                   <Button onClick={handleSaveSafeguarding} disabled={savingSafeguarding} className="gap-2">
                     {savingSafeguarding ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Save className="w-4 h-4" />
+                    )}
+                    Save changes
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Section 4: Timezone */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-primary" />
+                  <CardTitle>Timezone</CardTitle>
+                </div>
+                <CardDescription>
+                  The IANA timezone this organisation operates in (e.g. Africa/Johannesburg,
+                  America/Sao_Paulo). Used to record session dates and times correctly. Leave
+                  blank if unset — sessions fall back to UTC until this is configured.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-1.5 sm:max-w-xs">
+                  <Label htmlFor="org-timezone">Timezone</Label>
+                  <Input
+                    id="org-timezone"
+                    value={timezone}
+                    onChange={(e) => setTimezone(e.target.value)}
+                    placeholder="e.g. Africa/Johannesburg"
+                    disabled={savingTimezone}
+                  />
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <Button onClick={handleSaveTimezone} disabled={savingTimezone} className="gap-2">
+                    {savingTimezone ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
                       <Save className="w-4 h-4" />

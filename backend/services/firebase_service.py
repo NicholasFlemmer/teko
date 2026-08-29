@@ -1,6 +1,7 @@
 import firebase_admin
 from firebase_admin import credentials, firestore
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from config import Config
 import os
 import random
@@ -1104,7 +1105,10 @@ class FirebaseService:
 
         Fields: name, slug, type, terminology, ai_persona_prompt, country,
         supported_languages, is_active, created_at, safeguarding_lead_name,
-        safeguarding_lead_email, works_with_minors. ai_persona_prompt is
+        safeguarding_lead_email, works_with_minors, timezone. timezone is
+        an optional IANA zone string (e.g. "Africa/Johannesburg"); nullable,
+        no default -- see FirebaseService.get_org_now for how an absent or
+        invalid value is handled at read time. ai_persona_prompt is
         optional — when empty/absent, the AI system prompt falls back to
         the default for the org's type (see
         ConversationService.get_ai_persona_prompt). country/
@@ -1164,6 +1168,37 @@ class FirebaseService:
         country = (org.get('country') if org else None) or cls.DEFAULT_COUNTRY
         languages = (org.get('supported_languages') if org else None) or cls.DEFAULT_SUPPORTED_LANGUAGES
         return {'country': country, 'supported_languages': list(languages)}
+
+    @classmethod
+    def get_org_now(cls, org_id):
+        """Current wall-clock date/time in an org's configured timezone, as
+        a naive datetime (no tzinfo) -- a drop-in replacement for the old
+        datetime.now(SAST).replace(tzinfo=None)/date.today() pattern, just
+        resolved per-org instead of one timezone hardcoded for every org.
+
+        Falls back to UTC (also naive, so it composes with date.today()-
+        style callers exactly as before) when the org has no `timezone`
+        field or it isn't a valid IANA zone name -- logged at WARNING
+        (naming org_id) either way, so an unconfigured or misconfigured org
+        stays visible instead of silently comparing against the wrong
+        clock.
+        """
+        tz_name = None
+        if org_id:
+            org = cls.get_organisation(org_id)
+            tz_name = (org or {}).get('timezone')
+
+        if not tz_name:
+            logger.warning("Org %s has no timezone configured — falling back to UTC.", org_id)
+            return datetime.now(timezone.utc).replace(tzinfo=None)
+
+        try:
+            tz = ZoneInfo(tz_name)
+        except Exception:
+            logger.warning("Org %s has invalid timezone %r — falling back to UTC.", org_id, tz_name)
+            return datetime.now(timezone.utc).replace(tzinfo=None)
+
+        return datetime.now(tz).replace(tzinfo=None)
 
     # =========================================================================
     # Settings operations (single document 'app_settings')

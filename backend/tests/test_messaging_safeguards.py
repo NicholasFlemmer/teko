@@ -28,13 +28,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 # tests/conftest.py, which runs before any test module in this directory
 # is imported.
 
-from datetime import datetime, timedelta  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 import pytest  # noqa: E402
 
 from config import Config  # noqa: E402
 from services.firebase_service import FirebaseService  # noqa: E402
-from services.scheduler_service import SchedulerService, SAST  # noqa: E402
+from services.scheduler_service import SchedulerService  # noqa: E402
 from services.whatsapp_service import WhatsAppService  # noqa: E402
 from services.conversation_service import ConversationService  # noqa: E402
 
@@ -104,7 +104,10 @@ def _install_fakes(monkeypatch, sessions, coach=COACH):
 
 
 def _session_with_end_hours_ago(session_id, hours_ago, status='checked_in', **extra):
-    end = datetime.now(SAST).replace(tzinfo=None) - timedelta(hours=hours_ago)
+    # No org_id is set on these fixtures, so send_end_session_prompts
+    # resolves "now" via FirebaseService.get_org_now(None), which falls
+    # back to UTC -- build against that same clock.
+    end = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours_ago)
     start = end - timedelta(hours=1)
     session = {
         'id': session_id,

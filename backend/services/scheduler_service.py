@@ -8,9 +8,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# South Africa Standard Time (UTC+2) — sessions are stored in local time
-SAST = timezone(timedelta(hours=2))
-
 class SchedulerService:
     """Service for scheduling and sending session reminders"""
 
@@ -24,6 +21,17 @@ class SchedulerService:
     }
 
     @classmethod
+    def _cached_org_now(cls, cache, org_id):
+        """Per-org 'now' (FirebaseService.get_org_now), memoized within a
+        single scheduler run so N sessions belonging to the same org don't
+        each trigger their own organisation read. A single run's wall-clock
+        drift across orgs is well under a second either way -- irrelevant
+        at the minute-granularity these comparisons run at."""
+        if org_id not in cache:
+            cache[org_id] = FirebaseService.get_org_now(org_id)
+        return cache[org_id]
+
+    @classmethod
     def check_and_send_reminders(cls):
         """Check for sessions that need reminders and send them
 
@@ -31,17 +39,19 @@ class SchedulerService:
         like Cloud Scheduler or a cron job.
         """
         try:
-            # Get current time in SAST (sessions are stored in local SA time)
-            now = datetime.now(SAST).replace(tzinfo=None)
-
-            # Calculate target time (X minutes from now)
-            target_time = now + timedelta(minutes=Config.REMINDER_MINUTES_BEFORE)
+            # target_time is passed to get_sessions_for_reminder() below,
+            # but that lookup is itself global (no date/time filter at all
+            # -- it just returns every status='scheduled' session, see its
+            # docstring) so this value is never actually used for
+            # filtering. Left UTC-based since it's otherwise inert.
+            target_time = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=Config.REMINDER_MINUTES_BEFORE)
 
             # Get all scheduled sessions
             sessions = FirebaseService.get_sessions_for_reminder(target_time)
 
             reminders_sent = 0
             errors = []
+            org_now_cache = {}
 
             for session in sessions:
                 try:
@@ -54,6 +64,12 @@ class SchedulerService:
 
                     session_datetime_str = f"{session_date} {session_start}"
                     session_datetime = datetime.strptime(session_datetime_str, "%Y-%m-%d %H:%M")
+
+                    # "Now" resolved in THIS session's own org's timezone --
+                    # sessions from different orgs in the same run can be in
+                    # different zones, so this must be per-session, not a
+                    # single shared value computed once for the whole batch.
+                    now = cls._cached_org_now(org_now_cache, session.get('org_id'))
 
                     # Check if session is within the reminder window
                     time_diff = (session_datetime - now).total_seconds() / 60
@@ -164,7 +180,6 @@ class SchedulerService:
         plus END_SESSION_PROMPT_MINUTES has passed.
         """
         try:
-            now = datetime.now(SAST).replace(tzinfo=None)
             db = FirebaseService.get_db()
             docs = db.collection('sessions').where('status', '==', 'checked_in').stream()
             sessions = [{'id': doc.id, **doc.to_dict()} for doc in docs]
@@ -172,7 +187,7 @@ class SchedulerService:
             sent = 0
             errors = []
             stale_skipped = 0
-            stale_cutoff = now - timedelta(hours=Config.END_PROMPT_MAX_AGE_HOURS)
+            org_now_cache = {}
 
             for session in sessions:
                 if session.get('end_prompt_sent'):
@@ -191,6 +206,12 @@ class SchedulerService:
                         end_dt = datetime.strptime(f"{session_date} {session_start}", "%Y-%m-%d %H:%M") + timedelta(hours=2)
                 except ValueError:
                     continue
+
+                # "Now" (and the stale cutoff derived from it) resolved in
+                # THIS session's own org's timezone -- sessions from
+                # different orgs in the same run can be in different zones.
+                now = cls._cached_org_now(org_now_cache, session.get('org_id'))
+                stale_cutoff = now - timedelta(hours=Config.END_PROMPT_MAX_AGE_HOURS)
 
                 prompt_after = end_dt + timedelta(minutes=Config.END_SESSION_PROMPT_MINUTES)
                 if now < prompt_after:
@@ -273,14 +294,13 @@ class SchedulerService:
         This should be run periodically (e.g., every hour) to update session statuses.
         """
         try:
-            now = datetime.now(SAST).replace(tzinfo=None)
-
             # Get only reminded sessions (avoids loading entire history)
             db = FirebaseService.get_db()
             docs = db.collection('sessions').where('status', '==', 'reminded').stream()
             sessions = [{'id': doc.id, **doc.to_dict()} for doc in docs]
 
             updated = 0
+            org_now_cache = {}
 
             for session in sessions:
                 # Parse session end time (fall back to start_time + 2h if no end_time)
@@ -298,6 +318,11 @@ class SchedulerService:
                         session_end_time = datetime.strptime(f"{session_date} {session_start}", "%Y-%m-%d %H:%M") + timedelta(hours=2)
                 except ValueError:
                     continue
+
+                # "Now" resolved in THIS session's own org's timezone --
+                # sessions from different orgs in the same run can be in
+                # different zones.
+                now = cls._cached_org_now(org_now_cache, session.get('org_id'))
 
                 # If session end time has passed, mark as missed — unless the
                 # session already has check-in evidence, in which case a

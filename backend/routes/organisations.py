@@ -19,6 +19,12 @@ _SUPER_ADMIN_ONLY_FIELDS = ['name', 'type', 'terminology', 'ai_persona_prompt', 
 # still write these too.
 _SAFEGUARDING_FIELDS = ['safeguarding_lead_name', 'safeguarding_lead_email', 'works_with_minors']
 
+# IANA timezone string for the org (e.g. "Africa/Johannesburg",
+# "America/Sao_Paulo"). Nullable, no default. Gated the same as
+# _SAFEGUARDING_FIELDS -- a location_admin is the realistic owner of "what
+# timezone is this location in", same rationale as the safeguarding lead.
+_BOTH_ROLES_FIELDS = _SAFEGUARDING_FIELDS + ['timezone']
+
 _EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
 
@@ -148,9 +154,9 @@ def update_organisation(current_user, org_id):
     """Update an organisation's fields.
 
     super_admin may write any of _SUPER_ADMIN_ONLY_FIELDS or
-    _SAFEGUARDING_FIELDS. location_admin may write ONLY
-    _SAFEGUARDING_FIELDS (safeguarding_lead_name, safeguarding_lead_email,
-    works_with_minors), and only for their own org -- name, type,
+    _BOTH_ROLES_FIELDS. location_admin may write ONLY
+    _BOTH_ROLES_FIELDS (safeguarding_lead_name, safeguarding_lead_email,
+    works_with_minors, timezone), and only for their own org -- name, type,
     terminology, ai_persona_prompt, country, and supported_languages
     remain super_admin-only, same as before this route accepted
     location_admin at all.
@@ -179,9 +185,9 @@ def update_organisation(current_user, org_id):
             disallowed = [field for field in data if field in _SUPER_ADMIN_ONLY_FIELDS]
             if disallowed:
                 return jsonify({'success': False, 'error': 'Insufficient permissions'}), 403
-            allowed_fields = _SAFEGUARDING_FIELDS
+            allowed_fields = _BOTH_ROLES_FIELDS
         else:
-            allowed_fields = _SUPER_ADMIN_ONLY_FIELDS + _SAFEGUARDING_FIELDS
+            allowed_fields = _SUPER_ADMIN_ONLY_FIELDS + _BOTH_ROLES_FIELDS
 
         # Pair check on VALUES, not key presence (see _is_blank docstring):
         # "" and null and an absent key are all the same "not set" state.
@@ -217,6 +223,20 @@ def update_organisation(current_user, org_id):
                     'error': 'works_with_minors must be true, false, or null'
                 }), 400
 
+        timezone_in_data = 'timezone' in data
+        if timezone_in_data:
+            timezone_value = data['timezone']
+            if timezone_value is not None and not isinstance(timezone_value, str):
+                return jsonify({
+                    'success': False,
+                    'error': 'timezone must be a string or null'
+                }), 400
+            # Not validated as a real IANA zone name here on purpose --
+            # FirebaseService.get_org_now already falls back to UTC and
+            # logs a WARNING naming the org for an absent or invalid value,
+            # so a typo is visible in logs rather than rejected outright.
+            normalized_timezone = _normalize_blank_to_none(timezone_value)
+
         org = FirebaseService.get_organisation(org_id)
         if not org:
             return jsonify({
@@ -232,6 +252,8 @@ def update_organisation(current_user, org_id):
                 update_data[field] = normalized_name
             elif field == 'safeguarding_lead_email':
                 update_data[field] = normalized_email
+            elif field == 'timezone':
+                update_data[field] = normalized_timezone
             else:
                 update_data[field] = data[field]
 

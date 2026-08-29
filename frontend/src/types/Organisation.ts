@@ -29,6 +29,10 @@ export interface Organisation {
   safeguarding_lead_name?: string | null;
   safeguarding_lead_email?: string | null;
   works_with_minors?: boolean | null;
+  // IANA timezone string, e.g. "Africa/Johannesburg" or "America/Sao_Paulo".
+  // Nullable, no default -- an org without one falls back to UTC server-side
+  // (see FirebaseService.get_org_now).
+  timezone?: string | null;
 }
 
 // Default terminology per org type, shown until an org customises its own

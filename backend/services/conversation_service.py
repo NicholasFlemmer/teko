@@ -644,8 +644,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
             sections.append(cls._context_degraded_note("Your teams and players"))
 
         try:
-            from datetime import date as _date
-            today_str = _date.today().strftime('%Y-%m-%d')
+            today_str = FirebaseService.get_org_now(org_id).strftime('%Y-%m-%d')
             sessions = FirebaseService.get_all_sessions(org_id, coach_id=coach_id, start_date=today_str)
             if sessions:
                 sessions.sort(key=lambda s: (s.get('date', ''), s.get('start_time', '')))
@@ -878,7 +877,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
     def _handle_attendance_command_inner(cls, coach):
         coach_id = coach.get('id')
         org_id = coach.get('org_id')
-        today_str = date.today().strftime('%Y-%m-%d')
+        today_str = FirebaseService.get_org_now(org_id).strftime('%Y-%m-%d')
         terminology = cls._terminology_for(org_id)
         logger.info("Attendance command from coach id=%s for %s", coach_id, today_str)
 
@@ -1074,7 +1073,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         """Allow re-recording attendance for today's session"""
         coach_id = coach.get('id')
         org_id = coach.get('org_id')
-        today_str = date.today().strftime('%Y-%m-%d')
+        today_str = FirebaseService.get_org_now(org_id).strftime('%Y-%m-%d')
         all_coach_sessions = FirebaseService.get_all_sessions(org_id, coach_id=coach_id)
         sessions = [s for s in all_coach_sessions if s.get('date') == today_str and s.get('team_id')]
         if not sessions:
@@ -1333,7 +1332,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
             coach_id = coach.get('id')
             org_id = coach.get('org_id')
             coach_name = coach.get('name', 'Coach')
-            today_str = date.today().strftime('%Y-%m-%d')
+            today_str = FirebaseService.get_org_now(org_id).strftime('%Y-%m-%d')
 
             # Find today's sessions for this coach
             all_sessions = FirebaseService.get_all_sessions(org_id, coach_id=coach_id)
@@ -1460,7 +1459,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         from firebase_admin import firestore as _firestore
         coach_id = coach.get('id')
         org_id = coach.get('org_id')
-        today_str = date.today().strftime('%Y-%m-%d')
+        today_str = FirebaseService.get_org_now(org_id).strftime('%Y-%m-%d')
         terminology = cls._terminology_for(org_id)
 
         all_coach_sessions = FirebaseService.get_all_sessions(org_id, coach_id=coach_id)
@@ -1581,13 +1580,14 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         existing FirebaseService.create_session (never a direct Firestore
         write here), matching the real production session document shape.
 
-        date and start_time are both derived from the same `now` so they
-        can never disagree -- and `date` must match the plain, naive
-        date.today() every other today_str check in this file (including
-        the untouched handle_location_check_in) uses, or check-in would
-        not find the session it just created.
+        date and start_time are both derived from the same `now` (in the
+        org's own configured timezone, via FirebaseService.get_org_now) so
+        they can never disagree with each other, and `date` matches
+        exactly what every other today_str check in this file (including
+        handle_location_check_in) computes for this same org_id -- or
+        check-in would not find the session it just created.
         """
-        now = datetime.now()
+        now = FirebaseService.get_org_now(org_id)
         team_id = team.get('id')
         session_data = {
             'org_id': org_id,
@@ -1632,7 +1632,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         coach_id = coach.get('id')
         org_id = coach.get('org_id')
         coach_phone = coach.get('phone_number', '')
-        today_str = date.today().strftime('%Y-%m-%d')
+        today_str = FirebaseService.get_org_now(org_id).strftime('%Y-%m-%d')
         terminology = cls._terminology_for(org_id)
 
         # Step 2: don't create a second session for today.

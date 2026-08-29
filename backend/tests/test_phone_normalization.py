@@ -43,6 +43,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 # is imported.
 
 from datetime import datetime, timedelta, timezone  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
 
 import jwt as _jwt  # noqa: E402
 import logging  # noqa: E402
@@ -53,7 +54,7 @@ from config import Config  # noqa: E402
 from utils.phone import normalize_sa_phone, normalize_phone_for_sending  # noqa: E402
 from services.firebase_service import FirebaseService  # noqa: E402
 from services.whatsapp_service import WhatsAppService  # noqa: E402
-from services.scheduler_service import SchedulerService, SAST  # noqa: E402
+from services.scheduler_service import SchedulerService  # noqa: E402
 from services.conversation_service import ConversationService  # noqa: E402
 from routes.sessions import sessions_bp  # noqa: E402
 
@@ -326,8 +327,15 @@ class _FakeDb:
         return _FakeCollection(self._collections.get(name, {}))
 
 
+_JOHANNESBURG = ZoneInfo('Africa/Johannesburg')
+
+
 def _due_session(session_id='sess-1', org_id='org-a', coach_id='coach-1'):
-    when = datetime.now(SAST).replace(tzinfo=None) + timedelta(minutes=Config.REMINDER_MINUTES_BEFORE / 2)
+    # SchedulerService now resolves "now" per-session via FirebaseService.
+    # get_org_now(session['org_id']) -- the fake db below gives org-a this
+    # same Africa/Johannesburg zone (fixed UTC+2, no DST) so this is
+    # equivalent to the old hardcoded SAST constant.
+    when = datetime.now(_JOHANNESBURG).replace(tzinfo=None) + timedelta(minutes=Config.REMINDER_MINUTES_BEFORE / 2)
     return {
         'id': session_id,
         'org_id': org_id,
@@ -344,7 +352,10 @@ def test_check_and_send_reminders_accepts_uae_coach_number(monkeypatch):
     session = _due_session()
     coach = {'id': 'coach-1', 'org_id': 'org-a', 'name': 'Ahmed', 'phone_number': '971563271027'}
 
-    fake_db = _FakeDb({'coaches': {'coach-1': coach}})
+    fake_db = _FakeDb({
+        'coaches': {'coach-1': coach},
+        'organisations': {'org-a': {'timezone': 'Africa/Johannesburg'}},
+    })
     monkeypatch.setattr(FirebaseService, 'get_db', lambda: fake_db)
     monkeypatch.setattr(FirebaseService, 'get_sessions_for_reminder', lambda target: [dict(session)])
     monkeypatch.setattr(FirebaseService, 'create_check_in_token', lambda *a, **kw: None)
@@ -400,7 +411,9 @@ class _FakeSessionsDb:
 
 def test_send_end_session_prompts_accepts_uae_coach_number(monkeypatch):
     coach = {'id': 'coach-1', 'name': 'Ahmed', 'phone_number': '971563271027'}
-    end = datetime.now(SAST).replace(tzinfo=None) - timedelta(hours=1)
+    # No org_id on this session -> get_org_now(None) falls back to UTC, so
+    # build the fixture against that same clock.
+    end = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
     start = end - timedelta(hours=1)
     session = {
         'id': 'sess-1',

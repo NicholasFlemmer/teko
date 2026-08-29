@@ -35,12 +35,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 # tests/conftest.py, which runs before any test module in this directory
 # is imported.
 
-from datetime import datetime, timedelta  # noqa: E402
+from datetime import datetime, timedelta, timezone  # noqa: E402
 
 import pytest  # noqa: E402
 
 from services.firebase_service import FirebaseService  # noqa: E402
-from services.scheduler_service import SchedulerService, SAST  # noqa: E402
+from services.scheduler_service import SchedulerService  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -101,8 +101,13 @@ def _install_fake_sessions(monkeypatch, sessions):
 
 
 def _past_session(session_id='sess-past', **extra):
-    """A session whose end_time is safely in the past relative to real now."""
-    end = datetime.now(SAST).replace(tzinfo=None) - timedelta(hours=2)
+    """A session whose end_time is safely in the past relative to real now.
+
+    No org_id is set on these fixtures, so mark_missed_sessions resolves
+    "now" via FirebaseService.get_org_now(None), which falls back to UTC --
+    build against that same clock.
+    """
+    end = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=2)
     start = end - timedelta(hours=1)
     session = {
         'id': session_id,
@@ -116,8 +121,11 @@ def _past_session(session_id='sess-past', **extra):
 
 
 def _future_session(session_id='sess-future', **extra):
-    """A session whose end_time is safely in the future relative to real now."""
-    start = datetime.now(SAST).replace(tzinfo=None) + timedelta(hours=1)
+    """A session whose end_time is safely in the future relative to real now.
+
+    Same no-org_id -> UTC fallback reasoning as _past_session above.
+    """
+    start = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
     end = start + timedelta(hours=1)
     session = {
         'id': session_id,

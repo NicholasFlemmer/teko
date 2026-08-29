@@ -24,11 +24,19 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from datetime import datetime, timedelta  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
 
 from services.firebase_service import FirebaseService  # noqa: E402
-from services.scheduler_service import SchedulerService, SAST  # noqa: E402
+from services.scheduler_service import SchedulerService  # noqa: E402
 from services.whatsapp_service import WhatsAppService  # noqa: E402
 from services.conversation_service import ConversationService  # noqa: E402
+
+# Scheduler "now" is resolved per-session via FirebaseService.get_org_now,
+# which reads the session's org's `timezone` field -- these fixtures give
+# org-a that field (Africa/Johannesburg, fixed UTC+2, no DST) so building
+# "due" session times against this same zone is equivalent to the old
+# hardcoded SAST constant this file used to import from scheduler_service.
+JOHANNESBURG = ZoneInfo('Africa/Johannesburg')
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +113,7 @@ def _due_session(session_id='sess-1', org_id='org-a', location_id='loc-1', coach
     that can silently drift out of range.
     """
     from config import Config
-    when = datetime.now(SAST).replace(tzinfo=None) + timedelta(minutes=Config.REMINDER_MINUTES_BEFORE / 2)
+    when = datetime.now(JOHANNESBURG).replace(tzinfo=None) + timedelta(minutes=Config.REMINDER_MINUTES_BEFORE / 2)
     return {
         'id': session_id,
         'org_id': org_id,
@@ -122,6 +130,11 @@ def _run_reminder_job(monkeypatch, session, locations_by_id, coaches_by_id):
     fake_db = _FakeDb({
         'locations': {'docs_by_id': locations_by_id},
         'coaches': {'docs_by_id': coaches_by_id},
+        # get_org_now(session['org_id']) reads this via FirebaseService.
+        # get_organisation -- give the session's own org a timezone so
+        # "now" resolves to the same Africa/Johannesburg used to build
+        # the fixture's "due" session time above.
+        'organisations': {'docs_by_id': {session['org_id']: {'timezone': 'Africa/Johannesburg'}}},
     })
     monkeypatch.setattr(FirebaseService, 'get_db', lambda: fake_db)
     monkeypatch.setattr(FirebaseService, 'get_sessions_for_reminder', lambda target: [dict(session)])
@@ -218,7 +231,7 @@ def _ended_session_needing_prompt(session_id='sess-2', org_id='org-a', coach_id=
     """A 'checked_in' session whose end-prompt window is open, and isn't
     stale enough to be skipped."""
     from config import Config
-    now = datetime.now(SAST).replace(tzinfo=None)
+    now = datetime.now(JOHANNESBURG).replace(tzinfo=None)
     end = now - timedelta(minutes=Config.END_SESSION_PROMPT_MINUTES + 5)
     start = end - timedelta(hours=1)
     return {
@@ -238,6 +251,10 @@ def _run_end_session_prompts_job(monkeypatch, session, coaches_by_id):
     fake_db = _FakeDb({
         'sessions': {'stream_docs': [stream_doc]},
         'coaches': {'docs_by_id': coaches_by_id},
+        # Same reasoning as _run_reminder_job: "now" must resolve to the
+        # same Africa/Johannesburg zone the fixture's end/start times were
+        # built against.
+        'organisations': {'docs_by_id': {session['org_id']: {'timezone': 'Africa/Johannesburg'}}},
     })
     monkeypatch.setattr(FirebaseService, 'get_db', lambda: fake_db)
     monkeypatch.setattr(ConversationService, 'save_message', lambda *a, **kw: None)
