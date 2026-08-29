@@ -1500,6 +1500,210 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         lines.append(f"\nGreat work, {terminology['coach_singular']}! 🎉")
         return '\n'.join(lines)
 
+    # ── Start session on demand via WhatsApp ──────────────────────────────
+    #
+    # Cricket without Boundaries coaches rarely pre-schedule sessions -- they
+    # need to start one on demand instead of via the dashboard's POST
+    # /sessions route. This creates a real session document for today (via
+    # the existing FirebaseService.create_session -- never a direct
+    # Firestore write from this handler) so the untouched
+    # handle_location_check_in flow finds it and check-in works exactly as
+    # it already does for a pre-scheduled session.
+
+    @classmethod
+    def get_pending_session(cls, coach_phone):
+        """Check if a coach has a pending start-session team choice.
+
+        Same convention as get_pending_attendance/get_pending_photo: raises
+        PendingStateReadError if the Firestore read itself fails, so a read
+        failure can never be misread as "no pending request" -- see
+        PendingStateReadError's docstring for why that distinction matters.
+        """
+        db = FirebaseService.get_db()
+        key = cls._phone_key(coach_phone)
+        try:
+            doc = db.collection('pending_session').document(key).get()
+            if doc.exists:
+                data = doc.to_dict()
+                # Expire after 30 minutes -- same TTL as pending_attendance.
+                created = data.get('created_at')
+                if created:
+                    now = datetime.now(timezone.utc)
+                    if hasattr(created, 'timestamp'):
+                        created_ts = created.timestamp()
+                    else:
+                        created_ts = created.replace(tzinfo=timezone.utc).timestamp()
+                    if (now.timestamp() - created_ts) > 1800:
+                        cls.clear_pending_session(coach_phone)
+                        return None
+                return data
+            return None
+        except Exception as e:
+            logger.error("Error reading pending session for %s: %s", coach_phone, e)
+            raise PendingStateReadError(str(e)) from e
+
+    @classmethod
+    def set_pending_session(cls, coach_phone, teams, org_id, coach_id):
+        """Store pending start-session team choice for a coach."""
+        db = FirebaseService.get_db()
+        key = cls._phone_key(coach_phone)
+        db.collection('pending_session').document(key).set({
+            'teams': teams,  # [{id, name}, ...]
+            'org_id': org_id,
+            'coach_id': coach_id,
+            'created_at': datetime.now(timezone.utc)
+        })
+
+    @classmethod
+    def clear_pending_session(cls, coach_phone):
+        """Clear pending start-session state."""
+        db = FirebaseService.get_db()
+        key = cls._phone_key(coach_phone)
+        try:
+            db.collection('pending_session').document(key).delete()
+        except Exception:
+            pass
+
+    @classmethod
+    def _start_session_team_prompt(cls, teams, terminology):
+        """Numbered team-choice prompt, reused for the initial ask and for
+        re-prompting on an unrecognised reply."""
+        team_word = terminology['team_singular'].lower()
+        session_word = terminology['session_singular'].lower()
+        lines = [f"Which {team_word} is this {session_word} for?\n"]
+        for i, t in enumerate(teams, 1):
+            lines.append(f"{i}. {t['name']}")
+        return '\n'.join(lines)
+
+    @classmethod
+    def _create_on_demand_session(cls, org_id, coach_id, team, terminology):
+        """Create today's on-demand session for the given team via the
+        existing FirebaseService.create_session (never a direct Firestore
+        write here), matching the real production session document shape.
+
+        date and start_time are both derived from the same `now` so they
+        can never disagree -- and `date` must match the plain, naive
+        date.today() every other today_str check in this file (including
+        the untouched handle_location_check_in) uses, or check-in would
+        not find the session it just created.
+        """
+        now = datetime.now()
+        team_id = team.get('id')
+        session_data = {
+            'org_id': org_id,
+            'date': now.strftime('%Y-%m-%d'),
+            'start_time': now.strftime('%H:%M'),
+            'team_id': team_id,
+            'team_ids': [team_id],
+            'coach_id': coach_id,
+            'coach_ids': [coach_id],
+            'type': 'practice',
+        }
+        location_id = team.get('location_id')
+        if location_id:
+            session_data['location_id'] = location_id
+
+        try:
+            FirebaseService.create_session(session_data)
+        except Exception as e:
+            logger.error(
+                "Failed to create on-demand session for org_id=%s coach_id=%s team_id=%s: %s",
+                org_id, coach_id, team_id, e, exc_info=True,
+            )
+            return f"Sorry, your {terminology['session_singular'].lower()} could not be started. Please try again or contact your administrator."
+
+        team_name = team.get('name') or terminology['team_singular']
+        return (
+            f"✅ {terminology['session_singular']} started for *{team_name}*!\n\n"
+            "Share your location to check in. 📍"
+        )
+
+    @classmethod
+    def handle_start_session_command(cls, coach):
+        """Handle /session — create an on-demand session for today."""
+        try:
+            return cls._handle_start_session_command_inner(coach)
+        except Exception as e:
+            logger.error("Start session command error: %s", e, exc_info=True)
+            return "Something went wrong starting your session. Please try again or contact your administrator."
+
+    @classmethod
+    def _handle_start_session_command_inner(cls, coach):
+        coach_id = coach.get('id')
+        org_id = coach.get('org_id')
+        coach_phone = coach.get('phone_number', '')
+        today_str = date.today().strftime('%Y-%m-%d')
+        terminology = cls._terminology_for(org_id)
+
+        # Step 2: don't create a second session for today.
+        all_coach_sessions = FirebaseService.get_all_sessions(org_id, coach_id=coach_id)
+        if any(s.get('date') == today_str for s in all_coach_sessions):
+            return (
+                f"You already have a {terminology['session_singular'].lower()} for today. "
+                "Share your location to check in. 📍"
+            )
+
+        # Step 3: this coach's teams, via the existing fetch-all-then-filter
+        # pattern already used at conversation_service.py:618 and :1522 --
+        # no array_contains query, no new composite index.
+        all_teams = FirebaseService.get_all_teams(org_id)
+        coach_teams = [t for t in all_teams if coach_id in (t.get('coach_ids') or [])]
+
+        if not coach_teams:
+            return (
+                f"You're not linked to a {terminology['team_singular'].lower()} yet. "
+                "Please contact your administrator. 📋"
+            )
+
+        if len(coach_teams) == 1:
+            return cls._create_on_demand_session(org_id, coach_id, coach_teams[0], terminology)
+
+        # More than one team -- ask which one, and remember the choice set.
+        team_options = [{'id': t['id'], 'name': t.get('name', 'Unnamed')} for t in coach_teams]
+        cls.set_pending_session(coach_phone, team_options, org_id, coach_id)
+        return cls._start_session_team_prompt(team_options, terminology)
+
+    @classmethod
+    def handle_start_session_response(cls, coach_phone, message_text, pending):
+        """Process a coach's reply picking which team to start a session
+        for. Accepts only a bare number matching a listed team -- anything
+        else re-prompts with the same list rather than falling through to
+        command classification or the AI.
+        """
+        teams = pending.get('teams') or []
+        org_id = pending.get('org_id')
+        coach_id = pending.get('coach_id')
+        terminology = cls._terminology_for(org_id)
+
+        text = message_text.strip()
+        chosen = None
+        if text.isdigit():
+            idx = int(text)
+            if 1 <= idx <= len(teams):
+                chosen = teams[idx - 1]
+
+        if not chosen:
+            return cls._start_session_team_prompt(teams, terminology)
+
+        # Re-fetch the full team record -- pending state only stores
+        # {id, name} (per the pending_attendance/pending_photo convention
+        # of storing the minimum needed), so location_id comes from here.
+        team = FirebaseService.get_team(chosen['id'], org_id)
+        try:
+            if not team:
+                logger.error(
+                    "Pending session team %s no longer found for org_id=%s coach_id=%s",
+                    chosen['id'], org_id, coach_id,
+                )
+                return f"Sorry, your {terminology['session_singular'].lower()} could not be started. Please try again or contact your administrator."
+            return cls._create_on_demand_session(org_id, coach_id, team, terminology)
+        finally:
+            # Cleared once the creation attempt has finished, success or
+            # failure -- a pending_session document must never survive a
+            # failed attempt (see _create_on_demand_session, which never
+            # raises past this point).
+            cls.clear_pending_session(coach_phone)
+
     # ── Players command ────────────────────────────────────────────────
 
     PLAYER_INTENT_RE = re.compile(
@@ -1569,6 +1773,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         'attendance_redo': ['/attendance-redo', 'attendance-redo'],
         'end_session': ['/end', 'end session'],
         'players': ['/players', 'players'],
+        'start_session': ['/session', 'start session', '/start-session'],
     }
 
     # action -> the set of person_types allowed to use it. 'qa' is the free
@@ -1588,6 +1793,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         'players': {'coach'},
         'photo_upload': {'coach'},
         'location_checkin': {'coach'},
+        'start_session': {'coach', 'location_admin'},
     }
 
     # Preserves the exact original pending-attendance carve-out: while a
@@ -1722,41 +1928,55 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
                 logger.info("Routing to pending attendance response handler")
                 response = cls.handle_attendance_response(from_number, message_text, pending)
             else:
-                action = cls._classify_command(text_lower)
-                logger.debug("Classified as action=%s", action)
-                # A coach is permitted for every coach-reachable action —
-                # COMMAND_PERMISSIONS is consulted here too (rather than
-                # skipped) so a future action that's opened up unevenly
-                # can't silently bypass the single source of truth.
-                if not cls._is_allowed(action, 'coach'):
-                    response = cls._command_declined_message(coach.get('name'), coach.get('org_id'))
-                elif action == 'help':
-                    response = cls.get_help_message(coach.get('name'), coach.get('org_id'))
-                elif action == 'reset':
-                    cls.clear_pending_attendance(from_number)
-                    response = "Your conversation has been reset. Feel free to ask me anything!"
-                elif action == 'attendance':
-                    logger.info("Matched /attendance command")
-                    response = cls.handle_attendance_command(coach)
-                elif action == 'attendance_redo':
-                    logger.info("Matched /attendance-redo command")
-                    response = cls.handle_attendance_redo(coach)
-                elif action == 'end_session':
-                    logger.info("Matched /end command")
-                    response = cls.handle_end_session_command(coach)
-                elif action == 'players':
-                    logger.info("Matched /players command")
-                    response = cls.handle_players_command(coach)
+                # Then a pending start-session team choice — same
+                # precedence tier as pending attendance above: a pending
+                # reply is consumed before the text is ever classified as a
+                # command. Unlike pending attendance, there is no exempt-
+                # token carve-out here (see handle_start_session_response) —
+                # any reply that isn't a valid team number re-prompts.
+                pending_session = cls.get_pending_session(from_number)
+                if pending_session:
+                    logger.info("Routing to pending start-session response handler")
+                    response = cls.handle_start_session_response(from_number, message_text, pending_session)
                 else:
-                    # action == 'qa' — generate an AI response
-                    response = cls.generate_response(
-                        phone=from_number,
-                        user_message=message_text,
-                        org_id=coach.get('org_id'),
-                        person_name=coach.get('name'),
-                        person_id=coach.get('id'),
-                        person_type='coach',
-                    )
+                    action = cls._classify_command(text_lower)
+                    logger.debug("Classified as action=%s", action)
+                    # A coach is permitted for every coach-reachable action —
+                    # COMMAND_PERMISSIONS is consulted here too (rather than
+                    # skipped) so a future action that's opened up unevenly
+                    # can't silently bypass the single source of truth.
+                    if not cls._is_allowed(action, 'coach'):
+                        response = cls._command_declined_message(coach.get('name'), coach.get('org_id'))
+                    elif action == 'help':
+                        response = cls.get_help_message(coach.get('name'), coach.get('org_id'))
+                    elif action == 'reset':
+                        cls.clear_pending_attendance(from_number)
+                        response = "Your conversation has been reset. Feel free to ask me anything!"
+                    elif action == 'attendance':
+                        logger.info("Matched /attendance command")
+                        response = cls.handle_attendance_command(coach)
+                    elif action == 'attendance_redo':
+                        logger.info("Matched /attendance-redo command")
+                        response = cls.handle_attendance_redo(coach)
+                    elif action == 'end_session':
+                        logger.info("Matched /end command")
+                        response = cls.handle_end_session_command(coach)
+                    elif action == 'players':
+                        logger.info("Matched /players command")
+                        response = cls.handle_players_command(coach)
+                    elif action == 'start_session':
+                        logger.info("Matched /session command")
+                        response = cls.handle_start_session_command(coach)
+                    else:
+                        # action == 'qa' — generate an AI response
+                        response = cls.generate_response(
+                            phone=from_number,
+                            user_message=message_text,
+                            org_id=coach.get('org_id'),
+                            person_name=coach.get('name'),
+                            person_id=coach.get('id'),
+                            person_type='coach',
+                        )
 
             # Send response via WhatsApp
             result = WhatsAppService.send_message(
