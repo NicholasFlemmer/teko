@@ -1,5 +1,6 @@
 import logging
 import re
+import zoneinfo
 from flask import Blueprint, request, jsonify, g
 from services.firebase_service import FirebaseService
 from routes.auth import token_required, role_required
@@ -231,11 +232,21 @@ def update_organisation(current_user, org_id):
                     'success': False,
                     'error': 'timezone must be a string or null'
                 }), 400
-            # Not validated as a real IANA zone name here on purpose --
-            # FirebaseService.get_org_now already falls back to UTC and
-            # logs a WARNING naming the org for an absent or invalid value,
-            # so a typo is visible in logs rather than rejected outright.
+            # Blank ("" or whitespace-only) normalizes to None here, same as
+            # the safeguarding string fields above -- it's the valid
+            # "not configured" case, not an invalid value.
             normalized_timezone = _normalize_blank_to_none(timezone_value)
+            # A typo used to reach Firestore unchecked and silently fall
+            # back to UTC at read time (FirebaseService.get_org_now), with
+            # no error surfaced to whoever saved it -- that fallback still
+            # exists for data already stored before this validation shipped
+            # (see get_org_now), but a new write is now checked against the
+            # real IANA database so the same mistake can't happen again.
+            if normalized_timezone is not None and normalized_timezone not in zoneinfo.available_timezones():
+                return jsonify({
+                    'success': False,
+                    'error': 'timezone must be a valid IANA timezone name or null'
+                }), 400
 
         org = FirebaseService.get_organisation(org_id)
         if not org:

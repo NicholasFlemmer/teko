@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -82,6 +82,19 @@ export default function OrgSettings() {
   const [savingTimezone, setSavingTimezone] = useState(false);
 
   const safeguardingConfigured = isSafeguardingFullyConfigured(org);
+
+  // All IANA zone names the runtime knows about, sorted alphabetically. If
+  // the org's stored value isn't among them (e.g. a leftover free-text typo
+  // from before this became a select), it's appended so it still shows up
+  // as the selected option instead of being silently dropped from the list
+  // -- the save button is otherwise disabled/idle, so nothing is corrected
+  // or discarded just by loading the page.
+  const timezoneOptions = useMemo(() => {
+    const supported = Intl.supportedValuesOf("timeZone");
+    const stored = org?.timezone;
+    const withStored = stored && !supported.includes(stored) ? [...supported, stored] : supported;
+    return [...withStored].sort((a, b) => a.localeCompare(b));
+  }, [org?.timezone]);
 
   useEffect(() => {
     if (!orgId) {
@@ -392,13 +405,20 @@ export default function OrgSettings() {
               <CardContent className="space-y-4">
                 <div className="space-y-1.5 sm:max-w-xs">
                   <Label htmlFor="org-timezone">Timezone</Label>
-                  <Input
+                  <select
                     id="org-timezone"
                     value={timezone}
                     onChange={(e) => setTimezone(e.target.value)}
-                    placeholder="e.g. Africa/Johannesburg"
                     disabled={savingTimezone}
-                  />
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                  >
+                    <option value="">Not set</option>
+                    {timezoneOptions.map((tz) => (
+                      <option key={tz} value={tz}>
+                        {tz}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div className="flex justify-end pt-2">
