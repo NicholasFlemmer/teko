@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Building2, Loader2, Save, ShieldAlert, AlertTriangle, Clock } from "lucide-react";
+import { Building2, Loader2, Save, ShieldAlert, AlertTriangle, Clock, ClipboardList } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRefreshTerminology } from "@/contexts/TerminologyContext";
@@ -14,6 +14,7 @@ import { organisationsAPI } from "@/services/api";
 import {
   DEFAULT_TERMINOLOGY,
   getDefaultTerminology,
+  type AttendanceMode,
   type Organisation,
   type OrganisationType,
   type Terminology,
@@ -81,6 +82,12 @@ export default function OrgSettings() {
   const [timezone, setTimezone] = useState("");
   const [savingTimezone, setSavingTimezone] = useState(false);
 
+  // Attendance mode section state. Unlike timezone, this is never blank --
+  // an org with no attendance_mode field yet defaults to 'named' here too,
+  // matching how the backend reads an absent value.
+  const [attendanceMode, setAttendanceMode] = useState<AttendanceMode>("named");
+  const [savingAttendanceMode, setSavingAttendanceMode] = useState(false);
+
   const safeguardingConfigured = isSafeguardingFullyConfigured(org);
 
   // All IANA zone names the runtime knows about, sorted alphabetically. If
@@ -123,6 +130,7 @@ export default function OrgSettings() {
             : null
         );
         setTimezone(orgRes.organisation.timezone ?? "");
+        setAttendanceMode(orgRes.organisation.attendance_mode ?? "named");
       } catch (err) {
         toast({
           title: "Failed to load settings",
@@ -211,6 +219,27 @@ export default function OrgSettings() {
       });
     } finally {
       setSavingTimezone(false);
+    }
+  };
+
+  const handleSaveAttendanceMode = async () => {
+    if (!orgId) return;
+    try {
+      setSavingAttendanceMode(true);
+      const updated = await organisationsAPI.update(orgId, { attendance_mode: attendanceMode });
+      setOrg(updated.organisation);
+      toast({
+        title: "Attendance mode saved",
+        description: "Your organisation's attendance mode has been updated.",
+      });
+    } catch (err: any) {
+      toast({
+        title: "Save failed",
+        description: err?.message || "Could not save your attendance mode. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingAttendanceMode(false);
     }
   };
 
@@ -424,6 +453,47 @@ export default function OrgSettings() {
                 <div className="flex justify-end pt-2">
                   <Button onClick={handleSaveTimezone} disabled={savingTimezone} className="gap-2">
                     {savingTimezone ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Save className="w-4 h-4" />
+                    )}
+                    Save changes
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Section 5: Attendance Mode */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <ClipboardList className="w-5 h-5 text-primary" />
+                  <CardTitle>Attendance Mode</CardTitle>
+                </div>
+                <CardDescription>
+                  How coaches record attendance over WhatsApp. Named requires a player
+                  register for each team. Headcount records boys, girls, and new
+                  participants as numbers, with no player register required.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-1.5 sm:max-w-xs">
+                  <Label htmlFor="org-attendance-mode">Attendance mode</Label>
+                  <select
+                    id="org-attendance-mode"
+                    value={attendanceMode}
+                    onChange={(e) => setAttendanceMode(e.target.value as AttendanceMode)}
+                    disabled={savingAttendanceMode}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                  >
+                    <option value="named">Named (player register)</option>
+                    <option value="headcount">Headcount (boys / girls / new)</option>
+                  </select>
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <Button onClick={handleSaveAttendanceMode} disabled={savingAttendanceMode} className="gap-2">
+                    {savingAttendanceMode ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
                       <Save className="w-4 h-4" />

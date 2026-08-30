@@ -1,5 +1,13 @@
 export type OrganisationType = 'sports' | 'ngo' | 'events' | 'corporate';
 
+// 'named' records attendance against a per-player register (the original
+// behaviour). 'headcount' records boys/girls/new-participant counts
+// instead, for orgs that don't keep named player registers -- no player
+// documents required. Absent/undefined reads as 'named' everywhere this
+// is consumed, so an existing org with no attendance_mode field yet keeps
+// today's behaviour with no backfill needed.
+export type AttendanceMode = 'named' | 'headcount';
+
 export interface Terminology {
   coach_singular: string;
   coach_plural: string;
@@ -33,6 +41,8 @@ export interface Organisation {
   // Nullable, no default -- an org without one falls back to UTC server-side
   // (see FirebaseService.get_org_now).
   timezone?: string | null;
+  // See AttendanceMode above. Not nullable -- absent reads as 'named'.
+  attendance_mode?: AttendanceMode;
 }
 
 // Default terminology per org type, shown until an org customises its own

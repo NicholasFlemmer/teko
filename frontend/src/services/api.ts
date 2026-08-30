@@ -148,6 +148,7 @@ export const organisationsAPI = {
         | 'safeguarding_lead_name'
         | 'safeguarding_lead_email'
         | 'works_with_minors'
+        | 'attendance_mode'
       >
     >
   ) =>

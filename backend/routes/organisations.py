@@ -24,7 +24,16 @@ _SAFEGUARDING_FIELDS = ['safeguarding_lead_name', 'safeguarding_lead_email', 'wo
 # "America/Sao_Paulo"). Nullable, no default. Gated the same as
 # _SAFEGUARDING_FIELDS -- a location_admin is the realistic owner of "what
 # timezone is this location in", same rationale as the safeguarding lead.
-_BOTH_ROLES_FIELDS = _SAFEGUARDING_FIELDS + ['timezone']
+#
+# attendance_mode: 'named' (a per-player register, the original behaviour)
+# or 'headcount' (boys/girls/new-participant counts, no player documents
+# required -- see ConversationService._handle_attendance_command_inner).
+# Not nullable -- an absent value is read as 'named' by application code,
+# so every existing org keeps today's behaviour with no backfill needed.
+# Gated the same as the fields above, same rationale.
+_BOTH_ROLES_FIELDS = _SAFEGUARDING_FIELDS + ['timezone', 'attendance_mode']
+
+_VALID_ATTENDANCE_MODES = {'named', 'headcount'}
 
 _EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
@@ -157,10 +166,10 @@ def update_organisation(current_user, org_id):
     super_admin may write any of _SUPER_ADMIN_ONLY_FIELDS or
     _BOTH_ROLES_FIELDS. location_admin may write ONLY
     _BOTH_ROLES_FIELDS (safeguarding_lead_name, safeguarding_lead_email,
-    works_with_minors, timezone), and only for their own org -- name, type,
-    terminology, ai_persona_prompt, country, and supported_languages
-    remain super_admin-only, same as before this route accepted
-    location_admin at all.
+    works_with_minors, timezone, attendance_mode), and only for their own
+    org -- name, type, terminology, ai_persona_prompt, country, and
+    supported_languages remain super_admin-only, same as before this route
+    accepted location_admin at all.
 
     A super_admin with an assigned org_id is still restricted to that org
     by the ownership check below -- only a super_admin with no assigned
@@ -246,6 +255,17 @@ def update_organisation(current_user, org_id):
                 return jsonify({
                     'success': False,
                     'error': 'timezone must be a valid IANA timezone name or null'
+                }), 400
+
+        if 'attendance_mode' in data:
+            attendance_mode_value = data['attendance_mode']
+            # isinstance guard first -- an unhashable value (list/dict)
+            # would otherwise raise TypeError from the `in` check against
+            # a set, turning an invalid request into a 500 instead of 400.
+            if not isinstance(attendance_mode_value, str) or attendance_mode_value not in _VALID_ATTENDANCE_MODES:
+                return jsonify({
+                    'success': False,
+                    'error': "attendance_mode must be 'named' or 'headcount'"
                 }), 400
 
         org = FirebaseService.get_organisation(org_id)

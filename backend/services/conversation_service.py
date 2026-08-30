@@ -1,4 +1,5 @@
 import logging
+from firebase_admin import firestore
 from services.firebase_service import FirebaseService
 from services.gemini_service import GeminiService
 from services.whatsapp_service import WhatsAppService
@@ -895,6 +896,18 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         session = sessions[0]
         team_id = session['team_id']
 
+        # Cricket without Boundaries feature 2 of 5: an org with
+        # attendance_mode='headcount' never touches player documents at
+        # all -- branch away before the named path's player-register logic
+        # even runs. Absent/unset attendance_mode reads as 'named', so
+        # every existing org (no attendance_mode field yet) falls straight
+        # through to the unmodified named path below with zero behaviour
+        # change.
+        org = FirebaseService.get_organisation(org_id)
+        attendance_mode = (org or {}).get('attendance_mode') or 'named'
+        if attendance_mode == 'headcount':
+            return cls._handle_headcount_attendance_command(coach, session, team_id, terminology)
+
         # Check if attendance already recorded
         if session.get('attended_player_ids') is not None and len(session.get('attended_player_ids', [])) > 0:
             attended_ids = set(session['attended_player_ids'])
@@ -1082,11 +1095,192 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         sessions.sort(key=lambda s: s.get('start_time', ''))
         session = sessions[0]
 
-        # Clear existing attendance so the command proceeds
-        FirebaseService.update_session(session['id'], {'attended_player_ids': []})
+        org = FirebaseService.get_organisation(org_id)
+        attendance_mode = (org or {}).get('attendance_mode') or 'named'
+
+        if attendance_mode == 'headcount':
+            # Clear existing headcount so the command proceeds
+            FirebaseService.update_session(session['id'], {'headcount': None})
+        else:
+            # Clear existing attendance so the command proceeds
+            FirebaseService.update_session(session['id'], {'attended_player_ids': []})
 
         # Now run the normal attendance flow
         return cls.handle_attendance_command(coach)
+
+    # ── Headcount attendance (Cricket without Boundaries feature 2 of 5) ──
+    #
+    # For an org with attendance_mode='headcount': coaches don't keep named
+    # player registers, so this records boys/girls/new-participant counts
+    # on the session document instead of a list of player IDs. Deliberately
+    # never calls get_all_players and never requires a single player
+    # document to exist -- that's the entire reason this mode exists (see
+    # _handle_attendance_command_inner's branch point above).
+
+    @classmethod
+    def get_pending_headcount(cls, coach_phone):
+        """Check if a coach has a pending headcount request.
+
+        Same convention as get_pending_attendance/get_pending_photo/
+        get_pending_session: raises PendingStateReadError if the Firestore
+        read itself fails, so a read failure can never be misread as "no
+        pending request" -- see PendingStateReadError's docstring.
+        """
+        db = FirebaseService.get_db()
+        key = cls._phone_key(coach_phone)
+        try:
+            doc = db.collection('pending_headcount').document(key).get()
+            if doc.exists:
+                data = doc.to_dict()
+                # Expire after 30 minutes -- same TTL as pending_attendance.
+                created = data.get('created_at')
+                if created:
+                    now = datetime.now(timezone.utc)
+                    if hasattr(created, 'timestamp'):
+                        created_ts = created.timestamp()
+                    else:
+                        created_ts = created.replace(tzinfo=timezone.utc).timestamp()
+                    if (now.timestamp() - created_ts) > 1800:
+                        cls.clear_pending_headcount(coach_phone)
+                        return None
+                return data
+            return None
+        except Exception as e:
+            logger.error("Error reading pending headcount for %s: %s", coach_phone, e)
+            raise PendingStateReadError(str(e)) from e
+
+    @classmethod
+    def set_pending_headcount(cls, coach_phone, session_id, team_id, org_id):
+        """Store pending headcount state for a coach"""
+        db = FirebaseService.get_db()
+        key = cls._phone_key(coach_phone)
+        db.collection('pending_headcount').document(key).set({
+            'session_id': session_id,
+            'team_id': team_id,
+            'org_id': org_id,
+            'created_at': datetime.now(timezone.utc)
+        })
+
+    @classmethod
+    def clear_pending_headcount(cls, coach_phone):
+        """Clear pending headcount state"""
+        db = FirebaseService.get_db()
+        key = cls._phone_key(coach_phone)
+        try:
+            db.collection('pending_headcount').document(key).delete()
+        except Exception:
+            pass
+
+    @classmethod
+    def _handle_headcount_attendance_command(cls, coach, session, team_id, terminology):
+        """Headcount variant of /attendance -- see the class-level comment
+        above this section. Mirrors the named path's structure (already-
+        recorded check, team name resolution, pending state, prompt) but
+        never touches players."""
+        org_id = coach.get('org_id')
+        session_id = session['id']
+
+        existing = session.get('headcount')
+        if existing:
+            boys = existing.get('boys', 0)
+            girls = existing.get('girls', 0)
+            new_participants = existing.get('new_participants', 0)
+            total = existing.get('total', boys + girls)
+            lines = [f"✅ Attendance already recorded for today's session.\n"]
+            lines.append(f"{total} total — {boys} boys, {girls} girls, {new_participants} new")
+            lines.append("\nSend /attendance-redo to record it again.")
+            return '\n'.join(lines)
+
+        team = FirebaseService.get_team(team_id, org_id)
+        default_team_name = f"your {terminology['team_singular'].lower()}"
+        team_name = team.get('name', default_team_name) if team else default_team_name
+
+        cls.set_pending_headcount(coach.get('phone_number', ''), session_id, team_id, org_id)
+
+        session_time = session.get('start_time', '')
+        session_type = session.get('type', terminology['session_singular']).capitalize()
+        today_str = session.get('date', '')
+        plural = terminology['player_plural'].lower()
+        lines = [f"📋 *{team_name}* — {session_type} ({today_str}, {session_time})\n"]
+        lines.append(f"Reply with *boys, girls, and new {plural}* as three numbers.")
+        lines.append("Example: 12 8 3 (12 boys, 8 girls, 3 new)\n")
+        lines.append("Reply *cancel* to abort.")
+        return '\n'.join(lines)
+
+    @classmethod
+    def handle_headcount_response(cls, coach, coach_phone, message_text, pending):
+        """Process a coach's reply with boys/girls/new-participant counts.
+
+        Mirrors handle_attendance_response's post-write behaviour exactly
+        (dashboard event, confirmation, pending_photo handoff), but writes
+        a 'headcount' field instead of attended_player_ids -- and never
+        touches attended_player_ids.
+        """
+        text = message_text.strip().lower()
+        session_id = pending.get('session_id')
+        team_id = pending.get('team_id')
+        org_id = pending.get('org_id')
+        if not session_id:
+            cls.clear_pending_headcount(coach_phone)
+            return "Something went wrong with your attendance session. Please send /attendance to start again."
+
+        if text == 'cancel':
+            cls.clear_pending_headcount(coach_phone)
+            return "Headcount cancelled. ❌"
+
+        parts = [p for p in re.split(r'[\s,]+', text.strip()) if p]
+        if len(parts) != 3 or not all(p.isdigit() for p in parts):
+            return (
+                "I didn't understand that. Please reply with:\n"
+                "- Boys, girls, and new participants as three numbers (e.g. 12 8 3)\n"
+                "- *cancel* to abort"
+            )
+
+        boys, girls, new_participants = (int(p) for p in parts)
+
+        if boys == 0 and girls == 0 and new_participants == 0:
+            return "All zeros doesn't look right. Please enter the actual headcount, or *cancel* to abort."
+
+        if new_participants > boys + girls:
+            return (
+                f"New participants ({new_participants}) can't be more than boys + girls "
+                f"({boys + girls}). Please try again, or *cancel* to abort."
+            )
+
+        total = boys + girls
+
+        try:
+            FirebaseService.update_session(session_id, {
+                'headcount': {
+                    'boys': boys,
+                    'girls': girls,
+                    'new_participants': new_participants,
+                    'total': total,
+                    'recorded_at': firestore.SERVER_TIMESTAMP,
+                    'recorded_by': coach.get('id'),
+                }
+            })
+        except Exception as e:
+            logger.error("Error saving headcount: %s", e)
+            return "Failed to save headcount. Please try again."
+
+        cls.clear_pending_headcount(coach_phone)
+
+        if org_id is not None:
+            push_event('attendance', org_id=org_id,
+                       coach_name=coach.get('name') or 'Unknown',
+                       preview=f"{total} total ({boys} boys, {girls} girls, {new_participants} new)")
+
+        lines = [f"✅ Headcount recorded! ({total} total — {boys} boys, {girls} girls, {new_participants} new)\n"]
+        lines.append("\n📸 Please send a group photo of the team!")
+        lines.append("Reply /end to mark this session as completed.")
+
+        # Set pending photo state so next image is linked to this session --
+        # same handoff the named path makes, same handle_image_message on
+        # the other end, completely unchanged.
+        cls.set_pending_photo(coach_phone, session_id, team_id)
+
+        return '\n'.join(lines)
 
     # ── Group photo upload ─────────────────────────────────────────────
 
@@ -1924,9 +2118,17 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
 
             # Check for pending attendance response first
             pending = cls.get_pending_attendance(from_number)
+            # Headcount mode's equivalent pending state (Cricket without
+            # Boundaries feature 2 of 5) -- checked at the same precedence
+            # tier as pending attendance above, since the two are mutually
+            # exclusive per org (an org is in exactly one attendance_mode).
+            pending_headcount = cls.get_pending_headcount(from_number)
             if pending and text_lower not in cls._PENDING_ATTENDANCE_EXEMPT_TOKENS:
                 logger.info("Routing to pending attendance response handler")
                 response = cls.handle_attendance_response(from_number, message_text, pending)
+            elif pending_headcount and text_lower not in cls._PENDING_ATTENDANCE_EXEMPT_TOKENS:
+                logger.info("Routing to pending headcount response handler")
+                response = cls.handle_headcount_response(coach, from_number, message_text, pending_headcount)
             else:
                 # Then a pending start-session team choice — same
                 # precedence tier as pending attendance above: a pending
