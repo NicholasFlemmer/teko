@@ -21,6 +21,7 @@ import { MapPin, User, Calendar, Clock, FileText, Shield, Trash2, Loader2, Bell,
 import { sessionsAPI, uploadsAPI } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 import { useTerm } from "@/contexts/TerminologyContext";
+import { formatSessionType } from "@/lib/sessionTypes";
 
 interface SessionPhoto {
   id: string;
@@ -221,7 +222,7 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
                     : "bg-emerald-500/10 text-emerald-600 border-emerald-500/30"
                 }
               >
-                {session.type === "match" ? "Match" : "Practice"}
+                {formatSessionType(session.type)}
               </Badge>
             </DialogTitle>
           </DialogHeader>

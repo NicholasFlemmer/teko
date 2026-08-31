@@ -40,6 +40,22 @@ const TEAM_COLORS = [
   "bg-purple-500", "bg-rose-500", "bg-teal-500", "bg-orange-500",
 ];
 
+/**
+ * Counts sessions whose `type` or `session_type` matches `target`, case-
+ * and whitespace-insensitively. Stored values are lowercase (e.g.
+ * "practice"), so a naive exact-string comparison against a capitalized
+ * target ("Practice") always misses -- this normalizes both sides before
+ * comparing.
+ */
+export function countSessionsByType(sessions: any[], target: string): number {
+  const normalizedTarget = target.trim().toLowerCase();
+  return sessions.filter((s) => {
+    const type = (s.type || "").toString().trim().toLowerCase();
+    const sessionType = (s.session_type || "").toString().trim().toLowerCase();
+    return type === normalizedTarget || sessionType === normalizedTarget;
+  }).length;
+}
+
 export default function TeamDetail() {
   const teamSingular = useTerm("team_singular");
   const teamPlural = useTerm("team_plural");
@@ -213,8 +229,8 @@ export default function TeamDetail() {
   });
 
   const totalSessions = teamSessions.length;
-  const practiceCount = teamSessions.filter((s) => s.type === "Practice" || s.session_type === "Practice").length;
-  const matchCount = teamSessions.filter((s) => s.type === "Match" || s.session_type === "Match").length;
+  const practiceCount = countSessionsByType(teamSessions, "Practice");
+  const matchCount = countSessionsByType(teamSessions, "Match");
 
   // Compute avg attendance from sessions using attended_player_ids
   const sessionsWithAttendance = teamSessions.filter((s) => s.attended_player_ids && s.attended_player_ids.length > 0);
