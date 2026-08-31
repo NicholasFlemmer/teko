@@ -1,0 +1,18 @@
+# Must be submitted from the frontend/ directory (gcloud builds submit --config=cloudbuild.yaml .)
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-f'
+      - 'Dockerfile'
+      - '--build-arg'
+      - 'VITE_API_URL=${_API_URL}'
+      - '--build-arg'
+      - 'VITE_GOOGLE_MAPS_API_KEY=${_MAPS_API_KEY}'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/teko-236ad/cloud-run-source-deploy/teko-frontend:${_GIT_SHA}'
+      - '.'
+images:
+  - 'us-central1-docker.pkg.dev/teko-236ad/cloud-run-source-deploy/teko-frontend:${_GIT_SHA}'
+options:
+  logging: CLOUD_LOGGING_ONLY
