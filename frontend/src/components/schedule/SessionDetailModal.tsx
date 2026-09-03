@@ -210,7 +210,7 @@ export function SessionDetailModal({ open, onOpenChange, session, onDelete, onEd
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent className="sm:max-w-[425px] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-3">
               <span>{sessionSingular} Details</span>
