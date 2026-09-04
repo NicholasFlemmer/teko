@@ -45,6 +45,12 @@ class PersonService:
     # in this codebase requires org_id; this is the one accepted exception.
     _coach_cache: dict = {}
     _participant_cache: dict = {}
+    # normalised phone -> list of every colliding coach record (2+ coaches
+    # sharing that number, same org or across orgs). A phone in here is
+    # deliberately withheld from _coach_cache -- see resolve(): one phone
+    # number must belong to exactly one coach, so a collision refuses
+    # rather than picking a winner.
+    _coach_collisions: dict = {}
     _cache_ts: float = 0
     _CACHE_TTL = 300  # seconds
 
@@ -79,6 +85,11 @@ class PersonService:
         cache entry. Detection only -- the caller still overwrites
         unconditionally afterward, so last-write-wins is unchanged.
 
+        PARTICIPANT-ONLY as of the coach fail-closed change below: coach
+        collisions no longer overwrite, they refuse (see
+        _log_coach_phone_collision / resolve()). This method still governs
+        participant duplicates, which are out of scope for that change.
+
         Different org_id: ERROR. This is the cross-org routing hazard —
         the record being overwritten will never resolve for its own org
         again once this refresh completes.
@@ -105,6 +116,34 @@ class PersonService:
                 collection_label, mask_phone(normalised), existing_org,
             )
 
+    @staticmethod
+    def _log_coach_phone_collision(normalised, records):
+        """Log an ERROR naming every coach record colliding on this
+        normalised phone number, at the moment resolve() actually refuses
+        to serve it.
+
+        Two or more coach records must never share a phone number --
+        whether they're in the same org (a data-quality duplicate) or
+        different orgs (the cross-org routing hazard the shared identity
+        cache used to paper over by silently picking a winner). Either
+        way, one phone number must belong to exactly one coach; resolve()
+        refuses rather than guessing, and this is the only place that
+        refusal gets logged, with enough detail (every colliding coach_id
+        and org_id) to diagnose and fix the duplicate from logs alone.
+        """
+        org_ids = {r.get('org_id') for r in records}
+        kind = 'cross-org' if len(org_ids) > 1 else 'same-org'
+        detail = ', '.join(
+            f"coach_id={r.get('id')!r} org_id={r.get('org_id')!r}" for r in records
+        )
+        logger.error(
+            "Refusing to resolve coach phone number %s — %s collision across "
+            "%d coach records: %s. One phone number must belong to exactly "
+            "one coach in exactly one org; fix the duplicate before this "
+            "number can resolve again.",
+            mask_phone(normalised), kind, len(records), detail,
+        )
+
     @classmethod
     def _refresh_cache_if_stale(cls):
         """Refresh the cache if it's stale (or has never populated).
@@ -122,14 +161,25 @@ class PersonService:
             coaches = FirebaseService.get_all_coaches(None)
             participants = FirebaseService.get_all_participants(None)
 
-            coach_cache = {}
+            # Group every coach by normalised phone first, rather than
+            # overwriting a dict entry as we go -- overwriting is what let
+            # a collision silently pick a winner before. A phone with 2+
+            # coach records is withheld from coach_cache entirely and
+            # recorded in coach_collisions instead; resolve() refuses those
+            # rather than serving one of the colliding records.
+            coach_phone_groups: dict = {}
             for coach in coaches:
                 normalised = cls._safe_normalize(coach.get('phone_number', ''))
                 if normalised:
-                    existing = coach_cache.get(normalised)
-                    if existing:
-                        cls._log_duplicate_phone('coach', normalised, existing, coach)
-                    coach_cache[normalised] = coach
+                    coach_phone_groups.setdefault(normalised, []).append(coach)
+
+            coach_cache = {}
+            coach_collisions = {}
+            for normalised, records in coach_phone_groups.items():
+                if len(records) > 1:
+                    coach_collisions[normalised] = records
+                else:
+                    coach_cache[normalised] = records[0]
 
             participant_cache = {}
             for participant in participants:
@@ -141,6 +191,7 @@ class PersonService:
                     participant_cache[normalised] = participant
 
             cls._coach_cache = coach_cache
+            cls._coach_collisions = coach_collisions
             cls._participant_cache = participant_cache
             cls._cache_ts = now
             cls._cache_populated = True
@@ -181,6 +232,16 @@ class PersonService:
         this logs a warning and returns the coach rather than silently
         picking a winner.
 
+        If a normalised phone number matches MORE THAN ONE coach record —
+        whether those coaches are in the same org or different orgs — this
+        refuses to resolve it at all: it does not pick the first, the
+        last, or the most recent. One phone number must belong to exactly
+        one coach. The refusal is logged as an ERROR naming every
+        colliding coach_id and org_id (see _log_coach_phone_collision) so
+        the duplicate is diagnosable from logs, then this behaves exactly
+        like "no coach matches" for that phone (participants are still
+        checked normally).
+
         Raises PersonCacheUnavailableError if the cache has never
         successfully populated (see _refresh_cache_if_stale) — this must
         stay distinguishable from returning None. A stale-but-previously
@@ -201,7 +262,13 @@ class PersonService:
                 "resolve phone numbers right now."
             )
 
-        coach = cls._coach_cache.get(normalised)
+        colliding_coaches = cls._coach_collisions.get(normalised)
+        if colliding_coaches:
+            cls._log_coach_phone_collision(normalised, colliding_coaches)
+            coach = None
+        else:
+            coach = cls._coach_cache.get(normalised)
+
         participant = cls._participant_cache.get(normalised)
 
         if coach and participant:

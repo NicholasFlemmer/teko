@@ -28,11 +28,13 @@ def _reset_person_cache():
     and after every test so one test's fixture data can never leak into the
     next via a warm cache."""
     PersonService._coach_cache = {}
+    PersonService._coach_collisions = {}
     PersonService._participant_cache = {}
     PersonService._cache_ts = 0
     PersonService._cache_populated = False
     yield
     PersonService._coach_cache = {}
+    PersonService._coach_collisions = {}
     PersonService._participant_cache = {}
     PersonService._cache_ts = 0
     PersonService._cache_populated = False
@@ -243,45 +245,109 @@ def test_resolve_no_match_with_healthy_cache_still_returns_none(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Duplicate-phone detection at cache-build time. Detection only — the
-# overwritten record is still overwritten (last-write-wins is unchanged);
-# see PersonService._log_duplicate_phone.
+# Coach phone collisions now FAIL CLOSED: a normalised phone number matching
+# more than one coach record — same org or across orgs — refuses to resolve
+# to either one, rather than the old last-write-wins cache overwrite. See
+# PersonService._log_coach_phone_collision / resolve(). Participant
+# duplicates are unchanged (still last-write-wins; see the participant test
+# below) — this fail-closed behaviour is coach-only, by design.
 # ---------------------------------------------------------------------------
 
-def test_duplicate_phone_across_orgs_logs_error_naming_both_orgs(monkeypatch, caplog):
-    """Two coaches in different orgs sharing a phone number is the real
-    cross-org routing hazard the shared identity cache creates — this must
-    be an ERROR naming both org_ids, and must never log the raw number."""
+def test_clean_single_coach_match_still_resolves(monkeypatch):
+    """No collision at all — a lone coach on a phone number must resolve
+    exactly as before the fail-closed change."""
+    _stub_directory(monkeypatch, coaches=[
+        {'id': 'coach-a', 'org_id': 'org-a', 'name': 'Alice', 'phone_number': '0821234567'},
+        {'id': 'coach-b', 'org_id': 'org-b', 'name': 'Beatriz', 'phone_number': '0839876543'},
+    ])
+
+    person = PersonService.resolve('27821234567')
+
+    assert person is not None
+    assert person['person_type'] == 'coach'
+    assert person['id'] == 'coach-a'
+
+
+def test_cross_org_coach_phone_collision_refuses_to_resolve(monkeypatch, caplog):
+    """Two coaches in different orgs sharing a phone number must not
+    resolve to either one — this is the real cross-org routing hazard the
+    shared identity cache created. Must refuse (None), log an ERROR naming
+    both coach_ids and both org_ids, and must never log the raw number."""
     _stub_directory(monkeypatch, coaches=[
         {'id': 'coach-a', 'org_id': 'org-a', 'name': 'Alice', 'phone_number': '0821234567'},
         {'id': 'coach-b', 'org_id': 'org-b', 'name': 'Beatriz', 'phone_number': '0821234567'},
     ])
 
     with caplog.at_level('WARNING'):
-        PersonService.resolve('27821234567')
+        person = PersonService.resolve('27821234567')
+
+    assert person is None, "A cross-org phone collision must refuse to resolve, not pick a winner."
 
     error_records = [r for r in caplog.records if r.levelname == 'ERROR']
-    assert error_records, "Expected an ERROR log for a cross-org phone duplicate."
+    assert error_records, "Expected an ERROR log for a cross-org phone collision."
     message = error_records[0].getMessage()
     assert 'org-a' in message and 'org-b' in message
+    assert 'coach-a' in message and 'coach-b' in message
     assert '0821234567' not in message, "Raw phone number must never be logged."
 
 
-def test_duplicate_phone_within_same_org_logs_warning_not_error(monkeypatch, caplog):
-    """Two coaches sharing a phone number inside ONE org is a data quality
-    issue, not a cross-org routing hazard — WARNING, not ERROR."""
+def test_same_org_coach_phone_collision_refuses_to_resolve(monkeypatch, caplog):
+    """Two coaches sharing a phone number inside ONE org must also refuse
+    to resolve — a same-org duplicate is still a case of 'which coach is
+    this really', not something to guess at just because it isn't a
+    cross-org hazard. Must refuse (None) and log an ERROR naming both
+    coach_ids."""
     _stub_directory(monkeypatch, coaches=[
         {'id': 'coach-a', 'org_id': 'org-a', 'name': 'Alice', 'phone_number': '0821234567'},
         {'id': 'coach-b', 'org_id': 'org-a', 'name': 'Alice Duplicate', 'phone_number': '0821234567'},
     ])
 
     with caplog.at_level('WARNING'):
-        PersonService.resolve('27821234567')
+        person = PersonService.resolve('27821234567')
 
-    assert not any(r.levelname == 'ERROR' for r in caplog.records), "Same-org duplicate must not log an ERROR."
+    assert person is None, "A same-org phone collision must refuse to resolve, not pick a winner."
+
+    error_records = [r for r in caplog.records if r.levelname == 'ERROR']
+    assert error_records, "Expected an ERROR log for a same-org phone collision."
+    message = error_records[0].getMessage()
+    assert 'coach-a' in message and 'coach-b' in message
+    assert 'org-a' in message
+    assert '0821234567' not in message, "Raw phone number must never be logged."
+
+
+def test_resolve_missing_phone_number_refuses(monkeypatch):
+    """A blank/missing incoming phone number must refuse (None) without
+    ever touching the cache or Firestore — this is the existing guard at
+    the top of resolve(), covered explicitly here rather than only
+    incidentally via other tests."""
+    _stub_directory(monkeypatch, coaches=[
+        {'id': 'coach-a', 'org_id': 'org-a', 'name': 'Alice', 'phone_number': '0821234567'},
+    ])
+
+    assert PersonService.resolve(None) is None
+    assert PersonService.resolve('') is None
+    assert PersonService._cache_populated is False, (
+        "A blank incoming phone number must short-circuit before ever refreshing the cache."
+    )
+
+
+def test_duplicate_participant_phone_within_same_org_still_logs_warning_and_resolves(monkeypatch, caplog):
+    """Participant duplicates are OUT OF SCOPE for the coach fail-closed
+    change — this proves participant behaviour is unchanged: still
+    last-write-wins, still a WARNING (not ERROR), still resolves."""
+    _stub_directory(monkeypatch, participants=[
+        {'id': 'participant-a', 'org_id': 'org-a', 'name': 'Bob', 'phone_number': '0821234567'},
+        {'id': 'participant-b', 'org_id': 'org-a', 'name': 'Bob Duplicate', 'phone_number': '0821234567'},
+    ])
+
+    with caplog.at_level('WARNING'):
+        person = PersonService.resolve('27821234567')
+
+    assert person is not None, "Participant duplicates must still resolve — only coach collisions refuse."
+    assert not any(r.levelname == 'ERROR' for r in caplog.records), "Same-org participant duplicate must not log an ERROR."
     warning_records = [r for r in caplog.records if r.levelname == 'WARNING']
     assert any('duplicate' in r.getMessage().lower() for r in warning_records), (
-        "Expected a WARNING log for a same-org phone duplicate."
+        "Expected a WARNING log for a same-org participant phone duplicate."
     )
 
 
