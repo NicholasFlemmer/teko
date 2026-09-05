@@ -288,3 +288,34 @@ class PersonService:
             return {**participant, 'person_type': 'participant'}
 
         return None
+
+    @classmethod
+    def get_colliding_org_ids(cls, phone):
+        """Return the distinct org_ids of every coach record colliding on
+        this phone number, or [] if it isn't a known collision.
+
+        Exists for callers that must act on a collision even though
+        resolve() itself refuses to name a person for it — currently
+        safeguarding alerting (see ConversationService), which must
+        still reach every colliding org's safeguarding lead without
+        knowing (or guessing) which one actually sent the message.
+
+        Read-only: refreshes the cache the same way resolve() does, but
+        never raises PersonCacheUnavailableError — a cache that has
+        never populated simply means no collision is known yet, so this
+        returns [] rather than surfacing that as an error. Callers that
+        need to distinguish "cache unavailable" from "no collision" must
+        use resolve() directly.
+        """
+        normalised = cls._safe_normalize(phone)
+        if not normalised:
+            return []
+
+        cls._refresh_cache_if_stale()
+        if not cls._cache_populated:
+            return []
+
+        records = cls._coach_collisions.get(normalised)
+        if not records:
+            return []
+        return sorted({r.get('org_id') for r in records if r.get('org_id')})

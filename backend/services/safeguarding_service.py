@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 
 from firebase_admin import firestore
 
-from services.email_service import send_safeguarding_alert_email
+from services.email_service import send_safeguarding_alert_email, send_phone_collision_alert_email
 from services.firebase_service import FirebaseService
 from services.safeguarding_keywords import SAFEGUARDING_KEYWORDS
 from utils.phone import mask_phone
@@ -299,3 +299,70 @@ def send_safeguarding_alert(flag):
         "Safeguarding alert sent: flag_id=%s org_id=%s recipients=%d",
         flag_id, org_id, len(recipients),
     )
+
+
+def send_phone_collision_alert(colliding_org_ids, phone_number):
+    """Alert every colliding org's safeguarding lead (or active
+    location_admins) that a safeguarding-flagged message arrived from a
+    phone number registered to more than one org's coach — WITHOUT
+    identifying who sent it, what they said, or which keyword matched.
+
+    Exists because PersonService.resolve() refuses to name a sender when
+    their number collides across orgs (see
+    PersonService._coach_collisions) — so a genuine disclosure from that
+    number must still be able to reach a human, without guessing which
+    of the colliding orgs it "really" belongs to, and without letting
+    one org see anything that might be another org's data. Every
+    colliding org gets its own, identical, content-free notice: only the
+    org name and the phone number's last 4 digits (see
+    send_phone_collision_alert_email) — no message text, no matched
+    category or term, no full phone number.
+
+    Recipients are resolved exactly like send_safeguarding_alert does
+    (org's safeguarding_lead_email, else active location_admins), via
+    the same _recipients_for_org helper, so the two paths can never
+    drift apart.
+
+    Writes nothing to Firestore — there is no single correct org_id to
+    record a flag document against here, only a set of orgs to notify.
+    Never raises: every failure (org/recipient resolution, send failure)
+    is caught and logged at ERROR per org, same as send_safeguarding_alert.
+    """
+    phone_masked = mask_phone(phone_number)
+
+    for org_id in colliding_org_ids:
+        try:
+            org = FirebaseService.get_organisation(org_id)
+            recipients = _recipients_for_org(org_id, org)
+        except Exception:
+            logger.error(
+                "Phone-collision safeguarding alert: failed to resolve recipients for org_id=%s",
+                org_id, exc_info=True,
+            )
+            continue
+
+        if not recipients:
+            logger.error(
+                "Phone-collision safeguarding alert: no recipients resolved for org_id=%s -- "
+                "no safeguarding_lead_email set and no active location_admin accounts found.",
+                org_id,
+            )
+            continue
+
+        org_name = (org or {}).get('name') or 'your organisation'
+        try:
+            for recipient in recipients:
+                send_phone_collision_alert_email(
+                    to_email=recipient,
+                    org_name=org_name,
+                    phone_masked=phone_masked,
+                )
+            logger.info(
+                "Phone-collision safeguarding alert sent: org_id=%s recipients=%d",
+                org_id, len(recipients),
+            )
+        except Exception:
+            logger.error(
+                "Phone-collision safeguarding alert: send failed for org_id=%s",
+                org_id, exc_info=True,
+            )

@@ -4,7 +4,10 @@ from services.firebase_service import FirebaseService
 from services.gemini_service import GeminiService
 from services.whatsapp_service import WhatsAppService
 from services.person_service import PersonService, PersonCacheUnavailableError
-from services.safeguarding_service import detect_safeguarding_matches, record_safeguarding_flag, send_safeguarding_alert
+from services.safeguarding_service import (
+    detect_safeguarding_matches, record_safeguarding_flag, send_safeguarding_alert,
+    send_phone_collision_alert,
+)
 from routes.sse import push_event
 from utils.phone import mask_phone
 from datetime import datetime, date, timezone
@@ -2045,12 +2048,39 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         try:
             logger.debug("Processing message from %s: %d chars", mask_phone(from_number), len(message_text))
 
+            # Safeguarding keyword detection runs FIRST, on every inbound
+            # message, unconditionally -- before and independent of who
+            # (if anyone) the sender resolves to. Detection must never
+            # depend on identity resolution succeeding: a genuine
+            # disclosure from a coach whose number collides across orgs
+            # (see PersonService._coach_collisions) still has to be
+            # caught, even though PersonService.resolve() below will
+            # refuse to name who sent it. Detection-only here: never
+            # touches `response`, never runs on the AI's outbound text.
+            # Wrapped so a detection failure can never block the reply
+            # (constraint 1) but is never swallowed silently either --
+            # logged at ERROR (constraint 2).
+            try:
+                safeguarding_matches = detect_safeguarding_matches(message_text)
+            except Exception as safeguarding_error:
+                logger.error(
+                    "Safeguarding detection failed for message_id=%s: %s",
+                    message_id, safeguarding_error, exc_info=True,
+                )
+                safeguarding_matches = None
+
             # Resolve the sender to a person (coach or participant), across
             # both collections — see PersonService for details.
             try:
                 person = PersonService.resolve(from_number)
             except PersonCacheUnavailableError:
                 logger.error("Identity cache unavailable — cannot resolve message sender %s", mask_phone(from_number))
+                # The cache has NEVER populated (the only trigger for this
+                # exception) -- collisions aren't known either in that
+                # state, so there is no org to alert even if
+                # safeguarding_matches is truthy. Nothing else to do here
+                # differently: this is a transient system failure, not a
+                # registration problem.
                 WhatsAppService.send_message(
                     phone_number=from_number,
                     message_text=cls.TRANSIENT_ERROR_MESSAGE
@@ -2058,21 +2088,46 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
                 return
 
             if not person:
-                logger.warning("Message from unrecognised number: %s", mask_phone(from_number))
-                WhatsAppService.send_message(
-                    phone_number=from_number,
-                    message_text=cls.UNRECOGNISED_SENDER_MESSAGE
-                )
+                # Two distinct reasons resolve() can return None:
+                # (a) a genuinely unregistered number -- no org anywhere
+                #     knows this number, so there is nobody to alert.
+                # (b) a KNOWN phone collision (PersonService._coach_collisions)
+                #     -- the colliding orgs ARE known even though resolve()
+                #     won't name a person, so a safeguarding match here
+                #     must still reach those orgs.
+                colliding_org_ids = PersonService.get_colliding_org_ids(from_number)
+
+                if safeguarding_matches and colliding_org_ids:
+                    try:
+                        send_phone_collision_alert(colliding_org_ids, from_number)
+                    except Exception as safeguarding_error:
+                        logger.error(
+                            "Phone-collision safeguarding alert failed for message_id=%s: %s",
+                            message_id, safeguarding_error, exc_info=True,
+                        )
+
+                if colliding_org_ids:
+                    logger.warning("Message from a phone number registered in multiple orgs: %s", mask_phone(from_number))
+                    WhatsAppService.send_message(
+                        phone_number=from_number,
+                        message_text=cls.PHONE_NEEDS_ATTENTION_MESSAGE
+                    )
+                else:
+                    # No colliding org -- a genuinely unregistered number.
+                    # Behaviour here is intentionally UNCHANGED from
+                    # before this safeguarding-independence change: no
+                    # flag, no email, same reply. safeguarding_matches may
+                    # have been computed above, but there is no org to
+                    # record or alert against, so it is simply discarded.
+                    logger.warning("Message from unrecognised number: %s", mask_phone(from_number))
+                    WhatsAppService.send_message(
+                        phone_number=from_number,
+                        message_text=cls.UNRECOGNISED_SENDER_MESSAGE
+                    )
                 return
 
-            # Safeguarding keyword detection -- runs on every inbound
-            # coach/participant message, before any command classification
-            # or AI call, so it covers both branches below identically.
-            # Detection-only: never touches `response`, never runs on the
-            # AI's outbound text. Wrapped so a detection/recording failure
-            # can never block the reply (constraint 1) but is never
-            # swallowed silently either -- logged at ERROR with enough
-            # context to investigate (constraint 2).
+            # A person resolved cleanly (no collision) -- record the flag
+            # against their own org, exactly as before.
             #
             # safeguarding_flag holds record_safeguarding_flag()'s return
             # value (or None) -- the only way a flag can ever reach
@@ -2081,9 +2136,8 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
             # branches. See send_safeguarding_alert()'s docstring for why
             # this also means a pre-existing flag can never be alerted on.
             safeguarding_flag = None
-            try:
-                safeguarding_matches = detect_safeguarding_matches(message_text)
-                if safeguarding_matches:
+            if safeguarding_matches:
+                try:
                     safeguarding_flag = record_safeguarding_flag(
                         org_id=person.get('org_id'),
                         person_id=person.get('id'),
@@ -2094,13 +2148,13 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
                         message_id=message_id,
                         matches=safeguarding_matches,
                     )
-            except Exception as safeguarding_error:
-                logger.error(
-                    "Safeguarding detection/recording failed for org_id=%s person_id=%s "
-                    "message_id=%s: %s",
-                    person.get('org_id'), person.get('id'), message_id, safeguarding_error,
-                    exc_info=True,
-                )
+                except Exception as safeguarding_error:
+                    logger.error(
+                        "Safeguarding flag recording failed for org_id=%s person_id=%s "
+                        "message_id=%s: %s",
+                        person.get('org_id'), person.get('id'), message_id, safeguarding_error,
+                        exc_info=True,
+                    )
 
             if person.get('person_type') != 'coach':
                 cls._handle_participant_message(from_number, message_text, person, safeguarding_flag)
@@ -2215,6 +2269,19 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
     UNRECOGNISED_SENDER_MESSAGE = (
         "Hello! This number isn't registered with Teko. Please contact your "
         "administrator to get set up."
+    )
+
+    # Sent instead of UNRECOGNISED_SENDER_MESSAGE when this number IS
+    # registered -- twice, to different coach records, which is why
+    # PersonService.resolve() refuses to pick one (see
+    # PersonService._coach_collisions). Deliberately does NOT say
+    # "unregistered" -- that would be false and confusing for someone who
+    # knows they're already set up. Person-type-neutral for the same
+    # reason as UNRECOGNISED_SENDER_MESSAGE.
+    PHONE_NEEDS_ATTENTION_MESSAGE = (
+        "Hello! There's an issue with this number that needs attention — it's "
+        "registered more than once. Please contact your administrator to get "
+        "this sorted out."
     )
 
     # Sent instead of UNRECOGNISED_SENDER_MESSAGE when PersonService can't

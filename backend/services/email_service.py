@@ -268,3 +268,46 @@ def send_safeguarding_alert_email(to_email, org_name, flag_id, person_name, pers
   This is an automated keyword detection. It has not been assessed by a person and may be a false positive.
 </p>"""
     _send(to_email, subject, _layout(body))
+
+
+def send_phone_collision_alert_email(to_email, org_name, phone_masked):
+    """Email one org's safeguarding lead/admin that a safeguarding-flagged
+    message arrived from a phone number registered to more than one
+    org's coach.
+
+    Used only when PersonService.resolve() refuses to identify a sender
+    because their number collides across orgs (see
+    services/safeguarding_service.py's send_phone_collision_alert) --
+    there is no single correct org_id to attribute the message to, so
+    unlike send_safeguarding_alert_email this carries NO message content,
+    NO matched keyword/category, and NO full phone number: only the org
+    name and the number's last 4 digits. One client must never see
+    another client's disclosure -- every colliding org gets this same
+    content-free notice and is told to contact the coach directly rather
+    than being shown anything that might belong to a different org.
+
+    Subject matches send_safeguarding_alert_email's convention (org name
+    only, never anything that could reveal content on a lock screen).
+    """
+    subject = f"Safeguarding alert - {org_name}"
+
+    esc = lambda s: html.escape(s or '', quote=False)  # noqa: E731
+
+    body = f"""\
+<p style="margin:0 0 16px 0;font-size:18px;font-weight:700;">Safeguarding alert</p>
+<p style="margin:0 0 20px 0;">
+  A flagged WhatsApp message arrived from a phone number that is registered to a coach
+  in more than one organisation, including <strong>{esc(org_name)}</strong>. Because the
+  number is shared across organisations, we can't confirm which coach sent it or show
+  you the message.
+</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px 0;font-size:14px;">
+  <tr><td style="padding:4px 0;color:{COLOR_MUTED};width:140px;vertical-align:top;">Organisation</td><td style="padding:4px 0;">{esc(org_name)}</td></tr>
+  <tr><td style="padding:4px 0;color:{COLOR_MUTED};vertical-align:top;">Number ending in</td><td style="padding:4px 0;">{esc(phone_masked) or '****'}</td></tr>
+</table>
+<p style="margin:0;color:{COLOR_MUTED};font-size:13px;">
+  Please contact the coach using this number directly to check on them. This is an
+  automated keyword detection. It has not been assessed by a person and may be a false
+  positive.
+</p>"""
+    _send(to_email, subject, _layout(body))
