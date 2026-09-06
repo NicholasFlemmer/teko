@@ -288,10 +288,70 @@ class SchedulerService:
             return {'success': False, 'error': str(e), 'prompts_sent': 0}
 
     @classmethod
+    def _send_missed_checkin_nudges(cls, session, org_id, session_date, session_start, errors):
+        """Send the missed-check-in nudge to every coach assigned to `session`.
+
+        Mirrors send_end_session_prompts' per-coach loop above: look up each
+        coach, skip (and record) anyone with no phone, send, save to
+        conversation history on success. Returns True if at least one send
+        succeeded. Best-effort and never retried -- the caller persists
+        missed_checkin_nudge_sent regardless of outcome (see
+        mark_missed_sessions' at-most-once guarantee).
+        """
+        session_word = FirebaseService.get_org_terminology(org_id)['session_singular']
+        coach_ids = FirebaseService.get_session_coach_ids(session)
+        sent_any = False
+        for coach_id in coach_ids:
+            coach = FirebaseService.get_coach(coach_id, org_id)
+            if not coach:
+                errors.append(f"Coach {coach_id} not found for session {session['id']} (missed-checkin nudge)")
+                continue
+
+            coach_name = coach.get('name') or coach.get('first_name', '') or 'Coach'
+            phone = normalize_phone_for_sending(coach.get('phone_number', ''))
+            if not phone:
+                errors.append(f"Invalid/missing phone for coach {coach_name} (missed-checkin nudge, session {session['id']})")
+                continue
+
+            message_text = (
+                f"Hi {coach_name}! Just checking in — your {session_word.lower()} on "
+                f"{session_date} at {session_start} hasn't been checked in, so it's "
+                f"showing as missed on our side. If you did run it, just reply here "
+                f"and let us know so we can get it logged properly. If it didn't "
+                f"happen, no worries at all — nothing else you need to do."
+            )
+            result = WhatsAppService.send_message(phone_number=phone, message_text=message_text)
+            if result.get('success'):
+                sent_any = True
+                from services.conversation_service import ConversationService
+                ConversationService.save_message(phone, 'assistant', message_text)
+            else:
+                errors.append(f"Failed to send missed-checkin nudge to {coach_name} for session {session['id']}: {result.get('error')}")
+        return sent_any
+
+    @classmethod
     def mark_missed_sessions(cls):
         """Mark sessions as missed if they haven't been checked in after session time
 
         This should be run periodically (e.g., every hour) to update session statuses.
+
+        missed_checkin_nudges: when a session is marked missed (not
+        rescued -- see below) and its org has missed_checkin_nudges=True,
+        every assigned coach gets a WhatsApp nudge. Absent/unset reads as
+        False -- same (org or {}).get('field') or default pattern already
+        used for attendance_mode (services/conversation_service.py:910), so
+        an org with no field set (every org today) behaves exactly as
+        before this feature existed, including the exact Firestore write.
+
+        At-most-once guarantee: this method's own query only ever returns
+        sessions still in status='reminded' -- once a session is flipped to
+        'missed' (or 'checked_in', on rescue) it structurally cannot be
+        re-selected by a later run, so a rerun never re-sends. On top of
+        that, missed_checkin_nudge_sent is persisted on the session in the
+        SAME write that flips status to 'missed' and is checked before
+        sending -- defense-in-depth against a concurrent second invocation
+        racing on the same 'reminded' snapshot, and a durable per-session
+        record of whether a nudge was ever sent.
         """
         try:
             # Get only reminded sessions (avoids loading entire history)
@@ -300,6 +360,8 @@ class SchedulerService:
             sessions = [{'id': doc.id, **doc.to_dict()} for doc in docs]
 
             updated = 0
+            nudges_sent = 0
+            errors = []
             org_now_cache = {}
 
             for session in sessions:
@@ -338,12 +400,29 @@ class SchedulerService:
                         )
                         FirebaseService.update_session(session['id'], {'status': 'checked_in'})
                     else:
-                        FirebaseService.update_session(session['id'], {'status': 'missed'})
+                        update_data = {'status': 'missed'}
+
+                        session_org_id = session.get('org_id')
+                        already_nudged = session.get('missed_checkin_nudge_sent', False)
+                        if session_org_id and not already_nudged:
+                            org = FirebaseService.get_organisation(session_org_id)
+                            missed_checkin_nudges = (org or {}).get('missed_checkin_nudges') or False
+                            if missed_checkin_nudges:
+                                sent_any = cls._send_missed_checkin_nudges(
+                                    session, session_org_id, session_date, session_start, errors,
+                                )
+                                if sent_any:
+                                    nudges_sent += 1
+                                update_data['missed_checkin_nudge_sent'] = True
+
+                        FirebaseService.update_session(session['id'], update_data)
                     updated += 1
 
             result = {
                 'success': True,
-                'sessions_marked_missed': updated
+                'sessions_marked_missed': updated,
+                'nudges_sent': nudges_sent,
+                'errors': errors,
             }
             cls.last_run['missed'] = {
                 'ran_at': datetime.now(timezone.utc).isoformat(),

@@ -51,6 +51,7 @@ Usage:
         --works-with-minors true --attendance-mode named \\
         --safeguarding-lead-name "Jane Doe" \\
         --safeguarding-lead-email jane@acmefc.org \\
+        --missed-checkin-nudges false \\
         --admin-name "Jane Doe" --admin-email jane@acmefc.org \\
         --admin-role location_admin
                                                         # dry run (default)
@@ -229,6 +230,7 @@ def create_org(args, commit=False):
         'attendance_mode': args.attendance_mode,
         'safeguarding_lead_name': args.safeguarding_lead_name,
         'safeguarding_lead_email': safeguarding_email,
+        'missed_checkin_nudges': args.missed_checkin_nudges,
         'is_active': True,
     }
 
@@ -329,6 +331,8 @@ def _build_parser():
     parser.add_argument('--safeguarding-lead-name', required=True, help="Name of the safeguarding lead.")
     parser.add_argument('--safeguarding-lead-email', required=True,
                          help="Email of the safeguarding lead. Mandatory -- no placeholder accepted.")
+    parser.add_argument('--missed-checkin-nudges', required=True, type=_parse_bool, metavar='true|false',
+                         help="Whether coaches get an automated WhatsApp nudge when a session is marked missed.")
     parser.add_argument('--admin-name', required=True, help="Name of the first admin user for this org.")
     parser.add_argument('--admin-email', required=True, help="Email of the first admin user.")
     parser.add_argument('--admin-role', required=True, choices=sorted(VALID_ROLES),
