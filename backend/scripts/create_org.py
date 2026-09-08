@@ -52,6 +52,7 @@ Usage:
         --safeguarding-lead-name "Jane Doe" \\
         --safeguarding-lead-email jane@acmefc.org \\
         --missed-checkin-nudges false \\
+        --end-photo-prompt false --session-note-prompt false \\
         --admin-name "Jane Doe" --admin-email jane@acmefc.org \\
         --admin-role location_admin
                                                         # dry run (default)
@@ -231,6 +232,8 @@ def create_org(args, commit=False):
         'safeguarding_lead_name': args.safeguarding_lead_name,
         'safeguarding_lead_email': safeguarding_email,
         'missed_checkin_nudges': args.missed_checkin_nudges,
+        'end_photo_prompt': args.end_photo_prompt,
+        'session_note_prompt': args.session_note_prompt,
         'is_active': True,
     }
 
@@ -333,6 +336,10 @@ def _build_parser():
                          help="Email of the safeguarding lead. Mandatory -- no placeholder accepted.")
     parser.add_argument('--missed-checkin-nudges', required=True, type=_parse_bool, metavar='true|false',
                          help="Whether coaches get an automated WhatsApp nudge when a session is marked missed.")
+    parser.add_argument('--end-photo-prompt', required=True, type=_parse_bool, metavar='true|false',
+                         help="Whether coaches are asked over WhatsApp for an end-of-session photo after /end.")
+    parser.add_argument('--session-note-prompt', required=True, type=_parse_bool, metavar='true|false',
+                         help="Whether coaches are asked over WhatsApp for a short session note after /end.")
     parser.add_argument('--admin-name', required=True, help="Name of the first admin user for this org.")
     parser.add_argument('--admin-email', required=True, help="Email of the first admin user.")
     parser.add_argument('--admin-role', required=True, choices=sorted(VALID_ROLES),

@@ -1339,6 +1339,133 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         except Exception:
             pass
 
+    # ── Pending end-of-session photo (set by /end when end_photo_prompt
+    # is on) -- same collection-per-type/phone-key/created_at/one-hour-TTL
+    # shape as pending_photo above. ─────────────────────────────────────
+
+    @classmethod
+    def get_pending_end_photo(cls, coach_phone):
+        """Check if a coach has a pending end-of-session photo request.
+
+        Same convention as get_pending_attendance/get_pending_photo/
+        get_pending_session/get_pending_headcount: raises
+        PendingStateReadError if the Firestore read itself fails, so a
+        read failure can never be misread as "no pending request" -- see
+        PendingStateReadError's docstring.
+        """
+        db = FirebaseService.get_db()
+        key = cls._phone_key(coach_phone)
+        try:
+            doc = db.collection('pending_end_photo').document(key).get()
+            if doc.exists:
+                data = doc.to_dict()
+                # Expire after 60 minutes -- same TTL as pending_photo.
+                created = data.get('created_at')
+                if created:
+                    now = datetime.now(timezone.utc)
+                    if hasattr(created, 'timestamp'):
+                        created_ts = created.timestamp()
+                    else:
+                        created_ts = created.replace(tzinfo=timezone.utc).timestamp()
+                    if (now.timestamp() - created_ts) > 3600:
+                        cls.clear_pending_end_photo(coach_phone)
+                        return None
+                return data
+            return None
+        except Exception as e:
+            logger.error("Error reading pending end photo for %s: %s", coach_phone, e)
+            raise PendingStateReadError(str(e)) from e
+
+    @classmethod
+    def set_pending_end_photo(cls, coach_phone, session_id, team_id):
+        """Store pending end-of-session photo state for a coach after /end."""
+        db = FirebaseService.get_db()
+        key = cls._phone_key(coach_phone)
+        db.collection('pending_end_photo').document(key).set({
+            'session_id': session_id,
+            'team_id': team_id,
+            'created_at': datetime.now(timezone.utc),
+        })
+
+    @classmethod
+    def clear_pending_end_photo(cls, coach_phone):
+        """Clear pending end-of-session photo state."""
+        db = FirebaseService.get_db()
+        key = cls._phone_key(coach_phone)
+        try:
+            db.collection('pending_end_photo').document(key).delete()
+        except Exception:
+            pass
+
+    # ── Pending session note (set by /end when session_note_prompt is
+    # on) -- same collection-per-type/phone-key/created_at/one-hour-TTL
+    # shape as pending_photo above. ─────────────────────────────────────
+
+    @classmethod
+    def get_pending_note(cls, coach_phone):
+        """Check if a coach has a pending session-note request.
+
+        Same convention as the other pending_* getters: raises
+        PendingStateReadError if the Firestore read itself fails -- see
+        PendingStateReadError's docstring.
+        """
+        db = FirebaseService.get_db()
+        key = cls._phone_key(coach_phone)
+        try:
+            doc = db.collection('pending_note').document(key).get()
+            if doc.exists:
+                data = doc.to_dict()
+                # Expire after 60 minutes -- same TTL as pending_photo.
+                created = data.get('created_at')
+                if created:
+                    now = datetime.now(timezone.utc)
+                    if hasattr(created, 'timestamp'):
+                        created_ts = created.timestamp()
+                    else:
+                        created_ts = created.replace(tzinfo=timezone.utc).timestamp()
+                    if (now.timestamp() - created_ts) > 3600:
+                        cls.clear_pending_note(coach_phone)
+                        return None
+                return data
+            return None
+        except Exception as e:
+            logger.error("Error reading pending note for %s: %s", coach_phone, e)
+            raise PendingStateReadError(str(e)) from e
+
+    @classmethod
+    def set_pending_note(cls, coach_phone, session_id):
+        """Store pending session-note state for a coach after /end."""
+        db = FirebaseService.get_db()
+        key = cls._phone_key(coach_phone)
+        db.collection('pending_note').document(key).set({
+            'session_id': session_id,
+            'created_at': datetime.now(timezone.utc),
+        })
+
+    @classmethod
+    def clear_pending_note(cls, coach_phone):
+        """Clear pending session-note state."""
+        db = FirebaseService.get_db()
+        key = cls._phone_key(coach_phone)
+        try:
+            db.collection('pending_note').document(key).delete()
+        except Exception:
+            pass
+
+    @classmethod
+    def _append_session_photo(cls, session_id, org_id, photo_item):
+        """Append photo_item to the session's `photos` array -- same
+        item shape (plus `phase`) the admin web upload path writes at
+        routes/sessions.py:592-601. Read-modify-write, same as that
+        route; WhatsApp photo uploads for a single session are already
+        serialised by the pending-state flow that gates them, so no
+        stronger consistency is needed here.
+        """
+        session = FirebaseService.get_session(session_id, org_id)
+        photos = list((session or {}).get('photos', []) or [])
+        photos.append(photo_item)
+        FirebaseService.update_session(session_id, {'photos': photos})
+
     @classmethod
     def handle_image_message(cls, from_number, image_info, message_id=None):
         """Handle an image sent by a coach via WhatsApp.
@@ -1375,9 +1502,15 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
 
             coach = person
             coach_name = coach.get('name', 'Coach')
+            org_id = coach.get('org_id')
             pending = cls.get_pending_photo(from_number)
+            # Only checked when pending_photo (check-in) is absent -- the
+            # two are mutually exclusive in practice (handle_end_session_
+            # command clears pending_photo before ever setting
+            # pending_end_photo), but pending_photo wins if both existed.
+            pending_end_photo = None if pending else cls.get_pending_end_photo(from_number)
 
-            if not pending:
+            if not pending and not pending_end_photo:
                 # No pending photo request — let them know
                 WhatsAppService.send_message(
                     phone_number=from_number,
@@ -1401,59 +1534,111 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
 
             # Upload to Cloud Storage
             from services.storage_service import StorageService
+            from datetime import timedelta
             ext = '.jpg'
             if content_type and 'png' in content_type:
                 ext = '.png'
             elif content_type and 'webp' in content_type:
                 ext = '.webp'
 
-            session_id = pending['session_id']
-            team_id = pending.get('team_id', '')
             today_str = date.today().strftime('%Y-%m-%d')
-            file_name = f"{today_str}_{session_id}{ext}"
-            blob_path = f"team_photos/{team_id}/{file_name}"
 
-            bucket = StorageService.get_bucket()
-            blob = bucket.blob(blob_path)
-            blob.upload_from_string(image_bytes, content_type=content_type or 'image/jpeg')
-            # Use signed URL (7 day expiry) instead of making blob public
-            from datetime import timedelta
-            public_url = blob.generate_signed_url(expiration=timedelta(days=7), method='GET')
+            if pending:
+                session_id = pending['session_id']
+                team_id = pending.get('team_id', '')
+                file_name = f"{today_str}_{session_id}{ext}"
+                blob_path = f"team_photos/{team_id}/{file_name}"
 
-            # Save reference on the session
-            photo_data = {
-                'group_photo': {
+                bucket = StorageService.get_bucket()
+                blob = bucket.blob(blob_path)
+                blob.upload_from_string(image_bytes, content_type=content_type or 'image/jpeg')
+                # Use signed URL (7 day expiry) instead of making blob public
+                public_url = blob.generate_signed_url(expiration=timedelta(days=7), method='GET')
+                uploaded_at = datetime.now(timezone.utc).isoformat()
+
+                # Save reference on the session -- unchanged from before
+                # this feature, so nothing that reads group_photo changes.
+                photo_data = {
+                    'group_photo': {
+                        'url': public_url,
+                        'file_path': blob_path,
+                        'uploaded_at': uploaded_at,
+                        'uploaded_by': coach.get('id'),
+                    }
+                }
+                FirebaseService.update_session(session_id, photo_data)
+
+                # Also append to the session's photos array -- same item
+                # shape the admin upload path writes at
+                # routes/sessions.py:592-601, plus `phase` so the
+                # check-in and end-of-session photos are distinguishable.
+                cls._append_session_photo(session_id, org_id, {
+                    'id': str(uuid.uuid4()),
                     'url': public_url,
                     'file_path': blob_path,
-                    'uploaded_at': datetime.now(timezone.utc).isoformat(),
+                    'uploaded_at': uploaded_at,
                     'uploaded_by': coach.get('id'),
-                }
-            }
-            FirebaseService.update_session(session_id, photo_data)
+                    'phase': 'checkin',
+                })
 
-            # Also save on the team as latest group photo
-            if team_id:
-                try:
-                    FirebaseService.update_team(team_id, {
-                        'latest_group_photo': {
-                            'url': public_url,
-                            'file_path': blob_path,
-                            'session_id': session_id,
-                            'date': today_str,
-                        }
-                    })
-                except Exception as e:
-                    logger.warning("Failed to update team photo: %s", e)
+                # Also save on the team as latest group photo
+                if team_id:
+                    try:
+                        FirebaseService.update_team(team_id, {
+                            'latest_group_photo': {
+                                'url': public_url,
+                                'file_path': blob_path,
+                                'session_id': session_id,
+                                'date': today_str,
+                            }
+                        })
+                    except Exception as e:
+                        logger.warning("Failed to update team photo: %s", e)
 
-            cls.clear_pending_photo(from_number)
-            push_event('photo_uploaded', org_id=coach.get('org_id'), coach_name=coach_name,
-                       preview=f"Group photo for session {today_str}")
+                cls.clear_pending_photo(from_number)
+                push_event('photo_uploaded', org_id=org_id, coach_name=coach_name,
+                           preview=f"Group photo for session {today_str}")
 
-            WhatsAppService.send_message(
-                phone_number=from_number,
-                message_text=f"📸 Group photo saved! Great work, {coach_name}!\nReply /end to mark this session as completed."
-            )
-            logger.info("Group photo saved for session %s by coach id=%s", session_id, coach.get('id'))
+                WhatsAppService.send_message(
+                    phone_number=from_number,
+                    message_text=f"📸 Group photo saved! Great work, {coach_name}!\nReply /end to mark this session as completed."
+                )
+                logger.info("Group photo saved for session %s by coach id=%s", session_id, coach.get('id'))
+
+            else:
+                # End-of-session photo (pending_end_photo) -- own storage
+                # suffix, own `photos` phase, advances the /end flow to
+                # the note step (if session_note_prompt is on) or finishes.
+                session_id = pending_end_photo['session_id']
+                team_id = pending_end_photo.get('team_id', '')
+                file_name = f"{today_str}_{session_id}_end{ext}"
+                blob_path = f"team_photos/{team_id}/{file_name}"
+
+                bucket = StorageService.get_bucket()
+                blob = bucket.blob(blob_path)
+                blob.upload_from_string(image_bytes, content_type=content_type or 'image/jpeg')
+                public_url = blob.generate_signed_url(expiration=timedelta(days=7), method='GET')
+                uploaded_at = datetime.now(timezone.utc).isoformat()
+
+                cls._append_session_photo(session_id, org_id, {
+                    'id': str(uuid.uuid4()),
+                    'url': public_url,
+                    'file_path': blob_path,
+                    'uploaded_at': uploaded_at,
+                    'uploaded_by': coach.get('id'),
+                    'phase': 'end',
+                })
+
+                cls.clear_pending_end_photo(from_number)
+                push_event('photo_uploaded', org_id=org_id, coach_name=coach_name,
+                           preview=f"End-of-session photo for session {today_str}")
+
+                coach_word = cls._terminology_for(org_id)['coach_singular']
+                message_text = cls._advance_past_photo_step(
+                    from_number, org_id, session_id, coach_word, photo_saved=True,
+                )
+                WhatsAppService.send_message(phone_number=from_number, message_text=message_text)
+                logger.info("End-of-session photo saved for session %s by coach id=%s", session_id, coach.get('id'))
 
         except Exception as e:
             logger.error("Image handling error: %s", e, exc_info=True)
@@ -1649,6 +1834,80 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
                 pass
 
     # ── End session command ─────────────────────────────────────────────
+    #
+    # Optional, skippable, per-org-gated follow-ups after /end: an
+    # end-of-session photo (end_photo_prompt) and a short session note
+    # (session_note_prompt). Both default to False -- absent/unset reads
+    # as off, same (org or {}).get('flag') or False idiom already used for
+    # missed_checkin_nudges (scheduler_service.py:408-409) and
+    # attendance_mode (conversation_service.py:910) -- so an org with
+    # neither field set (every existing org today) gets the exact same
+    # /end reply as before this feature existed.
+
+    END_PHOTO_PROMPT_MESSAGE = (
+        "📸 Got a photo from the end of the session? Send it over, or reply skip."
+    )
+    END_PHOTO_SKIPPED_MESSAGE = "No worries — skipping the end-of-session photo."
+    END_PHOTO_SAVED_MESSAGE = "📸 End-of-session photo saved!"
+
+    SESSION_NOTE_PROMPT_MESSAGE = (
+        "📝 Want to leave a quick note about this session? Reply with a "
+        "short note, or reply skip."
+    )
+    SESSION_NOTE_SKIPPED_MESSAGE = "No worries — skipping the note."
+    SESSION_NOTE_SAVED_MESSAGE = "Got it, thanks — note saved!"
+
+    @classmethod
+    def _end_flow_finish_message(cls, prefix, coach_word):
+        """Final line of the /end flow, however it got here (both flags
+        off, or after the photo/note steps resolve) -- same "Great work"
+        register the un-gated completion message has always used."""
+        return f"{prefix}\n\nGreat work, {coach_word}! 🎉"
+
+    @classmethod
+    def _advance_past_photo_step(cls, coach_phone, org_id, session_id, coach_word, photo_saved):
+        """Called once the end-of-session photo step has resolved (an
+        image arrived, or the coach replied skip). Moves on to the note
+        prompt if session_note_prompt is on for this org, otherwise
+        finishes. Returns the outbound message text."""
+        prefix = cls.END_PHOTO_SAVED_MESSAGE if photo_saved else cls.END_PHOTO_SKIPPED_MESSAGE
+        org = FirebaseService.get_organisation(org_id)
+        session_note_prompt = (org or {}).get('session_note_prompt') or False
+        if session_note_prompt:
+            cls.set_pending_note(coach_phone, session_id)
+            return f"{prefix}\n\n{cls.SESSION_NOTE_PROMPT_MESSAGE}"
+        return cls._end_flow_finish_message(prefix, coach_word)
+
+    @classmethod
+    def _advance_past_note_step(cls, note_saved, coach_word):
+        """Called once the note step has resolved (a note was saved, or
+        the coach replied skip). Always finishes the flow."""
+        prefix = cls.SESSION_NOTE_SAVED_MESSAGE if note_saved else cls.SESSION_NOTE_SKIPPED_MESSAGE
+        return cls._end_flow_finish_message(prefix, coach_word)
+
+    @classmethod
+    def _clear_stale_end_flow_state(cls, coach_phone, session_id):
+        """Clear any pending end-of-session photo/note request left over
+        from a DIFFERENT session -- a coach can only be mid-flow for the
+        session they just called /end on, so a leftover pending request
+        tied to another session must never leak into this one. Best-
+        effort: a read failure here must never block the /end reply (see
+        module docstring's "never block the coach"), so read errors are
+        swallowed rather than propagated.
+        """
+        try:
+            stale_photo = cls.get_pending_end_photo(coach_phone)
+        except PendingStateReadError:
+            stale_photo = None
+        if stale_photo and stale_photo.get('session_id') != session_id:
+            cls.clear_pending_end_photo(coach_phone)
+
+        try:
+            stale_note = cls.get_pending_note(coach_phone)
+        except PendingStateReadError:
+            stale_note = None
+        if stale_note and stale_note.get('session_id') != session_id:
+            cls.clear_pending_note(coach_phone)
 
     @classmethod
     def handle_end_session_command(cls, coach):
@@ -1656,6 +1915,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         from firebase_admin import firestore as _firestore
         coach_id = coach.get('id')
         org_id = coach.get('org_id')
+        coach_phone = coach.get('phone_number', '')
         today_str = FirebaseService.get_org_now(org_id).strftime('%Y-%m-%d')
         terminology = cls._terminology_for(org_id)
 
@@ -1679,6 +1939,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         session_time = session.get('start_time', '')
         session_type = session.get('type', terminology['session_singular']).capitalize()
         attended = session.get('attended_player_ids', [])
+        team_id = session.get('team_id', '')
 
         FirebaseService.update_session(session['id'], {
             'status': 'completed',
@@ -1686,15 +1947,74 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         })
 
         # Clear any pending photo request since session is done
-        cls.clear_pending_photo(coach.get('phone_number', ''))
+        cls.clear_pending_photo(coach_phone)
+        cls._clear_stale_end_flow_state(coach_phone, session['id'])
 
         lines = [f"✅ Session completed! ({session_type} at {session_time})"]
         if attended:
             lines.append(f"Attendance: {len(attended)} {terminology['player_plural'].lower()} recorded")
         else:
             lines.append("No attendance was recorded for this session.")
-        lines.append(f"\nGreat work, {terminology['coach_singular']}! 🎉")
+
+        org = FirebaseService.get_organisation(org_id)
+        end_photo_prompt = (org or {}).get('end_photo_prompt') or False
+        session_note_prompt = (org or {}).get('session_note_prompt') or False
+
+        if end_photo_prompt:
+            cls.set_pending_end_photo(coach_phone, session['id'], team_id)
+            lines.append(f"\n{cls.END_PHOTO_PROMPT_MESSAGE}")
+        elif session_note_prompt:
+            cls.set_pending_note(coach_phone, session['id'])
+            lines.append(f"\n{cls.SESSION_NOTE_PROMPT_MESSAGE}")
+        else:
+            lines.append(f"\nGreat work, {terminology['coach_singular']}! 🎉")
         return '\n'.join(lines)
+
+    @classmethod
+    def handle_end_photo_skip_response(cls, coach, pending):
+        """Coach replied 'skip' while pending_end_photo was set -- advance
+        to the note step (if session_note_prompt is on for this org) or
+        finish."""
+        coach_phone = coach.get('phone_number', '')
+        org_id = coach.get('org_id')
+        cls.clear_pending_end_photo(coach_phone)
+        coach_word = cls._terminology_for(org_id)['coach_singular']
+        return cls._advance_past_photo_step(
+            coach_phone, org_id, pending['session_id'], coach_word, photo_saved=False,
+        )
+
+    @classmethod
+    def handle_note_response(cls, coach, message_text, pending):
+        """Handle a coach's reply while pending_note is set.
+
+        Commands win (callers only route here for non-command text -- see
+        the '/' carve-out in handle_incoming_message). 'skip' (case-
+        insensitive) finishes without saving a note. Anything else is
+        saved as the note: trimmed, capped at 1000 characters, appended
+        on a new line prefixed "Coach note: " if the session already has
+        notes, written as-is if not.
+        """
+        coach_phone = coach.get('phone_number', '')
+        org_id = coach.get('org_id')
+        coach_word = cls._terminology_for(org_id)['coach_singular']
+        text_stripped = message_text.strip()
+
+        if text_stripped.lower() == 'skip':
+            cls.clear_pending_note(coach_phone)
+            return cls._advance_past_note_step(note_saved=False, coach_word=coach_word)
+
+        note_text = text_stripped[:1000]
+        session_id = pending['session_id']
+        session = FirebaseService.get_session(session_id, org_id)
+        existing_notes = (session or {}).get('notes') or ''
+        if existing_notes.strip():
+            new_notes = f"{existing_notes}\nCoach note: {note_text}"
+        else:
+            new_notes = note_text
+        FirebaseService.update_session(session_id, {'notes': new_notes})
+
+        cls.clear_pending_note(coach_phone)
+        return cls._advance_past_note_step(note_saved=True, coach_word=coach_word)
 
     # ── Start session on demand via WhatsApp ──────────────────────────────
     #
@@ -2195,44 +2515,66 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
                     logger.info("Routing to pending start-session response handler")
                     response = cls.handle_start_session_response(from_number, message_text, pending_session)
                 else:
-                    action = cls._classify_command(text_lower)
-                    logger.debug("Classified as action=%s", action)
-                    # A coach is permitted for every coach-reachable action —
-                    # COMMAND_PERMISSIONS is consulted here too (rather than
-                    # skipped) so a future action that's opened up unevenly
-                    # can't silently bypass the single source of truth.
-                    if not cls._is_allowed(action, 'coach'):
-                        response = cls._command_declined_message(coach.get('name'), coach.get('org_id'))
-                    elif action == 'help':
-                        response = cls.get_help_message(coach.get('name'), coach.get('org_id'))
-                    elif action == 'reset':
-                        cls.clear_pending_attendance(from_number)
-                        response = "Your conversation has been reset. Feel free to ask me anything!"
-                    elif action == 'attendance':
-                        logger.info("Matched /attendance command")
-                        response = cls.handle_attendance_command(coach)
-                    elif action == 'attendance_redo':
-                        logger.info("Matched /attendance-redo command")
-                        response = cls.handle_attendance_redo(coach)
-                    elif action == 'end_session':
-                        logger.info("Matched /end command")
-                        response = cls.handle_end_session_command(coach)
-                    elif action == 'players':
-                        logger.info("Matched /players command")
-                        response = cls.handle_players_command(coach)
-                    elif action == 'start_session':
-                        logger.info("Matched /session command")
-                        response = cls.handle_start_session_command(coach)
+                    # End-of-session photo/note flow (set by
+                    # handle_end_session_command when end_photo_prompt /
+                    # session_note_prompt is on) — same precedence tier as
+                    # the pending states above: consumed before the text
+                    # is classified as a command, except a command itself
+                    # always wins (text starting with '/') — see
+                    # handle_note_response's docstring.
+                    pending_end_photo = cls.get_pending_end_photo(from_number)
+                    pending_note = cls.get_pending_note(from_number)
+                    if pending_end_photo and not text_lower.startswith('/'):
+                        logger.info("Routing to pending end-photo text response handler")
+                        if text_lower == 'skip':
+                            response = cls.handle_end_photo_skip_response(coach, pending_end_photo)
+                        else:
+                            # Not 'skip' and not an image -- re-prompt,
+                            # leave the pending request in place so a
+                            # photo or 'skip' sent afterwards still works.
+                            response = cls.END_PHOTO_PROMPT_MESSAGE
+                    elif pending_note and not text_lower.startswith('/'):
+                        logger.info("Routing to pending note response handler")
+                        response = cls.handle_note_response(coach, message_text, pending_note)
                     else:
-                        # action == 'qa' — generate an AI response
-                        response = cls.generate_response(
-                            phone=from_number,
-                            user_message=message_text,
-                            org_id=coach.get('org_id'),
-                            person_name=coach.get('name'),
-                            person_id=coach.get('id'),
-                            person_type='coach',
-                        )
+                        action = cls._classify_command(text_lower)
+                        logger.debug("Classified as action=%s", action)
+                        # A coach is permitted for every coach-reachable action —
+                        # COMMAND_PERMISSIONS is consulted here too (rather than
+                        # skipped) so a future action that's opened up unevenly
+                        # can't silently bypass the single source of truth.
+                        if not cls._is_allowed(action, 'coach'):
+                            response = cls._command_declined_message(coach.get('name'), coach.get('org_id'))
+                        elif action == 'help':
+                            response = cls.get_help_message(coach.get('name'), coach.get('org_id'))
+                        elif action == 'reset':
+                            cls.clear_pending_attendance(from_number)
+                            response = "Your conversation has been reset. Feel free to ask me anything!"
+                        elif action == 'attendance':
+                            logger.info("Matched /attendance command")
+                            response = cls.handle_attendance_command(coach)
+                        elif action == 'attendance_redo':
+                            logger.info("Matched /attendance-redo command")
+                            response = cls.handle_attendance_redo(coach)
+                        elif action == 'end_session':
+                            logger.info("Matched /end command")
+                            response = cls.handle_end_session_command(coach)
+                        elif action == 'players':
+                            logger.info("Matched /players command")
+                            response = cls.handle_players_command(coach)
+                        elif action == 'start_session':
+                            logger.info("Matched /session command")
+                            response = cls.handle_start_session_command(coach)
+                        else:
+                            # action == 'qa' — generate an AI response
+                            response = cls.generate_response(
+                                phone=from_number,
+                                user_message=message_text,
+                                org_id=coach.get('org_id'),
+                                person_name=coach.get('name'),
+                                person_id=coach.get('id'),
+                                person_type='coach',
+                            )
 
             # Send response via WhatsApp
             result = WhatsAppService.send_message(

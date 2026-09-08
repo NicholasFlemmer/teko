@@ -48,6 +48,8 @@ def _args(**overrides):
         safeguarding_lead_name="Jane Doe",
         safeguarding_lead_email="jane@acmefc.org",
         missed_checkin_nudges=False,
+        end_photo_prompt=False,
+        session_note_prompt=False,
         admin_name="Jane Doe",
         admin_email="jane@acmefc.org",
         admin_role="location_admin",
@@ -179,7 +181,8 @@ def test_duplicate_slug_reported_even_in_dry_run(monkeypatch):
 _EXPECTED_ORG_FIELDS = {
     'name', 'slug', 'type', 'timezone', 'country', 'supported_languages',
     'works_with_minors', 'attendance_mode', 'safeguarding_lead_name',
-    'safeguarding_lead_email', 'missed_checkin_nudges', 'is_active',
+    'safeguarding_lead_email', 'missed_checkin_nudges', 'end_photo_prompt',
+    'session_note_prompt', 'is_active',
 }
 
 _EXPECTED_ADMIN_FIELDS = {
@@ -203,6 +206,8 @@ def test_writes_full_field_set_on_clean_run(monkeypatch):
         safeguarding_lead_name="Jane Doe",
         safeguarding_lead_email="jane@acmefc.org",
         missed_checkin_nudges=True,
+        end_photo_prompt=True,
+        session_note_prompt=True,
         admin_name="Jane Doe",
         admin_email="Jane@AcmeFC.org",
         admin_role="location_admin",
@@ -228,6 +233,8 @@ def test_writes_full_field_set_on_clean_run(monkeypatch):
         'safeguarding_lead_name': "Jane Doe",
         'safeguarding_lead_email': "jane@acmefc.org",
         'missed_checkin_nudges': True,
+        'end_photo_prompt': True,
+        'session_note_prompt': True,
         'is_active': True,
     }
 
