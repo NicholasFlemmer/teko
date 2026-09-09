@@ -178,6 +178,32 @@ def test_missed_session_flag_on_sends_one_nudge(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Exact nudge wording -- pins the full message text (asks the coach to
+# share their location rather than reply, and drops the "reply here" promise
+# conversation_service.py never actually acted on).
+# ---------------------------------------------------------------------------
+
+def test_missed_session_nudge_pins_exact_message_text(monkeypatch):
+    session = _past_session()
+    orgs = {'org-1': {'id': 'org-1', 'type': 'sports', 'missed_checkin_nudges': True}}
+    store, whatsapp_calls = _install_fakes(monkeypatch, [session], orgs, _COACH)
+
+    SchedulerService.mark_missed_sessions()
+
+    assert len(whatsapp_calls) == 1
+    message = whatsapp_calls[0]['message_text']
+    assert message == (
+        f"Hi Jo! Just checking in, your session on {session['date']} "
+        f"at {session['start_time']} hasn't been checked in yet, so "
+        f"it's showing as missed on our side. If you're still at the session, "
+        f"share your location now and it'll check you in. If it didn't "
+        f"happen, no worries at all, nothing else you need to do."
+    )
+    assert '—' not in message  # no em dashes
+    assert 'reply' not in message.lower()
+
+
+# ---------------------------------------------------------------------------
 # Rerun: the same session sends nothing on a second run
 # ---------------------------------------------------------------------------
 

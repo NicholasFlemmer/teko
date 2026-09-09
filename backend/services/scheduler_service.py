@@ -314,11 +314,11 @@ class SchedulerService:
                 continue
 
             message_text = (
-                f"Hi {coach_name}! Just checking in — your {session_word.lower()} on "
-                f"{session_date} at {session_start} hasn't been checked in, so it's "
-                f"showing as missed on our side. If you did run it, just reply here "
-                f"and let us know so we can get it logged properly. If it didn't "
-                f"happen, no worries at all — nothing else you need to do."
+                f"Hi {coach_name}! Just checking in, your {session_word.lower()} on "
+                f"{session_date} at {session_start} hasn't been checked in yet, so "
+                f"it's showing as missed on our side. If you're still at the session, "
+                f"share your location now and it'll check you in. If it didn't "
+                f"happen, no worries at all, nothing else you need to do."
             )
             result = WhatsAppService.send_message(phone_number=phone, message_text=message_text)
             if result.get('success'):
