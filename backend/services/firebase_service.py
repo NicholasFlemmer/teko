@@ -419,9 +419,23 @@ class FirebaseService:
         coach. Pass org_id=None only for the intentional super_admin
         cross-org case, matching every other org-scoped getter in this
         class.
+
+        check_in_data['location_verified'] is False in two different
+        situations that must not collapse to the same session status:
+          - the venue has GPS configured and the coach was outside the
+            allowed radius (genuinely unverified -- still 'missed'), or
+          - the venue has no GPS configured at all, so distance could
+            never be checked (a real check-in that just can't be
+            verified -- should count as 'checked_in', not 'missed').
+        check_in_data['location_verifiable'] (default True) distinguishes
+        the two: pass False only for the second case. location_verified
+        itself is still recorded as False either way -- it is not a lie,
+        the location genuinely wasn't verified -- but it alone no longer
+        drives status to 'missed'.
         """
         db = cls.get_db()
         location_verified = check_in_data.get('location_verified', False)
+        location_verifiable = check_in_data.get('location_verifiable', True)
         location = check_in_data.get('location', {})
 
         update_data = {
@@ -443,8 +457,11 @@ class FirebaseService:
         all_coach_ids = cls.get_session_coach_ids(session) if session else []
 
         if len(all_coach_ids) <= 1 or not coach_id:
-            # Single-coach or unknown coach — simple status
-            update_data['status'] = 'checked_in' if location_verified else 'missed'
+            # Single-coach or unknown coach — simple status. A check-in
+            # counts as 'checked_in' if the location was verified, OR if
+            # it simply couldn't be verified (no venue GPS) -- only a
+            # verifiable-but-failed check (out of range) is 'missed'.
+            update_data['status'] = 'checked_in' if (location_verified or not location_verifiable) else 'missed'
         else:
             # Multi-coach: check if all coaches have now checked in
             existing_check_ins = dict(session.get('coach_check_ins', {}) or {})

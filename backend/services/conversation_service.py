@@ -1779,10 +1779,14 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
             actual_location = format_location(latitude, longitude)
 
             if not expected_location:
-                # No GPS on the venue — still check in but can't verify distance
+                # No GPS on the venue — still check in but can't verify distance.
+                # location_verifiable=False tells check_in_session this is an
+                # unverifiable check-in, not a failed (out-of-range) one, so it
+                # still counts as 'checked_in' rather than 'missed'.
                 FirebaseService.check_in_session(session['id'], {
                     'location': actual_location,
                     'location_verified': False,  # can't verify without venue coordinates
+                    'location_verifiable': False,
                 }, coach_id=coach_id, org_id=org_id)
                 WhatsAppService.send_message(
                     phone_number=from_number,

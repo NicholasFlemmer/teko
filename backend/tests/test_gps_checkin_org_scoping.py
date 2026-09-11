@@ -58,6 +58,13 @@ def _base_mocks(monkeypatch, coach, sessions):
         lambda org_id, coach_id=None, **kw: [dict(s) for s in sessions],
     )
     monkeypatch.setattr(WhatsAppService, 'send_message', lambda **kw: {'success': True})
+    # get_org_now() (used only for today's date string here) otherwise
+    # calls the real FirebaseService.get_organisation -- a live Firestore
+    # read this pure-unit test file must not depend on. Use naive local
+    # time (not UTC) so its date matches _today_session()'s date.today()
+    # (also local) regardless of the machine's UTC offset.
+    from datetime import datetime
+    monkeypatch.setattr(FirebaseService, 'get_org_now', lambda org_id: datetime.now())
 
 
 def test_gps_checkin_no_venue_configured_passes_coach_org_id_to_check_in_session(monkeypatch):
@@ -71,7 +78,7 @@ def test_gps_checkin_no_venue_configured_passes_coach_org_id_to_check_in_session
     calls = []
 
     def _fake_check_in_session(session_id, check_in_data, org_id, coach_id=None):
-        calls.append({'session_id': session_id, 'coach_id': coach_id, 'org_id': org_id})
+        calls.append({'session_id': session_id, 'coach_id': coach_id, 'org_id': org_id, 'check_in_data': check_in_data})
         return dict(session)
 
     monkeypatch.setattr(FirebaseService, 'check_in_session', _fake_check_in_session)
@@ -81,6 +88,9 @@ def test_gps_checkin_no_venue_configured_passes_coach_org_id_to_check_in_session
     assert len(calls) == 1
     assert calls[0]['org_id'] == 'org-a'
     assert calls[0]['coach_id'] == 'coach-1'
+    # No venue GPS -- unverifiable, not a failed/out-of-range verification,
+    # so check_in_session must be told not to treat this as a missed check-in.
+    assert calls[0]['check_in_data'].get('location_verifiable') is False
 
 
 def test_gps_checkin_distance_verified_passes_coach_org_id_to_check_in_session(monkeypatch):
@@ -101,7 +111,7 @@ def test_gps_checkin_distance_verified_passes_coach_org_id_to_check_in_session(m
     calls = []
 
     def _fake_check_in_session(session_id, check_in_data, org_id, coach_id=None):
-        calls.append({'session_id': session_id, 'coach_id': coach_id, 'org_id': org_id})
+        calls.append({'session_id': session_id, 'coach_id': coach_id, 'org_id': org_id, 'check_in_data': check_in_data})
         return dict(session)
 
     monkeypatch.setattr(FirebaseService, 'check_in_session', _fake_check_in_session)
@@ -111,6 +121,9 @@ def test_gps_checkin_distance_verified_passes_coach_org_id_to_check_in_session(m
     assert len(calls) == 1
     assert calls[0]['org_id'] == 'org-a'
     assert calls[0]['coach_id'] == 'coach-1'
+    # Venue GPS is configured and the coach is within radius -- this is a
+    # verifiable check-in, so location_verifiable must not be forced False.
+    assert calls[0]['check_in_data'].get('location_verifiable', True) is True
 
 
 def test_check_in_session_does_not_act_on_a_session_from_another_org(monkeypatch):

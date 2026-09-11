@@ -269,14 +269,14 @@ def test_check_in_single_coach_location_verified_true_sets_checked_in(monkeypatc
 
 
 def test_check_in_single_coach_location_verified_false_sets_missed(monkeypatch):
-    """PINNED BEHAVIOUR -- deliberately not changed by this fix.
+    """PINNED BEHAVIOUR -- a genuinely out-of-range check-in (venue GPS
+    configured, coach outside the radius) still writes status='missed'.
 
-    A single/unknown-coach check-in with location_verified=False still
-    writes status='missed', even though a real check-in attempt happened.
-    That is bug-shaped but is a separate, undecided product question
-    (should a failed-GPS check-in count as an attendance signal?) and is
-    explicitly out of scope here per DECIDED BEHAVIOUR. Do not "fix" this
-    test without a product decision on Bucket A behaviour.
+    location_verifiable defaults to True when absent, so this call --
+    which doesn't pass it -- represents "verification was possible and
+    failed", not "verification wasn't possible". See
+    test_check_in_single_coach_gps_not_configured_sets_checked_in below
+    for the latter case, which now (correctly) sets 'checked_in' instead.
     """
     session = {
         'id': 'sess-1',
@@ -290,3 +290,72 @@ def test_check_in_single_coach_location_verified_false_sets_missed(monkeypatch):
     assert len(captured) == 1
     _, update_data = captured[0]
     assert update_data['status'] == 'missed'
+
+
+def test_check_in_single_coach_gps_not_configured_sets_checked_in(monkeypatch):
+    """A check-in where the venue has no GPS configured (location_verified=
+    False AND location_verifiable=False) is a real check-in that simply
+    can't be verified -- it must write status='checked_in', not 'missed',
+    unlike the genuinely-out-of-range case above."""
+    session = {
+        'id': 'sess-1',
+        'status': 'reminded',
+        'coach_id': 'c1',
+    }
+    captured = _install_check_in_fakes(monkeypatch, session)
+
+    FirebaseService.check_in_session(
+        'sess-1',
+        {'location_verified': False, 'location_verifiable': False, 'location': {}},
+        org_id='org-1', coach_id='c1',
+    )
+
+    assert len(captured) == 1
+    _, update_data = captured[0]
+    assert update_data['status'] == 'checked_in'
+    # location_verified is still recorded as False -- it genuinely wasn't
+    # verified -- only the derived status changes.
+    assert update_data['location_verified'] is False
+
+
+def test_check_in_multi_coach_location_verified_false_sets_checked_in_unchanged(monkeypatch):
+    """PINNED BEHAVIOUR -- multi-coach status has never depended on
+    location_verified (any coach checking in, verified or not, marks the
+    session 'checked_in'); this fix does not touch that."""
+    session = {
+        'id': 'sess-1',
+        'status': 'reminded',
+        'coach_ids': ['c1', 'c2', 'c3', 'c4', 'c5'],
+        'coach_check_ins': {'c1': True},
+    }
+    captured = _install_check_in_fakes(monkeypatch, session)
+
+    FirebaseService.check_in_session('sess-1', {'location_verified': False, 'location': {}}, org_id='org-1', coach_id='c2')
+
+    assert len(captured) == 1
+    _, update_data = captured[0]
+    assert update_data['status'] == 'checked_in'
+
+
+def test_check_in_multi_coach_gps_not_configured_sets_checked_in(monkeypatch):
+    """Multi-coach path with location_verifiable=False (venue has no GPS)
+    -- same 'checked_in' outcome as every other multi-coach case, since
+    multi-coach status doesn't derive from location_verified/verifiable
+    at all."""
+    session = {
+        'id': 'sess-1',
+        'status': 'reminded',
+        'coach_ids': ['c1', 'c2', 'c3', 'c4', 'c5'],
+        'coach_check_ins': {'c1': True},
+    }
+    captured = _install_check_in_fakes(monkeypatch, session)
+
+    FirebaseService.check_in_session(
+        'sess-1',
+        {'location_verified': False, 'location_verifiable': False, 'location': {}},
+        org_id='org-1', coach_id='c2',
+    )
+
+    assert len(captured) == 1
+    _, update_data = captured[0]
+    assert update_data['status'] == 'checked_in'
