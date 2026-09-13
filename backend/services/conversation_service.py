@@ -935,6 +935,13 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
             else:
                 lines.append("Everyone is present! 🎉")
             lines.append("\nSend /attendance-redo to record it again.")
+
+            # On a shared session, another coach hitting this branch still
+            # needs their own pending photo armed -- otherwise only whoever
+            # originally recorded attendance can ever send the group photo.
+            # Same handoff as the fresh-submission path (line ~1084).
+            cls.set_pending_photo(coach.get('phone_number', ''), session['id'], team_id)
+
             return '\n'.join(lines)
 
         team = FirebaseService.get_team(team_id, org_id)
@@ -1193,6 +1200,13 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
             lines = [f"✅ Attendance already recorded for today's session.\n"]
             lines.append(f"{total} total — {boys} boys, {girls} girls, {new_participants} new")
             lines.append("\nSend /attendance-redo to record it again.")
+
+            # On a shared session, another coach hitting this branch still
+            # needs their own pending photo armed -- otherwise only whoever
+            # originally recorded the headcount can ever send the group
+            # photo. Same handoff as the fresh-submission path (line ~1285).
+            cls.set_pending_photo(coach.get('phone_number', ''), session_id, team_id)
+
             return '\n'.join(lines)
 
         team = FirebaseService.get_team(team_id, org_id)

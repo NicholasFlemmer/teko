@@ -23,7 +23,12 @@ Covers:
   - /attendance-redo clears 'headcount' (not attended_player_ids) in
     headcount mode, then re-prompts.
   - A second /attendance with a headcount already recorded reports the
-    numbers back and does not set new pending state.
+    numbers back and does not set new pending_headcount state -- but (bug
+    fix, shared multi-coach sessions) DOES arm a pending_photo for the
+    coach who just ran the command, in both named and headcount modes, so
+    they aren't permanently locked out of the photo step just because
+    someone else on the same session submitted first. A coach who never
+    ran /attendance at all is confirmed to stay unarmed.
   - Two orgs in different attendance_mode resolve independently in the
     same process (mirrors tests/test_org_timezone.py's independent-orgs
     test for get_org_now).
@@ -514,12 +519,92 @@ def test_second_attendance_command_reports_recorded_headcount(monkeypatch):
     monkeypatch.setattr(FirebaseService, 'get_all_players', _boom)
     set_calls = []
     monkeypatch.setattr(ConversationService, 'set_pending_headcount', classmethod(lambda cls, *a: set_calls.append(a)))
+    # This branch now arms a pending_photo for the CURRENT coach (see the
+    # dedicated tests below) -- stubbed here since this test isn't about
+    # that and doesn't use fake_db.
+    monkeypatch.setattr(ConversationService, 'set_pending_photo', classmethod(lambda cls, phone, sid, tid: None))
 
     reply = ConversationService.handle_attendance_command(_coach())
 
     assert '20' in reply and '12' in reply and '8' in reply and '3' in reply
     assert 'attendance-redo' in reply.lower()
-    assert not set_calls, "must not set new pending state when a headcount is already recorded"
+    assert not set_calls, "must not set new pending state (pending_headcount) when a headcount is already recorded"
+
+
+# ---------------------------------------------------------------------------
+# 14b. Bug fix: on a shared multi-coach session, a coach who hits the
+# "already recorded" branch (because a DIFFERENT coach submitted first)
+# must still get their OWN pending_photo armed for their own phone number --
+# otherwise only whoever originally recorded attendance/headcount could
+# ever send the group photo. Covers both named and headcount modes, using
+# the real pending_photo storage (fake_db) so this exercises the actual
+# set_pending_photo/get_pending_photo round trip, not a stub. Also confirms
+# a third coach who never ran /attendance at all is not accidentally armed.
+# ---------------------------------------------------------------------------
+
+def test_named_mode_already_recorded_still_arms_pending_photo_for_this_coach(monkeypatch, fake_db):
+    # Coach A already recorded attendance on this shared session.
+    session = _session(attended_player_ids=['p1'])
+    monkeypatch.setattr(FirebaseService, 'get_org_now', lambda org_id: datetime(2026, 8, 30, 10, 0))
+    monkeypatch.setattr(FirebaseService, 'get_organisation', lambda org_id: _org(attendance_mode='named'))
+    monkeypatch.setattr(FirebaseService, 'get_all_sessions', lambda org_id, coach_id=None, **kw: [session])
+    monkeypatch.setattr(FirebaseService, 'get_all_players', lambda org_id, team_id=None: [
+        {'id': 'p1', 'first_name': 'Amy', 'last_name': 'A'},
+        {'id': 'p2', 'first_name': 'Bea', 'last_name': 'B'},
+    ])
+
+    # Coach B (different phone, same session/team) runs /attendance afterward.
+    coach_b = _coach(coach_id='coach-2', phone='27829999999', name='Bea Coach')
+    reply = ConversationService.handle_attendance_command(coach_b)
+
+    assert 'already recorded' in reply.lower(), "must still return the already-recorded summary"
+    assert 'attendance-redo' in reply.lower()
+
+    photo_pending = ConversationService.get_pending_photo('27829999999')
+    assert photo_pending is not None, (
+        "coach B must have their own pending_photo armed even though attendance was already recorded by someone else"
+    )
+    assert photo_pending['session_id'] == 'session-1'
+    assert photo_pending['team_id'] == 'team-1'
+
+    # A third coach who never ran /attendance (and never submitted anything)
+    # must not be accidentally armed.
+    assert ConversationService.get_pending_photo('27821111111') is None, (
+        "a coach who never ran /attendance must not have a pending_photo"
+    )
+
+
+def test_headcount_mode_already_recorded_still_arms_pending_photo_for_this_coach(monkeypatch, fake_db):
+    # Coach A already recorded the headcount on this shared session.
+    session = _session(headcount={'boys': 12, 'girls': 8, 'new_participants': 3, 'total': 20})
+    monkeypatch.setattr(FirebaseService, 'get_org_now', lambda org_id: datetime(2026, 8, 30, 10, 0))
+    monkeypatch.setattr(FirebaseService, 'get_organisation', lambda org_id: _org(attendance_mode='headcount'))
+    monkeypatch.setattr(FirebaseService, 'get_all_sessions', lambda org_id, coach_id=None, **kw: [session])
+
+    def _boom(*a, **kw):
+        raise AssertionError("headcount mode must never call get_all_players")
+
+    monkeypatch.setattr(FirebaseService, 'get_all_players', _boom)
+
+    # Coach B (different phone, same session/team) runs /attendance afterward.
+    coach_b = _coach(coach_id='coach-2', phone='27829999999', name='Bea Coach')
+    reply = ConversationService.handle_attendance_command(coach_b)
+
+    assert 'already recorded' in reply.lower(), "must still return the already-recorded summary"
+    assert '20' in reply
+
+    photo_pending = ConversationService.get_pending_photo('27829999999')
+    assert photo_pending is not None, (
+        "coach B must have their own pending_photo armed even though the headcount was already recorded by someone else"
+    )
+    assert photo_pending['session_id'] == 'session-1'
+    assert photo_pending['team_id'] == 'team-1'
+
+    # A third coach who never ran /attendance (and never submitted anything)
+    # must not be accidentally armed.
+    assert ConversationService.get_pending_photo('27821111111') is None, (
+        "a coach who never ran /attendance must not have a pending_photo"
+    )
 
 
 # ---------------------------------------------------------------------------
