@@ -222,7 +222,14 @@ class _FakeBlob:
     def upload_from_string(self, data, content_type=None):
         pass
 
-    def generate_signed_url(self, expiration=None, method=None):
+    def generate_signed_url(self, expiration=None, method=None, credentials=None):
+        # Real generate_signed_url() accepts a credentials= kwarg (used to
+        # route signing through the IAM-impersonated credentials from
+        # StorageService.get_signing_credentials() -- see
+        # test_generate_signed_url_calls_are_passed_signing_credentials
+        # below). Recording it here lets that test prove the real call
+        # sites actually pass it, not just that a URL comes back.
+        signed_url_calls.append({'credentials': credentials})
         return 'https://example.com/end-photo.jpg'
 
 
@@ -231,13 +238,26 @@ class _FakeBucket:
         return _FakeBlob()
 
 
+signed_url_calls = []
+
+# A recognisable sentinel standing in for the real signing-aware
+# credentials StorageService.get_signing_credentials() would return
+# (unit-tested directly in test_storage_signing_credentials.py). Fixed at
+# module level so tests can assert the exact object identity was passed
+# through to generate_signed_url(), not just that some credentials were.
+SENTINEL_SIGNING_CREDENTIALS = object()
+
+
 @pytest.fixture
 def drive_image(monkeypatch, backend):
     """Drive a WhatsApp image message through the real handle_image_message
     entry point, with WhatsApp media download and Cloud Storage stubbed."""
+    signed_url_calls.clear()
     monkeypatch.setattr(ConversationService, '_download_whatsapp_media',
                          classmethod(lambda cls, media_id: (b'fake-bytes', 'image/jpeg')))
     monkeypatch.setattr(StorageService, 'get_bucket', classmethod(lambda cls: _FakeBucket()))
+    monkeypatch.setattr(StorageService, 'get_signing_credentials',
+                         classmethod(lambda cls: SENTINEL_SIGNING_CREDENTIALS))
 
     def _drive(coach):
         monkeypatch.setattr(PersonService, 'resolve', lambda phone: dict(coach))
@@ -404,6 +424,15 @@ def test_both_on_full_happy_path(drive, drive_image, monkeypatch, backend):
     assert r2 == (
         "📸 End-of-session photo saved!\n\n"
         "📝 Want to leave a quick note about this session? Reply with a short note, or reply skip."
+    )
+    # Bug fix: handle_image_message's end-of-session-photo branch must pass
+    # StorageService.get_signing_credentials() through to
+    # generate_signed_url(), not call it with the raw default/unsigned
+    # credentials (which raise AttributeError on Cloud Run -- see
+    # conversation_service.py's two generate_signed_url call sites).
+    assert signed_url_calls[-1]['credentials'] is SENTINEL_SIGNING_CREDENTIALS, (
+        "generate_signed_url() must be called with StorageService.get_signing_credentials(), "
+        "not left to the default (unsigned) credentials"
     )
     assert ConversationService.get_pending_end_photo(coach['phone_number']) is None
     pending_note = ConversationService.get_pending_note(coach['phone_number'])

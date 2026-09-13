@@ -1578,7 +1578,10 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
                 blob = bucket.blob(blob_path)
                 blob.upload_from_string(image_bytes, content_type=content_type or 'image/jpeg')
                 # Use signed URL (7 day expiry) instead of making blob public
-                public_url = blob.generate_signed_url(expiration=timedelta(days=7), method='GET')
+                public_url = blob.generate_signed_url(
+                    expiration=timedelta(days=7), method='GET',
+                    credentials=StorageService.get_signing_credentials(),
+                )
                 uploaded_at = datetime.now(timezone.utc).isoformat()
 
                 # Save reference on the session -- unchanged from before
@@ -1642,7 +1645,10 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
                 bucket = StorageService.get_bucket()
                 blob = bucket.blob(blob_path)
                 blob.upload_from_string(image_bytes, content_type=content_type or 'image/jpeg')
-                public_url = blob.generate_signed_url(expiration=timedelta(days=7), method='GET')
+                public_url = blob.generate_signed_url(
+                    expiration=timedelta(days=7), method='GET',
+                    credentials=StorageService.get_signing_credentials(),
+                )
                 uploaded_at = datetime.now(timezone.utc).isoformat()
 
                 cls._append_session_photo(session_id, org_id, {

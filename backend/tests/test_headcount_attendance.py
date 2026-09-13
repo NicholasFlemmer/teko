@@ -454,18 +454,27 @@ def test_headcount_recording_sets_pending_photo_and_photo_flow_writes_group_phot
     monkeypatch.setattr(ConversationService, '_download_whatsapp_media',
                          classmethod(lambda cls, media_id: (b'fake-bytes', 'image/jpeg')))
 
+    signed_url_calls = []
+
     class _FakeBlob:
         def upload_from_string(self, data, content_type=None):
             pass
 
-        def generate_signed_url(self, expiration=None, method=None):
+        def generate_signed_url(self, expiration=None, method=None, credentials=None):
+            # Real generate_signed_url() accepts (and, per the bug fix,
+            # must be called with) a credentials= kwarg -- see the
+            # assertion below.
+            signed_url_calls.append({'credentials': credentials})
             return 'https://example.com/photo.jpg'
 
     class _FakeBucket:
         def blob(self, path):
             return _FakeBlob()
 
+    sentinel_signing_credentials = object()
     monkeypatch.setattr(StorageService, 'get_bucket', classmethod(lambda cls: _FakeBucket()))
+    monkeypatch.setattr(StorageService, 'get_signing_credentials',
+                         classmethod(lambda cls: sentinel_signing_credentials))
     monkeypatch.setattr(WhatsAppService, 'send_message', lambda phone_number, message_text: {'success': True})
 
     ConversationService.handle_image_message('27821234567', {'id': 'media-1'}, message_id='m-1')
@@ -474,6 +483,14 @@ def test_headcount_recording_sets_pending_photo_and_photo_flow_writes_group_phot
     # The headcount recorded in step 1 must still be there, untouched by
     # the photo write.
     assert session_store['session-1']['headcount']['boys'] == 12
+    # Bug fix: handle_image_message's check-in-photo branch must pass
+    # StorageService.get_signing_credentials() through to
+    # generate_signed_url(), not the raw default/unsigned credentials
+    # (which raise AttributeError on Cloud Run).
+    assert signed_url_calls[-1]['credentials'] is sentinel_signing_credentials, (
+        "generate_signed_url() must be called with StorageService.get_signing_credentials(), "
+        "not left to the default (unsigned) credentials"
+    )
 
 
 # ---------------------------------------------------------------------------

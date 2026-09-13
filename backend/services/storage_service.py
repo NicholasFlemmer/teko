@@ -3,6 +3,10 @@ from config import Config
 import uuid
 import os
 import logging
+import google.auth
+from google.auth import impersonated_credentials
+from google.auth.credentials import Signing as _SigningCredentials
+from google.auth.transport.requests import Request as _GoogleAuthRequest
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +23,7 @@ class StorageService:
     """Service for Firebase Cloud Storage operations"""
 
     _bucket = None
+    _signing_credentials = None
 
     @classmethod
     def get_bucket(cls):
@@ -31,6 +36,51 @@ class StorageService:
                 bucket_name = f"{project_id}.firebasestorage.app"
             cls._bucket = storage.bucket(bucket_name)
         return cls._bucket
+
+    @classmethod
+    def get_signing_credentials(cls):
+        """Credentials that can actually sign a URL (i.e. carry a private
+        key), for use with blob.generate_signed_url(credentials=...).
+
+        On Cloud Run/GCE, google.auth.default() returns
+        google.auth.compute_engine.credentials.Credentials, which only ever
+        carries a bearer token -- generate_signed_url() raises
+        AttributeError on these no matter what IAM roles are granted,
+        because nothing tells the library to sign via IAM instead of a
+        local private key. The fix is to wrap the default credentials in
+        impersonated_credentials.Credentials, targeting the SAME service
+        account (self-impersonation): this routes signing through the IAM
+        signBlob API, using the roles/iam.serviceAccountTokenCreator grant
+        already present on this service account.
+
+        A local service-account key file (google.oauth2.service_account.
+        Credentials, e.g. via FIREBASE_CREDENTIALS_PATH) already implements
+        google.auth.credentials.Signing directly -- no impersonation is
+        needed or attempted for those, so local dev with a key file is
+        unaffected.
+
+        Cached at class level: building the impersonated credentials
+        requires resolving the real service account email, which for
+        compute engine credentials means a metadata-server round trip on
+        first refresh -- this must not happen on every signed-URL call.
+        """
+        if cls._signing_credentials is None:
+            credentials, _project = google.auth.default()
+            if isinstance(credentials, _SigningCredentials):
+                # Already has a private key -- use as-is, no impersonation.
+                cls._signing_credentials = credentials
+            else:
+                if not credentials.valid:
+                    # Also resolves compute-engine credentials' service
+                    # account email from 'default' to the real address.
+                    credentials.refresh(_GoogleAuthRequest())
+                cls._signing_credentials = impersonated_credentials.Credentials(
+                    source_credentials=credentials,
+                    target_principal=credentials.service_account_email,
+                    target_scopes=['https://www.googleapis.com/auth/cloud-platform'],
+                    lifetime=3600,
+                )
+        return cls._signing_credentials
 
     # 10 MB max upload size
     MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -119,6 +169,7 @@ class StorageService:
         blob = bucket.blob(file_path)
         url = blob.generate_signed_url(
             expiration=timedelta(minutes=expiration_minutes),
-            method='GET'
+            method='GET',
+            credentials=cls.get_signing_credentials(),
         )
         return url
