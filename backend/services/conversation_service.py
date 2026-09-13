@@ -10,7 +10,7 @@ from services.safeguarding_service import (
 )
 from routes.sse import push_event
 from utils.phone import mask_phone
-from datetime import datetime, date, timezone
+from datetime import datetime, date, timezone, timedelta
 import uuid
 import re
 import traceback
@@ -870,6 +870,52 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
             pass
 
     @classmethod
+    def _select_active_or_nearest_session(cls, sessions, org_now):
+        """Pick "the" session for a same-day, multi-session coach command.
+
+        Prefers a session currently in its time window (start_time <=
+        org_now <= end_time, end_time defaulting to start_time + 2h when
+        unset -- same convention as scheduler_service's end-of-session
+        handling, for consistency). Falls back to whichever session's
+        start_time is closest to org_now when none are active. With a
+        single session, or when no session has parseable date/start_time,
+        falls back to the old sort-by-start_time/take-first behaviour.
+        """
+        def _parse_window(session):
+            date_str = session.get('date', '')
+            start_str = session.get('start_time', '')
+            end_str = session.get('end_time', '')
+            if not date_str or not start_str:
+                return None
+            try:
+                start_dt = datetime.strptime(f"{date_str} {start_str}", "%Y-%m-%d %H:%M")
+            except ValueError:
+                return None
+            end_dt = None
+            if end_str:
+                try:
+                    end_dt = datetime.strptime(f"{date_str} {end_str}", "%Y-%m-%d %H:%M")
+                except ValueError:
+                    end_dt = None
+            if end_dt is None:
+                end_dt = start_dt + timedelta(hours=2)
+            return start_dt, end_dt
+
+        parsed = [(s, _parse_window(s)) for s in sessions]
+
+        active = [(s, window) for s, window in parsed if window and window[0] <= org_now <= window[1]]
+        if active:
+            active.sort(key=lambda pair: pair[1][0])
+            return active[0][0]
+
+        with_windows = [(s, window) for s, window in parsed if window]
+        if with_windows:
+            with_windows.sort(key=lambda pair: abs((pair[1][0] - org_now).total_seconds()))
+            return with_windows[0][0]
+
+        return sorted(sessions, key=lambda s: s.get('start_time', ''))[0]
+
+    @classmethod
     def handle_attendance_command(cls, coach):
         """Handle /attendance command — find today's session and send player list"""
         try:
@@ -882,7 +928,8 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
     def _handle_attendance_command_inner(cls, coach):
         coach_id = coach.get('id')
         org_id = coach.get('org_id')
-        today_str = FirebaseService.get_org_now(org_id).strftime('%Y-%m-%d')
+        org_now = FirebaseService.get_org_now(org_id)
+        today_str = org_now.strftime('%Y-%m-%d')
         terminology = cls._terminology_for(org_id)
         logger.info("Attendance command from coach id=%s for %s", coach_id, today_str)
 
@@ -895,9 +942,9 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         if not sessions:
             return "You don't have any sessions with a team scheduled for today. 📋"
 
-        # Pick the session (if multiple, pick the earliest by start_time)
-        sessions.sort(key=lambda s: s.get('start_time', ''))
-        session = sessions[0]
+        # Pick the session actually happening now when the coach has more
+        # than one today, not just the earliest.
+        session = cls._select_active_or_nearest_session(sessions, org_now)
         team_id = session['team_id']
 
         # Cricket without Boundaries feature 2 of 5: an org with
@@ -1097,14 +1144,14 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
         """Allow re-recording attendance for today's session"""
         coach_id = coach.get('id')
         org_id = coach.get('org_id')
-        today_str = FirebaseService.get_org_now(org_id).strftime('%Y-%m-%d')
+        org_now = FirebaseService.get_org_now(org_id)
+        today_str = org_now.strftime('%Y-%m-%d')
         all_coach_sessions = FirebaseService.get_all_sessions(org_id, coach_id=coach_id)
         sessions = [s for s in all_coach_sessions if s.get('date') == today_str and s.get('team_id')]
         if not sessions:
             return "You don't have any sessions scheduled for today. 📋"
 
-        sessions.sort(key=lambda s: s.get('start_time', ''))
-        session = sessions[0]
+        session = cls._select_active_or_nearest_session(sessions, org_now)
 
         org = FirebaseService.get_organisation(org_id)
         attendance_mode = (org or {}).get('attendance_mode') or 'named'
