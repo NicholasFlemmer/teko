@@ -13,6 +13,7 @@ from utils.phone import mask_phone
 from datetime import datetime, date, timezone
 import uuid
 import re
+import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -1524,7 +1525,17 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
                 return
 
             # Download image from WhatsApp
-            image_bytes, content_type = cls._download_whatsapp_media(media_id)
+            # DIAGNOSTIC (temporary): print, not logger, as a backstop in case
+            # logging itself is implicated in image messages going silently
+            # unprocessed. Remove once the root cause is confirmed.
+            print(f"IMAGE_DEBUG: start downloading media for {message_id}", flush=True)
+            try:
+                image_bytes, content_type = cls._download_whatsapp_media(media_id)
+            except Exception as e:
+                print(f"IMAGE_DEBUG: EXCEPTION downloading media for {message_id}: {type(e).__name__}: {e}", flush=True)
+                traceback.print_exc()
+                raise
+            print(f"IMAGE_DEBUG: finished downloading media for {message_id}", flush=True)
             if not image_bytes:
                 WhatsAppService.send_message(
                     phone_number=from_number,

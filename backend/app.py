@@ -13,6 +13,7 @@ import os
 import atexit
 import hmac
 import hashlib
+import traceback
 import collections as _collections
 from flask import Flask, jsonify
 from flask_cors import CORS
@@ -336,11 +337,22 @@ def whatsapp_webhook():
                                                 )
                                         elif message_type == 'image':
                                             image_data = message.get('image', {})
-                                            ConversationService.handle_image_message(
-                                                from_number=from_number,
-                                                image_info=image_data,
-                                                message_id=message_id
-                                            )
+                                            # DIAGNOSTIC (temporary): print, not logger, as a
+                                            # backstop in case logging itself is implicated in
+                                            # image messages going silently unprocessed. Remove
+                                            # once the root cause is confirmed.
+                                            print(f"IMAGE_DEBUG: start processing {message_id} from {mask_phone(from_number)}", flush=True)
+                                            try:
+                                                ConversationService.handle_image_message(
+                                                    from_number=from_number,
+                                                    image_info=image_data,
+                                                    message_id=message_id
+                                                )
+                                            except Exception as e:
+                                                print(f"IMAGE_DEBUG: EXCEPTION in {message_id}: {type(e).__name__}: {e}", flush=True)
+                                                traceback.print_exc()
+                                                raise
+                                            print(f"IMAGE_DEBUG: finished processing {message_id}", flush=True)
                                         elif message_type == 'location':
                                             location_data = message.get('location', {})
                                             lat = location_data.get('latitude')
