@@ -14,8 +14,11 @@ import {
   X,
   Loader2,
   Repeat,
+  StickyNote,
+  Camera,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Toggle } from "@/components/ui/toggle";
 import { StatusCard } from "@/components/ui/status-card";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { CreateSessionModal } from "@/components/schedule/CreateSessionModal";
@@ -47,6 +50,7 @@ interface Session {
   type: string;
   status: string;
   notes?: string;
+  photos?: unknown[];
   recurrence_group_id?: string;
   check_in_time?: any;
   location_verified?: boolean;
@@ -97,8 +101,10 @@ export default function Schedule() {
   const [filterType, setFilterType] = useState("all");
   const [filterTeam, setFilterTeam] = useState("all");
   const [filterLocation, setFilterLocation] = useState("all");
+  const [filterHasNotes, setFilterHasNotes] = useState(false);
+  const [filterHasPhotos, setFilterHasPhotos] = useState(false);
 
-  const hasActiveFilter = filterCoach !== "all" || filterType !== "all" || filterTeam !== "all" || filterLocation !== "all";
+  const hasActiveFilter = filterCoach !== "all" || filterType !== "all" || filterTeam !== "all" || filterLocation !== "all" || filterHasNotes || filterHasPhotos;
 
   // Build lookup maps for coach/team/location names by ID
   const coachMap = useMemo(() => {
@@ -149,6 +155,7 @@ export default function Schedule() {
       type: raw.type || "practice",
       status: raw.status || "scheduled",
       notes: raw.notes,
+      photos: raw.photos,
       recurrence_group_id: raw.recurrence_group_id,
       check_in_time: raw.check_in_time,
       location_verified: raw.location_verified,
@@ -219,9 +226,11 @@ export default function Schedule() {
       if (filterType !== "all" && s.type !== filterType) return false;
       if (filterTeam !== "all" && !s.teamIds.includes(filterTeam)) return false;
       if (filterLocation !== "all" && s.location !== filterLocation) return false;
+      if (filterHasNotes && !(s.notes && s.notes.trim().length > 0)) return false;
+      if (filterHasPhotos && !(s.photos && s.photos.length > 0)) return false;
       return true;
     });
-  }, [displaySessions, filterCoach, filterType, filterTeam, filterLocation]);
+  }, [displaySessions, filterCoach, filterType, filterTeam, filterLocation, filterHasNotes, filterHasPhotos]);
 
   // Status counts from display sessions
   const statusCounts = useMemo(() => {
@@ -242,6 +251,8 @@ export default function Schedule() {
     setFilterType("all");
     setFilterTeam("all");
     setFilterLocation("all");
+    setFilterHasNotes(false);
+    setFilterHasPhotos(false);
   };
 
   const today = new Date();
@@ -392,6 +403,30 @@ export default function Schedule() {
               ))}
             </SelectContent>
           </Select>
+
+          <Toggle
+            pressed={filterHasNotes}
+            onPressedChange={setFilterHasNotes}
+            variant="outline"
+            size="sm"
+            className="gap-1.5 bg-card"
+            aria-label="Only show sessions with notes"
+          >
+            <StickyNote className="w-3.5 h-3.5" />
+            Has notes
+          </Toggle>
+
+          <Toggle
+            pressed={filterHasPhotos}
+            onPressedChange={setFilterHasPhotos}
+            variant="outline"
+            size="sm"
+            className="gap-1.5 bg-card"
+            aria-label="Only show sessions with photos"
+          >
+            <Camera className="w-3.5 h-3.5" />
+            Has photos
+          </Toggle>
 
           {hasActiveFilter && (
             <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground" onClick={clearFilters}>
