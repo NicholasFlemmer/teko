@@ -27,6 +27,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { MainLayout } from "@/components/layout/MainLayout";
+import { CoachMultiSelect } from "@/components/teams/CoachMultiSelect";
 import { teamsAPI, playersAPI, coachesAPI, locationsAPI, sessionsAPI } from "@/services/api";
 import { useTerm } from "@/contexts/TerminologyContext";
 
@@ -80,7 +81,7 @@ export default function TeamDetail() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [editData, setEditData] = useState({ name: "", ageGroup: "", locationId: "" });
+  const [editData, setEditData] = useState({ name: "", ageGroup: "", locationId: "", coachIds: [] as string[] });
 
   useEffect(() => {
     if (!id) return;
@@ -105,6 +106,7 @@ export default function TeamDetail() {
           name: t.name || "",
           ageGroup: t.age_group || "",
           locationId: t.location_id || "",
+          coachIds: t.coach_ids || [],
         });
       } catch (err) {
         console.error("Failed to fetch team detail:", err);
@@ -128,6 +130,7 @@ export default function TeamDetail() {
         name: editData.name,
         age_group: editData.ageGroup,
         location_id: editData.locationId || undefined,
+        coach_ids: editData.coachIds,
       });
       const res = await teamsAPI.getOne(id);
       setTeam(res.team);
@@ -135,6 +138,7 @@ export default function TeamDetail() {
         name: res.team.name || "",
         ageGroup: res.team.age_group || "",
         locationId: res.team.location_id || "",
+        coachIds: res.team.coach_ids || [],
       });
       setIsEditing(false);
     } catch (err: any) {
@@ -150,6 +154,7 @@ export default function TeamDetail() {
         name: team.name || "",
         ageGroup: team.age_group || "",
         locationId: team.location_id || "",
+        coachIds: team.coach_ids || [],
       });
     }
     setIsEditing(false);
@@ -347,6 +352,11 @@ export default function TeamDetail() {
                       </SelectContent>
                     </Select>
                   </div>
+                  <CoachMultiSelect
+                    coaches={coaches}
+                    value={editData.coachIds}
+                    onChange={(ids) => setEditData({ ...editData, coachIds: ids })}
+                  />
                 </div>
               ) : (
                 <>

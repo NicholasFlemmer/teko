@@ -17,7 +17,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { teamsAPI, locationsAPI } from "@/services/api";
+import { teamsAPI, locationsAPI, coachesAPI } from "@/services/api";
+import { CoachMultiSelect } from "./CoachMultiSelect";
 
 interface AddTeamModalProps {
   open: boolean;
@@ -31,6 +32,8 @@ export function AddTeamModal({ open, onOpenChange, onTeamAdded }: AddTeamModalPr
   const teamSingular = useTerm("team_singular");
   const locationSingular = useTerm("location_singular");
   const [locations, setLocations] = useState<any[]>([]);
+  const [coaches, setCoaches] = useState<any[]>([]);
+  const [coachIds, setCoachIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -43,8 +46,12 @@ export function AddTeamModal({ open, onOpenChange, onTeamAdded }: AddTeamModalPr
     if (open) {
       setFormData({ name: "", ageGroup: "", locationId: "" });
       setError(null);
+      setCoachIds([]);
       locationsAPI.getAll().then((res) => {
         setLocations(res.locations || []);
+      }).catch(console.error);
+      coachesAPI.getAll().then((res) => {
+        setCoaches(res.coaches || []);
       }).catch(console.error);
     }
   }, [open]);
@@ -58,6 +65,7 @@ export function AddTeamModal({ open, onOpenChange, onTeamAdded }: AddTeamModalPr
         name: formData.name,
         age_group: formData.ageGroup,
         location_id: formData.locationId || undefined,
+        coach_ids: coachIds,
       });
       onOpenChange(false);
       setFormData({
@@ -143,6 +151,8 @@ export function AddTeamModal({ open, onOpenChange, onTeamAdded }: AddTeamModalPr
               </SelectContent>
             </Select>
           </div>
+
+          <CoachMultiSelect coaches={coaches} value={coachIds} onChange={setCoachIds} />
 
           <div className="flex gap-3 pt-4">
             <Button type="submit" className="flex-1" disabled={submitting}>

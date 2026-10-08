@@ -5,6 +5,9 @@ from routes.auth import token_required
 
 logger = logging.getLogger(__name__)
 
+# Roles allowed to set which coaches belong to a team.
+COACH_ASSIGN_ROLES = ('super_admin', 'location_admin')
+
 teams_bp = Blueprint('teams', __name__)
 
 
@@ -20,6 +23,34 @@ def _resolve_org_scope():
     if org_id is None and role != 'super_admin':
         return None, (jsonify({'success': False, 'error': 'Organisation context missing'}), 403)
     return org_id, None
+
+
+def _validate_coach_ids(raw, team_org_id):
+    """Validate a coach_ids payload for a team in team_org_id.
+
+    Returns (clean_list, None) on success, or (None, error_response). Every
+    id must be a string naming an existing coach in the same org as the
+    team; an unknown id and an id from another org are rejected the same
+    way (get_coach returns None for both), so the response never reveals
+    whether a coach exists in another org. Only the admin roles may write
+    coach_ids.
+    """
+    if getattr(g, 'current_user_role', None) not in COACH_ASSIGN_ROLES:
+        return None, (jsonify({'success': False, 'error': 'Insufficient permissions'}), 403)
+    if not isinstance(raw, list) or not all(isinstance(c, str) and c.strip() for c in raw):
+        return None, (jsonify({'success': False, 'error': 'coach_ids must be a list of coach ids'}), 400)
+    clean = list(dict.fromkeys(c.strip() for c in raw))
+    if not clean:
+        return clean, None
+    if team_org_id is None:
+        return None, (jsonify({'success': False, 'error': 'Organisation context missing'}), 403)
+    for coach_id in clean:
+        if not FirebaseService.get_coach(coach_id, team_org_id):
+            return None, (jsonify({
+                'success': False,
+                'error': 'One or more coaches do not exist in this organisation',
+            }), 400)
+    return clean, None
 
 
 @teams_bp.route('', methods=['GET'])
@@ -91,12 +122,18 @@ def create_team(current_user):
         if err:
             return err
 
+        coach_ids = []
+        if 'coach_ids' in data:
+            coach_ids, err = _validate_coach_ids(data['coach_ids'], org_id)
+            if err:
+                return err
+
         # Create team
         team = FirebaseService.create_team({
             'name': data['name'],
             'age_group': data['age_group'],
             'location_id': data.get('location_id', ''),
-            'coach_ids': data.get('coach_ids', []),
+            'coach_ids': coach_ids,
             'org_id': org_id,
         })
 
@@ -139,6 +176,14 @@ def update_team(current_user, team_id):
         for field in allowed_fields:
             if field in data:
                 update_data[field] = data[field]
+
+        if 'coach_ids' in update_data:
+            # Validate against the team's own org, not the caller's, so a
+            # super_admin (org_id None) is held to the same rule.
+            clean, err = _validate_coach_ids(update_data['coach_ids'], team.get('org_id'))
+            if err:
+                return err
+            update_data['coach_ids'] = clean
 
         if not update_data:
             return jsonify({
