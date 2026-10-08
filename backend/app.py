@@ -17,7 +17,6 @@ import traceback
 import collections as _collections
 from flask import Flask, jsonify
 from flask_cors import CORS
-from apscheduler.schedulers.background import BackgroundScheduler
 from config import Config
 from utils.phone import mask_phone
 
@@ -89,34 +88,9 @@ app.register_blueprint(organisations_bp, url_prefix='/api/organisations')
 app.register_blueprint(admins_bp, url_prefix='/api/admins')
 
 # Background scheduler for automated reminders & missed-session marking.
-# Guard: only start once (avoid duplicate jobs when gunicorn preloads or reloads).
-if not app.config.get('SCHEDULER_STARTED'):
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(
-        func=SchedulerService.check_and_send_reminders,
-        trigger='interval',
-        minutes=1,
-        id='check_reminders',
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        func=SchedulerService.send_end_session_prompts,
-        trigger='interval',
-        minutes=5,
-        id='end_session_prompts',
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        func=SchedulerService.mark_missed_sessions,
-        trigger='interval',
-        minutes=30,
-        id='mark_missed',
-        replace_existing=True,
-    )
-    scheduler.start()
-    atexit.register(lambda: scheduler.shutdown())
-    app.config['SCHEDULER_STARTED'] = True
-    logger.info("Automated reminder scheduler started (every 1 min)")
+# Skipped entirely when DISABLE_SCHEDULER is set (used for hidden candidate
+# revisions that share production data and must not send or write on their own).
+SchedulerService.start_background_scheduler(app)
 
 @app.route('/')
 def index():

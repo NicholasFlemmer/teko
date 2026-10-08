@@ -11,6 +11,47 @@ logger = logging.getLogger(__name__)
 class SchedulerService:
     """Service for scheduling and sending session reminders"""
 
+    @classmethod
+    def start_background_scheduler(cls, flask_app):
+        """Start the in-process scheduler once per app; returns it, or None
+        if it was skipped (DISABLE_SCHEDULER set, or already started)."""
+        import atexit
+        from apscheduler.schedulers.background import BackgroundScheduler
+
+        if Config.DISABLE_SCHEDULER:
+            logger.info("Automated reminder scheduler NOT started (DISABLE_SCHEDULER is set)")
+            return None
+        # Guard: only start once (avoid duplicate jobs when gunicorn preloads or reloads).
+        if flask_app.config.get('SCHEDULER_STARTED'):
+            return None
+        scheduler = BackgroundScheduler()
+        scheduler.add_job(
+            func=cls.check_and_send_reminders,
+            trigger='interval',
+            minutes=1,
+            id='check_reminders',
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            func=cls.send_end_session_prompts,
+            trigger='interval',
+            minutes=5,
+            id='end_session_prompts',
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            func=cls.mark_missed_sessions,
+            trigger='interval',
+            minutes=30,
+            id='mark_missed',
+            replace_existing=True,
+        )
+        scheduler.start()
+        atexit.register(lambda: scheduler.shutdown())
+        flask_app.config['SCHEDULER_STARTED'] = True
+        logger.info("Automated reminder scheduler started (every 1 min)")
+        return scheduler
+
     # In-memory last-run diagnostics (survives within a single process).
     # Exposed via /api/admin/scheduler/status so admins can see why
     # reminders aren't being delivered.
