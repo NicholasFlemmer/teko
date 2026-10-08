@@ -11,10 +11,43 @@ logger = logging.getLogger(__name__)
 class SchedulerService:
     """Service for scheduling and sending session reminders"""
 
+    # The app's in-process jobs: setting name -> (job id, how often, method name).
+    BACKGROUND_JOBS = {
+        'reminders': ('check_reminders', 1, 'check_and_send_reminders'),
+        'end_prompts': ('end_session_prompts', 5, 'send_end_session_prompts'),
+        'missed': ('mark_missed', 30, 'mark_missed_sessions'),
+    }
+
+    @classmethod
+    def enabled_background_jobs(cls, setting):
+        """Which in-process jobs to start for a SCHEDULER_JOBS value.
+
+        Unset/blank: all three (the behaviour before this setting existed).
+        Otherwise a comma-separated list of reminders, end_prompts, missed
+        (case and spaces ignored). Names that aren't one of those three are
+        ignored and logged as an ERROR -- a typo can never switch ON a job
+        that wasn't asked for, and if nothing valid is left no job starts
+        (it fails quiet, not noisy: it cannot send anything).
+        """
+        if setting is None or not str(setting).strip():
+            return list(cls.BACKGROUND_JOBS)
+        asked = [n.strip().lower() for n in str(setting).split(',') if n.strip()]
+        unknown = [n for n in asked if n not in cls.BACKGROUND_JOBS]
+        if unknown:
+            logger.error(
+                "SCHEDULER_JOBS has unrecognised name(s) %s -- ignored. Valid names: %s",
+                unknown, ', '.join(cls.BACKGROUND_JOBS),
+            )
+        return [n for n in cls.BACKGROUND_JOBS if n in asked]
+
     @classmethod
     def start_background_scheduler(cls, flask_app):
         """Start the in-process scheduler once per app; returns it, or None
-        if it was skipped (DISABLE_SCHEDULER set, or already started)."""
+        if it was skipped (DISABLE_SCHEDULER set -- it wins over everything --
+        no valid job selected by SCHEDULER_JOBS, or already started).
+
+        The /api/scheduler/* endpoints call the job methods directly and do
+        not need this scheduler to have started."""
         import atexit
         from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -24,32 +57,24 @@ class SchedulerService:
         # Guard: only start once (avoid duplicate jobs when gunicorn preloads or reloads).
         if flask_app.config.get('SCHEDULER_STARTED'):
             return None
+        enabled = cls.enabled_background_jobs(Config.SCHEDULER_JOBS)
+        if not enabled:
+            logger.error("Automated reminder scheduler NOT started (SCHEDULER_JOBS selects no valid job)")
+            return None
         scheduler = BackgroundScheduler()
-        scheduler.add_job(
-            func=cls.check_and_send_reminders,
-            trigger='interval',
-            minutes=1,
-            id='check_reminders',
-            replace_existing=True,
-        )
-        scheduler.add_job(
-            func=cls.send_end_session_prompts,
-            trigger='interval',
-            minutes=5,
-            id='end_session_prompts',
-            replace_existing=True,
-        )
-        scheduler.add_job(
-            func=cls.mark_missed_sessions,
-            trigger='interval',
-            minutes=30,
-            id='mark_missed',
-            replace_existing=True,
-        )
+        for name in enabled:
+            job_id, minutes, method = cls.BACKGROUND_JOBS[name]
+            scheduler.add_job(
+                func=getattr(cls, method),
+                trigger='interval',
+                minutes=minutes,
+                id=job_id,
+                replace_existing=True,
+            )
         scheduler.start()
         atexit.register(lambda: scheduler.shutdown())
         flask_app.config['SCHEDULER_STARTED'] = True
-        logger.info("Automated reminder scheduler started (every 1 min)")
+        logger.info("Automated scheduler started with job(s): %s", ', '.join(enabled))
         return scheduler
 
     # In-memory last-run diagnostics (survives within a single process).

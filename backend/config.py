@@ -91,3 +91,9 @@ class Config:
     # prompts, missed-session marking) is not started. Off by default, so
     # absence of the env var leaves behaviour exactly as before.
     DISABLE_SCHEDULER = os.getenv('DISABLE_SCHEDULER', 'false').strip().lower() in ('true', '1', 'yes')
+
+    # Which in-process jobs start at boot: a comma-separated list of
+    # reminders, end_prompts, missed. Unset/blank = all three (as before).
+    # DISABLE_SCHEDULER wins over this. Raw value; parsed in
+    # SchedulerService.enabled_background_jobs.
+    SCHEDULER_JOBS = os.getenv('SCHEDULER_JOBS')
