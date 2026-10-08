@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/select";
 import { sessionsAPI } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
+import { NoLocationsHint } from "./NoLocationsHint";
 
 interface CoachOption {
   id: string;
@@ -318,6 +319,7 @@ export function EditSessionModal({ open, onOpenChange, session, coaches, teams, 
                 ))}
               </SelectContent>
             </Select>
+            {locations.length === 0 && <NoLocationsHint />}
           </div>
 
           {/* Date */}

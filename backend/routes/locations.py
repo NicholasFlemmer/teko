@@ -3,7 +3,7 @@ from flask import Blueprint, request, jsonify, g
 from config import Config
 from services.firebase_service import FirebaseService
 from services.rate_limiter import is_rate_limited
-from routes.auth import token_required
+from routes.auth import token_required, role_required
 from utils.geolocation import extract_coords_from_maps_url, geocode_address
 from utils.request_ip import get_trusted_client_ip
 
@@ -85,6 +85,7 @@ def get_location(current_user, location_id):
 
 @locations_bp.route('', methods=['POST'])
 @token_required
+@role_required('super_admin', 'location_admin')
 def create_location(current_user):
     """Create a new location"""
     try:
@@ -117,6 +118,12 @@ def create_location(current_user):
         org_id, err = _resolve_org_scope()
         if err:
             return err
+        # A new location always belongs to the caller's own organisation
+        # (never to a body-supplied org_id). A caller with no org of their
+        # own (cross-org super_admin) has nowhere to put it, and a location
+        # with no org would be invisible to every org.
+        if org_id is None:
+            return jsonify({'success': False, 'error': 'Organisation context missing'}), 403
 
         # Create location
         location_data = {
@@ -147,6 +154,7 @@ def create_location(current_user):
 
 @locations_bp.route('/<location_id>', methods=['PUT'])
 @token_required
+@role_required('super_admin', 'location_admin')
 def update_location(current_user, location_id):
     """Update a location"""
     try:
@@ -204,6 +212,7 @@ def update_location(current_user, location_id):
 
 @locations_bp.route('/<location_id>', methods=['DELETE'])
 @token_required
+@role_required('super_admin', 'location_admin')
 def delete_location(current_user, location_id):
     """Delete a location"""
     try:

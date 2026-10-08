@@ -35,6 +35,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { sessionsAPI } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
+import { defaultLocationForTeams } from "@/lib/sessionLocation";
+import { NoLocationsHint } from "./NoLocationsHint";
 
 interface CoachOption {
   id: string;
@@ -44,6 +46,7 @@ interface CoachOption {
 interface TeamOption {
   id: string;
   name: string;
+  location_id?: string;
 }
 
 interface LocationOption {
@@ -93,6 +96,8 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
   const [newTypeName, setNewTypeName] = useState("");
   const [isAddingType, setIsAddingType] = useState(false);
   const [deleteTypeId, setDeleteTypeId] = useState<string | null>(null);
+  // Once the user picks a venue by hand, ticking teams no longer changes it.
+  const [locationChosenByHand, setLocationChosenByHand] = useState(false);
 
   const resetForm = () => {
     setFormData({
@@ -100,6 +105,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
       location: "", sessionType: "", notes: "",
       recurring: false, recurrenceFrequency: "weekly", recurrenceEndDate: "",
     });
+    setLocationChosenByHand(false);
   };
 
   // Reset form when modal opens so stale data doesn't persist after cancel
@@ -219,12 +225,18 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
                       checked={isSelected}
                       onChange={() => {
                         const id = team.id.toString();
-                        setFormData((prev) => ({
-                          ...prev,
-                          teams: isSelected
+                        setFormData((prev) => {
+                          const nextTeams = isSelected
                             ? prev.teams.filter((t) => t !== id)
-                            : [...prev.teams, id],
-                        }));
+                            : [...prev.teams, id];
+                          return {
+                            ...prev,
+                            teams: nextTeams,
+                            location: locationChosenByHand
+                              ? prev.location
+                              : defaultLocationForTeams(nextTeams, teams, locations),
+                          };
+                        });
                       }}
                       className="rounded border-border"
                     />
@@ -353,7 +365,10 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
             <Label htmlFor="location">{locationSingular}</Label>
             <Select
               value={formData.location}
-              onValueChange={(value) => setFormData(prev => ({ ...prev, location: value }))}
+              onValueChange={(value) => {
+                setLocationChosenByHand(true);
+                setFormData(prev => ({ ...prev, location: value }));
+              }}
             >
               <SelectTrigger>
                 <SelectValue placeholder={`Select a ${locationSingular.toLowerCase()}`} />
@@ -366,6 +381,7 @@ export function CreateSessionModal({ open, onOpenChange, coaches, teams, locatio
                 ))}
               </SelectContent>
             </Select>
+            {locations.length === 0 && <NoLocationsHint />}
             {selectedLocation?.address && import.meta.env.VITE_GOOGLE_MAPS_API_KEY && (
               <div className="rounded-lg border border-border overflow-hidden mt-2">
                 <iframe

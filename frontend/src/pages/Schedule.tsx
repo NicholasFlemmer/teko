@@ -66,6 +66,7 @@ interface CoachOption {
 interface TeamOption {
   id: number;
   name: string;
+  location_id?: string;
 }
 
 interface LocationOption {
@@ -179,7 +180,7 @@ export default function Schedule() {
           locationsAPI.getAll(),
         ]);
         if (coachRes.coaches) setCoachOptions(coachRes.coaches.map((c: any) => ({ id: c.id, name: c.name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || `Unknown ${coachSingular}` })));
-        if (teamRes.teams) setTeamOptions(teamRes.teams.map((t: any) => ({ id: t.id, name: t.name })));
+        if (teamRes.teams) setTeamOptions(teamRes.teams.map((t: any) => ({ id: t.id, name: t.name, location_id: t.location_id })));
         if (locationRes.locations) setLocationOptions(locationRes.locations.map((l: any) => ({ id: l.id, name: l.name, address: l.address })));
       } catch (err) {
         console.error("Failed to load reference data:", err);
