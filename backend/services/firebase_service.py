@@ -404,6 +404,26 @@ class FirebaseService:
         db.collection('check_in_tokens').document(token).update({'used': True})
         return True
     
+    MAX_CHECK_IN_ATTEMPTS = 10
+
+    @classmethod
+    def append_check_in_attempt(cls, session_id, attempt, org_id):
+        """Append one WhatsApp location check-in attempt to the session's
+        check_in_attempts list, keeping only the last MAX_CHECK_IN_ATTEMPTS.
+
+        An attempt is {'coach_id', 'time' (ISO string), 'distance' (metres or
+        None), 'verified'} -- no coordinates. Read-modify-write on the
+        session, scoped to org_id like every other getter here.
+        """
+        session = cls.get_session(session_id, org_id)
+        if not session:
+            return None
+        attempts = list(session.get('check_in_attempts') or [])
+        attempts.append(attempt)
+        attempts = attempts[-cls.MAX_CHECK_IN_ATTEMPTS:]
+        cls.get_db().collection('sessions').document(session_id).update({'check_in_attempts': attempts})
+        return attempts
+
     @classmethod
     def check_in_session(cls, session_id, check_in_data, org_id, coach_id=None):
         """Update session with check-in data, scoped to org_id.

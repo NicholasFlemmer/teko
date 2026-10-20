@@ -1757,6 +1757,26 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
 
     # ── WhatsApp location check-in ───────────────────────────────────────
 
+    @staticmethod
+    def _check_in_is_unverified(check_in):
+        """True when a coach's stored check-in exists and was not verified.
+        Anything that isn't a dict (legacy marker) is treated as verified."""
+        return isinstance(check_in, dict) and not check_in.get('location_verified')
+
+    @classmethod
+    def _record_check_in_attempt(cls, session_id, org_id, coach_id, distance, verified):
+        """Best-effort: log this attempt on the session (time, distance,
+        verified; last 10 kept). Never blocks or fails the check-in."""
+        try:
+            FirebaseService.append_check_in_attempt(session_id, {
+                'coach_id': coach_id,
+                'time': datetime.now(timezone.utc).isoformat(),
+                'distance': round(distance) if distance is not None else None,
+                'verified': bool(verified),
+            }, org_id)
+        except Exception as e:
+            logger.warning("Failed to record check-in attempt for session %s: %s", session_id, e)
+
     @classmethod
     def handle_location_check_in(cls, from_number, latitude, longitude, message_id=None):
         """Handle a shared WhatsApp location for coach check-in"""
@@ -1806,15 +1826,22 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
                 )
                 return
 
-            # Pick the best session: prefer ones this coach hasn't checked into yet
-            unchecked = [s for s in sessions
-                         if s.get('status') != 'cancelled'
-                         and coach_id not in (s.get('coach_check_ins') or {})]
+            # Pick the best session: prefer ones this coach hasn't checked into
+            # yet; otherwise one whose check-in by this coach was unverified
+            # (outside the radius / no venue GPS), which a new share may fix.
+            live = [s for s in sessions if s.get('status') != 'cancelled']
+            unchecked = [s for s in live if coach_id not in (s.get('coach_check_ins') or {})]
+            retryable = [s for s in live
+                         if s.get('status') != 'completed'
+                         and cls._check_in_is_unverified((s.get('coach_check_ins') or {}).get(coach_id))]
             if unchecked:
                 unchecked.sort(key=lambda s: s.get('start_time', ''))
                 session = unchecked[0]
+            elif retryable:
+                retryable.sort(key=lambda s: s.get('start_time', ''))
+                session = retryable[0]
             else:
-                # All sessions already checked in
+                # Every session already has a verified check-in
                 WhatsAppService.send_message(
                     phone_number=from_number,
                     message_text="You've already checked in for today's session. ✅"
@@ -1866,6 +1893,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
                     'location_verified': False,  # can't verify without venue coordinates
                     'location_verifiable': False,
                 }, coach_id=coach_id, org_id=org_id)
+                cls._record_check_in_attempt(session['id'], org_id, coach_id, None, False)
                 WhatsAppService.send_message(
                     phone_number=from_number,
                     message_text=f"✅ Checked in, {coach_name}! (Location GPS not configured for this venue, so distance wasn't verified.)"
@@ -1880,7 +1908,9 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
             FirebaseService.check_in_session(session['id'], {
                 'location': actual_location,
                 'location_verified': within,
+                'distance': distance,
             }, coach_id=coach_id, org_id=org_id)
+            cls._record_check_in_attempt(session['id'], org_id, coach_id, distance, within)
 
             venue_link = format_maps_link(expected_location.get('latitude'), expected_location.get('longitude'))
             venue_ref = f"\n📍 {venue_link}" if venue_link else ""
@@ -1898,7 +1928,7 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
                 radius_str = f"{allowed_radius}m" if allowed_radius < 1000 else f"{allowed_radius/1000:.1f}km"
                 WhatsAppService.send_message(
                     phone_number=from_number,
-                    message_text=f"📍 You're {dist_str} from the venue (need to be within {radius_str}). Please try again when you're closer, or contact your administrator if this seems wrong.{venue_ref}"
+                    message_text=f"📍 You're {dist_str} from the venue (need to be within {radius_str}). Please move closer and share your location again, or contact your administrator if this seems wrong.{venue_ref}"
                 )
 
             push_event('check_in', org_id=org_id, coach_name=coach_name,

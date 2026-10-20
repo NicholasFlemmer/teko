@@ -2,6 +2,7 @@ import logging
 from flask import Blueprint, request, jsonify, g
 from services.firebase_service import FirebaseService
 from services.whatsapp_service import WhatsAppService
+from services.storage_service import StorageService
 from routes.auth import token_required
 from utils.geolocation import verify_location, format_location
 from utils.phone import normalize_phone_for_sending
@@ -118,7 +119,7 @@ def get_session(current_user, session_id):
         
         return jsonify({
             'success': True,
-            'session': session
+            'session': StorageService.with_fresh_session_photo_links(session)
         }), 200
     except Exception as e:
         logger.exception("Error in get_session")
@@ -564,7 +565,7 @@ def get_session_photos(current_user, session_id):
             return jsonify({'success': False, 'error': 'Session not found'}), 404
         return jsonify({
             'success': True,
-            'photos': session.get('photos', []) or []
+            'photos': [StorageService.with_fresh_photo_link(p) for p in (session.get('photos', []) or [])]
         }), 200
     except Exception as e:
         logger.exception("Error in get_session_photos")

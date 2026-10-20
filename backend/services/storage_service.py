@@ -173,3 +173,38 @@ class StorageService:
             credentials=cls.get_signing_credentials(),
         )
         return url
+
+    # Photos coach-sent over WhatsApp live under this prefix and are private
+    # (signed links only). Admin uploads live elsewhere and are public.
+    PRIVATE_PHOTO_PREFIX = 'team_photos/'
+    PHOTO_LINK_MINUTES = 60
+
+    @classmethod
+    def with_fresh_photo_link(cls, photo):
+        """Return a copy of a stored photo dict with a freshly signed 1-hour
+        'url' made from its stored 'file_path'. The stored (possibly expired)
+        link is ignored. Photos outside PRIVATE_PHOTO_PREFIX (admin uploads)
+        and anything without a path are returned unchanged. If signing fails
+        the stored link is kept rather than failing the whole request."""
+        if not isinstance(photo, dict):
+            return photo
+        path = photo.get('file_path') or ''
+        if not path.startswith(cls.PRIVATE_PHOTO_PREFIX):
+            return photo
+        try:
+            return {**photo, 'url': cls.get_signed_url(path, cls.PHOTO_LINK_MINUTES)}
+        except Exception as e:
+            logger.warning("Could not refresh photo link for %s: %s", path, e)
+            return photo
+
+    @classmethod
+    def with_fresh_session_photo_links(cls, session):
+        """Copy of a session dict with fresh links on 'photos' and 'group_photo'."""
+        if not isinstance(session, dict):
+            return session
+        out = dict(session)
+        if isinstance(out.get('photos'), list):
+            out['photos'] = [cls.with_fresh_photo_link(p) for p in out['photos']]
+        if isinstance(out.get('group_photo'), dict):
+            out['group_photo'] = cls.with_fresh_photo_link(out['group_photo'])
+        return out
