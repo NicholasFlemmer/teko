@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { locationsAPI } from "@/services/api";
-import { geocodeAddress, extractCoordsFromMapsUrl } from "@/lib/geocode";
+import { geocodeAddress } from "@/lib/geocode";
 
 interface AddLocationModalProps {
   open: boolean;
@@ -46,10 +46,9 @@ export function AddLocationModal({ open, onOpenChange, onLocationAdded }: AddLoc
       setSubmitting(true);
       setError(null);
 
-      // Geocode address to get lat/lng for check-in distance verification
-      const coords =
-        extractCoordsFromMapsUrl(formData.googleMapsLink) ||
-        (await geocodeAddress(formData.address));
+      // With a Google Maps link the backend reads the pin from the link's place
+      // marker. Without one, geocode the address for check-in distance verification.
+      const coords = formData.googleMapsLink ? null : await geocodeAddress(formData.address);
 
       await locationsAPI.create({
         name: formData.name,

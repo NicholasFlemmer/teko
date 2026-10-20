@@ -131,6 +131,11 @@ export default function Locations() {
                   <div className="flex-1 min-w-0">
                     <h3 className="font-semibold text-foreground">{location.name}</h3>
                     <p className="text-sm text-muted-foreground mt-1">{location.address}</p>
+                    {location.pin_needs_confirmation && (
+                      <span className="inline-block mt-2 rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">
+                        Pin needs confirming
+                      </span>
+                    )}
                   </div>
                 </div>
 

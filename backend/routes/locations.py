@@ -4,7 +4,7 @@ from config import Config
 from services.firebase_service import FirebaseService
 from services.rate_limiter import is_rate_limited
 from routes.auth import token_required, role_required
-from utils.geolocation import extract_coords_from_maps_url, geocode_address
+from utils.geolocation import resolve_maps_link, geocode_address, PIN_KINDS
 from utils.request_ip import get_trusted_client_ip
 
 logger = logging.getLogger(__name__)
@@ -99,11 +99,21 @@ def create_location(current_user):
 
         maps_link = data.get('google_maps_link', '')
 
-        # Google Maps link is the source of truth for coordinates
-        coords = extract_coords_from_maps_url(maps_link) if maps_link else None
-
-        # Fall back to explicitly provided lat/lng if no maps link
-        if not coords:
+        # A Google Maps link is the source of truth for the pin: its place
+        # marker is used, never the map centre. A link with no place marker
+        # (or one that can't be read) saves the venue without a pin from the
+        # link and flags it for confirmation -- coordinates sent alongside a
+        # link are ignored, since they would be a guess at the same thing.
+        coords = None
+        pin_needs_confirmation = False
+        if maps_link:
+            found = resolve_maps_link(maps_link)
+            if found and found['kind'] in PIN_KINDS:
+                coords = {'latitude': found['latitude'], 'longitude': found['longitude']}
+            else:
+                pin_needs_confirmation = True
+        else:
+            # No link: use explicitly provided lat/lng, if any
             has_lat = data.get('latitude') is not None
             has_lng = data.get('longitude') is not None
             if has_lat and has_lng:
@@ -133,6 +143,7 @@ def create_location(current_user):
             'radius': data.get('radius', 100),
             'notes': data.get('notes', ''),
             'org_id': org_id,
+            'pin_needs_confirmation': pin_needs_confirmation,
         }
         if coords:
             location_data['latitude'] = coords['latitude']
@@ -174,13 +185,28 @@ def update_location(current_user, location_id):
                 'error': 'Location not found'
             }), 404
 
-        # If maps link is provided/changed, re-derive coordinates from it
+        # If a maps link is provided, its place marker (never the map centre)
+        # is the pin. Coordinates sent alongside a link are ignored.
+        #   - real place point: pin updated, confirmation flag cleared
+        #   - link has only a map centre: existing pin kept, flagged
+        #   - link couldn't be read (e.g. Google unreachable): flagged, unless
+        #     it is the same link the venue already had and that wasn't flagged
+        pin_flag = None
         maps_link = data.get('google_maps_link')
         if maps_link:
-            coords = extract_coords_from_maps_url(maps_link)
-            if coords:
-                data['latitude'] = coords['latitude']
-                data['longitude'] = coords['longitude']
+            data.pop('latitude', None)
+            data.pop('longitude', None)
+            found = resolve_maps_link(maps_link)
+            if found and found['kind'] in PIN_KINDS:
+                data['latitude'] = found['latitude']
+                data['longitude'] = found['longitude']
+                pin_flag = False
+            elif found is None and maps_link == location.get('google_maps_link') and not location.get('pin_needs_confirmation'):
+                pin_flag = None  # transient failure on an unchanged, trusted link: leave as is
+            else:
+                pin_flag = True
+        elif data.get('latitude') is not None and data.get('longitude') is not None:
+            pin_flag = False  # a person supplied the coordinates directly
 
         # Update allowed fields
         update_data = {}
@@ -188,6 +214,9 @@ def update_location(current_user, location_id):
         for field in allowed_fields:
             if field in data:
                 update_data[field] = data[field]
+
+        if pin_flag is not None:
+            update_data['pin_needs_confirmation'] = pin_flag
 
         if not update_data:
             return jsonify({

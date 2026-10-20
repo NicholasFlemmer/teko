@@ -81,66 +81,99 @@ def format_location(latitude, longitude):
     }
 
 
-def extract_coords_from_maps_url(url):
-    """Extract lat/lng from a Google Maps URL, raw coord string, or shortened link.
-
-    Handles:
-        - Full Maps URLs with @lat,lng or ?q=lat,lng or /place/lat,lng
-        - Raw coordinate strings like "-34.046864, 18.707249"
-        - Shortened links (maps.app.goo.gl, share.google, etc.) by following redirects
-
-    Returns:
-        dict with latitude/longitude or None
-    """
-    if not url:
-        return None
-
-    text = url.strip()
-
-    # Try extracting coords from the text directly (works for full URLs and raw coord strings)
-    coords = _extract_coords_from_text(text)
-    if coords:
-        return coords
-
-    # If it looks like a URL, resolve redirects and try again
-    if text.startswith('http'):
-        try:
-            resp = requests.head(text, allow_redirects=True, timeout=5)
-            resolved = resp.url
-            if resolved != text:
-                coords = _extract_coords_from_text(resolved)
-                if coords:
-                    return coords
-        except Exception as e:
-            logger.debug("Failed to resolve shortened URL %s: %s", text, e)
-
-    return None
+# How trustworthy a point read from a Google Maps link is, best first.
+#   marker -- the place marker (!3d<lat>!4d<lng>) inside a place link
+#   point  -- an explicit point in the link: ?q=lat,lng or /place|search/lat,lng
+#   raw    -- the link text is just "lat, lng"
+#   centre -- only the map's centre (@lat,lng): NOT the place -- how far it is
+#             from the real place depends on how far the map was zoomed out
+#             (about 250 m zoomed in, many km zoomed out), so it is never
+#             used as a venue pin.
+_KIND_RANK = {'marker': 0, 'point': 1, 'raw': 2, 'centre': 3}
+PIN_KINDS = ('marker', 'point', 'raw')
+_SHORT_LINK_HOSTS = ('maps.app.goo.gl', 'goo.gl', 'g.co', 'share.google')
 
 
-def _extract_coords_from_text(text):
-    """Extract lat/lng from a string using known coordinate patterns.
-
-    Returns:
-        dict with latitude/longitude or None
-    """
-    # @lat,lng (standard Maps URL)
-    m = re.search(r'@(-?\d+\.?\d*),(-?\d+\.?\d*)', text)
-    if m:
-        return {'latitude': float(m.group(1)), 'longitude': float(m.group(2))}
+def _extract_point_from_text(text):
+    """Best point found in a string, as
+    {'latitude', 'longitude', 'kind'} (see _KIND_RANK), or None."""
+    # The place marker. A place link can carry several !3d!4d pairs (e.g.
+    # directions); the marker of the place is the last one.
+    markers = re.findall(r'!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)', text)
+    if markers:
+        return {'latitude': float(markers[-1][0]), 'longitude': float(markers[-1][1]), 'kind': 'marker'}
     # ?q=lat,lng
     m = re.search(r'[?&]q=(-?\d+\.?\d*),(-?\d+\.?\d*)', text)
     if m:
-        return {'latitude': float(m.group(1)), 'longitude': float(m.group(2))}
+        return {'latitude': float(m.group(1)), 'longitude': float(m.group(2)), 'kind': 'point'}
     # /place/lat,lng or /search/lat,+lng (resolved shortened links)
     m = re.search(r'/(?:place|search)/(-?\d+\.?\d*),\+?(-?\d+\.?\d*)', text)
     if m:
-        return {'latitude': float(m.group(1)), 'longitude': float(m.group(2))}
+        return {'latitude': float(m.group(1)), 'longitude': float(m.group(2)), 'kind': 'point'}
     # Raw coords: "-34.046864, 18.707249" (no URL structure)
     m = re.fullmatch(r'\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*', text)
     if m:
         lat, lng = float(m.group(1)), float(m.group(2))
         if -90 <= lat <= 90 and -180 <= lng <= 180:
-            return {'latitude': lat, 'longitude': lng}
+            return {'latitude': lat, 'longitude': lng, 'kind': 'raw'}
+    # @lat,lng -- the map centre, not the place
+    m = re.search(r'@(-?\d+\.?\d*),(-?\d+\.?\d*)', text)
+    if m:
+        return {'latitude': float(m.group(1)), 'longitude': float(m.group(2)), 'kind': 'centre'}
+    return None
+
+
+def _best(a, b):
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a if _KIND_RANK[a['kind']] <= _KIND_RANK[b['kind']] else b
+
+
+def resolve_maps_link(url):
+    """Read a point from a Google Maps link, as
+    {'latitude', 'longitude', 'kind'} or None if nothing could be read.
+
+    Handles full links, raw "lat, lng" text and shortened links
+    (maps.app.goo.gl etc., by following redirects -- needs network access;
+    on failure the result is None, never a guess). Look at 'kind': only
+    'marker', 'point' and 'raw' are a real place -- see _KIND_RANK.
+    """
+    if not url:
+        return None
+    text = url.strip()
+    found = _extract_point_from_text(text)
+    if found and found['kind'] in PIN_KINDS:
+        return found
+
+    host = re.sub(r'^https?://', '', text).split('/')[0].lower() if text.startswith('http') else ''
+    # Only follow redirects when they can tell us more: a short link, or a
+    # link with no point in it at all.
+    if text.startswith('http') and (found is None or host in _SHORT_LINK_HOSTS):
+        try:
+            resp = requests.head(text, allow_redirects=True, timeout=5)
+            from urllib.parse import unquote, urlparse, parse_qs
+            candidates = [r.headers.get('Location', '') for r in resp.history] + [resp.url]
+            for c in list(candidates):
+                # Consent / interstitial pages carry the real link in ?continue=
+                for v in parse_qs(urlparse(c).query).get('continue', []):
+                    candidates.append(unquote(v))
+            for c in candidates:
+                found = _best(found, _extract_point_from_text(c) if c else None)
+        except Exception as e:
+            logger.debug("Failed to resolve shortened URL %s: %s", text, e)
+    return found
+
+
+def extract_coords_from_maps_url(url):
+    """Venue-pin coordinates from a Google Maps link: {'latitude', 'longitude'}
+    or None. Only a real place point counts (place marker, explicit point,
+    raw coordinates). A link with just a map centre gives None -- use
+    resolve_maps_link() to tell "no marker" from "couldn't read the link"."""
+    found = resolve_maps_link(url)
+    if found and found['kind'] in PIN_KINDS:
+        return {'latitude': found['latitude'], 'longitude': found['longitude']}
     return None
 
 

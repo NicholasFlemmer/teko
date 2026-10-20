@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { locationsAPI, sessionsAPI, coachesAPI, playersAPI } from "@/services/api";
-import { geocodeAddress, extractCoordsFromMapsUrl } from "@/lib/geocode";
+import { geocodeAddress } from "@/lib/geocode";
 import { useTerm } from "@/contexts/TerminologyContext";
 
 const COACH_COLORS = [
@@ -104,9 +104,8 @@ export default function LocationDetail() {
       const mapsLinkChanged = editData.googleMapsLink !== (location.google_maps_link || "");
       let coords: { latitude: number; longitude: number } | null = null;
       if (addressChanged || mapsLinkChanged) {
-        coords =
-          extractCoordsFromMapsUrl(editData.googleMapsLink) ||
-          (await geocodeAddress(editData.address));
+        // With a maps link the backend reads the pin from its place marker
+        coords = editData.googleMapsLink ? null : await geocodeAddress(editData.address);
       }
 
       await locationsAPI.update(id, {
@@ -252,6 +251,11 @@ export default function LocationDetail() {
           <div className="flex-1">
             <h1 className="page-title">{location.name}</h1>
             <p className="page-subtitle">{locationSingular} Details</p>
+            {location.pin_needs_confirmation && (
+              <p className="text-sm text-warning mt-1">
+                Pin needs confirming — the Google Maps link has no place marker. Paste a link to the exact place (use Share on the place) and save.
+              </p>
+            )}
           </div>
           {googleMapsLink && (
             <Button variant="outline" className="gap-2" asChild>
