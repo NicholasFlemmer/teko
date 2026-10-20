@@ -7,6 +7,7 @@ import { MainLayout } from "@/components/layout/MainLayout";
 import { useToast } from "@/hooks/use-toast";
 import { reportsAPI } from "@/services/api";
 import { useTerm } from "@/contexts/TerminologyContext";
+import { QuickStats, checkInHeadline, participantsTile, attendanceCsvRows } from "@/lib/reportsFormat";
 
 function sanitizeCSVValue(val: unknown): string {
   let str = String(val ?? "").replace(/"/g, '""');
@@ -36,18 +37,13 @@ function downloadCSV(data: any[], filename: string) {
   URL.revokeObjectURL(url);
 }
 
-interface QuickStats {
-  total_sessions: number;
-  check_in_rate: number;
-  total_students: number;
-  active_coaches: number;
-}
-
 interface CoachRow {
   coach_id: string;
   coach_name: string;
   total_sessions: number;
   checked_in: number;
+  verified_check_ins: number;
+  unverified_check_ins: number;
 }
 
 interface LocationRow {
@@ -55,6 +51,8 @@ interface LocationRow {
   location_name: string;
   total_sessions: number;
   checked_in: number;
+  verified_check_ins: number;
+  unverified_check_ins: number;
 }
 
 interface StudentRow {
@@ -91,6 +89,7 @@ export default function Reports() {
   const sessionPlural = useTerm("session_plural");
   const teamPlural = useTerm("team_plural");
   const playerSingular = useTerm("player_singular");
+  const playerPlural = useTerm("player_plural");
   const { toast } = useToast();
   const [dateRange, setDateRange] = useState({ from: "", to: "" });
 
@@ -104,12 +103,15 @@ export default function Reports() {
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"coaches" | "locations" | "students">("coaches");
 
-  // Fetch quick stats on mount
+  // Fetch quick stats on mount and when the date range changes
   useEffect(() => {
     const fetchStats = async () => {
       setLoadingStats(true);
       try {
-        const res = await reportsAPI.getStats();
+        const res = await reportsAPI.getStats({
+          start_date: dateRange.from || undefined,
+          end_date: dateRange.to || undefined,
+        });
         if (res.success && res.stats) {
           setStats(res.stats);
         }
@@ -120,7 +122,7 @@ export default function Reports() {
       }
     };
     fetchStats();
-  }, []);
+  }, [dateRange]);
 
   const fetchReports = useCallback(async () => {
     setLoadingReports(true);
@@ -155,10 +157,10 @@ export default function Reports() {
     try {
       switch (reportId) {
         case "coaches":
-          downloadCSV(coachData, `coach-attendance-${suffix}.csv`);
+          downloadCSV(attendanceCsvRows(coachData), `coach-attendance-${suffix}.csv`);
           break;
         case "locations":
-          downloadCSV(locationData, `location-attendance-${suffix}.csv`);
+          downloadCSV(attendanceCsvRows(locationData), `location-attendance-${suffix}.csv`);
           break;
         case "students":
           downloadCSV(studentData.map(s => ({ ...s, teams: s.teams?.join("; ") })), `student-rollcall-${suffix}.csv`);
@@ -191,11 +193,11 @@ export default function Reports() {
         {/* Quick Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { label: `Total ${sessionPlural}`, value: stats?.total_sessions ?? 0, icon: Calendar },
-            { label: "Check-in Rate", value: stats?.check_in_rate != null ? `${Math.round(stats.check_in_rate)}%` : "0%", icon: BarChart3 },
-            { label: "Students Attended", value: stats?.total_students ?? 0, icon: GraduationCap },
+            { label: `${sessionPlural} Started`, value: stats?.total_sessions ?? 0, icon: Calendar },
+            { label: "Check-in Rate", value: stats?.check_in_rate != null ? `${Math.round(stats.check_in_rate)}%` : "0%", sub: checkInHeadline(stats), icon: BarChart3 },
+            { label: participantsTile(stats, playerPlural).label, value: participantsTile(stats, playerPlural).value, icon: GraduationCap },
             { label: `Active ${coachPlural}`, value: stats?.active_coaches ?? 0, icon: Users },
-          ].map((stat) => (
+          ].map((stat: { label: string; value: string | number; sub?: string; icon: any }) => (
             <div key={stat.label} className="bg-card rounded-xl border border-border p-4 shadow-card">
               {loadingStats ? (
                 <div className="flex items-center justify-center py-4">
@@ -208,6 +210,7 @@ export default function Reports() {
                     <span className="text-xs">{stat.label}</span>
                   </div>
                   <p className="text-2xl font-bold text-foreground">{stat.value}</p>
+                  {stat.sub && <p className="text-xs text-muted-foreground mt-0.5">{stat.sub}</p>}
                 </>
               )}
             </div>
@@ -338,6 +341,7 @@ export default function Reports() {
                               <p className="font-medium text-foreground text-sm truncate">{coach.coach_name}</p>
                               <p className="text-xs text-muted-foreground">
                                 {coach.checked_in}/{coach.total_sessions} {sessionPlural.toLowerCase()} checked in
+                                {" "}({coach.verified_check_ins ?? 0} verified, {coach.unverified_check_ins ?? 0} unverified)
                               </p>
                             </div>
                             <div className="w-32">
@@ -369,6 +373,7 @@ export default function Reports() {
                               <p className="font-medium text-foreground text-sm truncate">{loc.location_name}</p>
                               <p className="text-xs text-muted-foreground">
                                 {loc.checked_in}/{loc.total_sessions} {sessionPlural.toLowerCase()} with check-in
+                                {" "}({loc.verified_check_ins ?? 0} verified, {loc.unverified_check_ins ?? 0} unverified)
                               </p>
                             </div>
                             <div className="w-32">

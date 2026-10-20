@@ -370,7 +370,13 @@ export const reportsAPI = {
     const qs = searchParams.toString();
     return request<{ success: boolean; data: any[] }>(`/api/reports/student-rollcall${qs ? `?${qs}` : ''}`);
   },
-  getStats: () => request<{ success: boolean; stats: any }>('/api/reports/stats'),
+  getStats: (params?: { start_date?: string; end_date?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.start_date) searchParams.set('start_date', params.start_date);
+    if (params?.end_date) searchParams.set('end_date', params.end_date);
+    const qs = searchParams.toString();
+    return request<{ success: boolean; stats: any }>(`/api/reports/stats${qs ? `?${qs}` : ''}`);
+  },
 };
 
 // Reminders
