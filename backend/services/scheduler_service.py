@@ -481,7 +481,13 @@ class SchedulerService:
                                     nudges_sent += 1
                                 update_data['missed_checkin_nudge_sent'] = True
 
-                        FirebaseService.update_session(session['id'], update_data)
+                        # Atomic: re-checks inside a transaction that no check-in
+                        # has been recorded since the snapshot above (a coach may
+                        # have checked in while this sweep was running).
+                        outcome = FirebaseService.mark_session_missed_if_unchecked(session['id'], update_data)
+                        if outcome != 'missed':
+                            logger.info("Session %s not marked missed (%s): a check-in arrived or status changed",
+                                        session['id'], outcome)
                     updated += 1
 
             result = {

@@ -1905,10 +1905,14 @@ Remember: You're here to support {player_word_plural_lower}, not to run the sess
             distance = verification.get('distance')
             within = verification.get('within_radius', False)
 
+            # An out-of-radius share is still a check-in: the coach is there and
+            # told us, only the distance check failed. Store it unverified and
+            # keep the session 'checked_in' (never 'missed').
             FirebaseService.check_in_session(session['id'], {
                 'location': actual_location,
                 'location_verified': within,
                 'distance': distance,
+                'unverified_counts_as_checked_in': True,
             }, coach_id=coach_id, org_id=org_id)
             cls._record_check_in_attempt(session['id'], org_id, coach_id, distance, within)
 

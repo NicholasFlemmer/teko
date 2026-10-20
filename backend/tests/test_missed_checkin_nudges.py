@@ -131,6 +131,10 @@ def _install_fakes(monkeypatch, sessions, orgs, coaches, send_result=None):
     store = _FakeSessionsStore(sessions)
     monkeypatch.setattr(FirebaseService, 'get_db', lambda: _FakeDb(store))
     monkeypatch.setattr(FirebaseService, 'update_session', store.update)
+    # The sweep now writes 'missed' through an atomic helper; for these tests
+    # the helper simply applies the same write to the fake store.
+    monkeypatch.setattr(FirebaseService, 'mark_session_missed_if_unchecked',
+                        lambda session_id, data: store.update(session_id, data) or 'missed')
     monkeypatch.setattr(FirebaseService, 'get_organisation', lambda org_id: orgs.get(org_id))
     monkeypatch.setattr(FirebaseService, 'get_org_terminology', lambda org_id: {'session_singular': 'Session'})
     monkeypatch.setattr(FirebaseService, 'get_coach', lambda coach_id, org_id: coaches.get(coach_id))

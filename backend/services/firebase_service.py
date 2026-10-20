@@ -440,22 +440,26 @@ class FirebaseService:
         cross-org case, matching every other org-scoped getter in this
         class.
 
-        check_in_data['location_verified'] is False in two different
-        situations that must not collapse to the same session status:
+        check_in_data['location_verified'] is False in three different
+        situations:
           - the venue has GPS configured and the coach was outside the
-            allowed radius (genuinely unverified -- still 'missed'), or
+            allowed radius. By default (the reminder's web check-in link)
+            this sets the session to 'missed'. The WhatsApp location flow
+            passes check_in_data['unverified_counts_as_checked_in']=True,
+            which keeps the session 'checked_in' (just unverified) --
+            the check-in did happen, only the distance check failed.
           - the venue has no GPS configured at all, so distance could
             never be checked (a real check-in that just can't be
-            verified -- should count as 'checked_in', not 'missed').
-        check_in_data['location_verifiable'] (default True) distinguishes
-        the two: pass False only for the second case. location_verified
-        itself is still recorded as False either way -- it is not a lie,
-        the location genuinely wasn't verified -- but it alone no longer
-        drives status to 'missed'.
+            verified -- 'checked_in', not 'missed').
+          - the location was verified (always 'checked_in').
+        check_in_data['location_verifiable'] (default True) marks the
+        no-venue-GPS case: pass False only for it. location_verified
+        itself is always recorded as it really was.
         """
         db = cls.get_db()
         location_verified = check_in_data.get('location_verified', False)
         location_verifiable = check_in_data.get('location_verifiable', True)
+        unverified_counts = check_in_data.get('unverified_counts_as_checked_in', False)
         location = check_in_data.get('location', {})
 
         update_data = {
@@ -479,9 +483,11 @@ class FirebaseService:
         if len(all_coach_ids) <= 1 or not coach_id:
             # Single-coach or unknown coach — simple status. A check-in
             # counts as 'checked_in' if the location was verified, OR if
-            # it simply couldn't be verified (no venue GPS) -- only a
-            # verifiable-but-failed check (out of range) is 'missed'.
-            update_data['status'] = 'checked_in' if (location_verified or not location_verifiable) else 'missed'
+            # it simply couldn't be verified (no venue GPS), OR if the
+            # caller says an unverified check-in still counts (WhatsApp
+            # flow) -- otherwise a verifiable-but-failed check (out of
+            # range, web link) is 'missed'.
+            update_data['status'] = 'checked_in' if (location_verified or not location_verifiable or unverified_counts) else 'missed'
         else:
             # Multi-coach: check if all coaches have now checked in
             existing_check_ins = dict(session.get('coach_check_ins', {}) or {})
@@ -496,6 +502,38 @@ class FirebaseService:
         doc_ref = db.collection('sessions').document(session_id)
         doc_ref.update(update_data)
         return cls.get_session(session_id, org_id)
+
+    @classmethod
+    def mark_session_missed_if_unchecked(cls, session_id, update_data):
+        """Atomically mark a session missed -- but only if, at the moment of
+        the write, it is still 'reminded' and has NO check-in recorded.
+
+        Runs in a transaction so a coach checking in while the missed sweep
+        is running can never be overwritten as missed. Any recorded check-in
+        (coach_check_ins or check_in_time) counts, whatever its
+        location_verified value. Returns:
+          'missed'  -- update_data (status 'missed' + extras) was written
+          'rescued' -- a check-in exists: status set to 'checked_in' instead
+          'skipped' -- the session is gone or no longer 'reminded'
+        """
+        db = cls.get_db()
+        ref = db.collection('sessions').document(session_id)
+
+        @firestore.transactional
+        def _run(tx):
+            snap = ref.get(transaction=tx)
+            if not snap.exists:
+                return 'skipped'
+            d = snap.to_dict() or {}
+            if d.get('status') != 'reminded':
+                return 'skipped'
+            if d.get('coach_check_ins') or d.get('check_in_time') is not None:
+                tx.update(ref, {'status': 'checked_in'})
+                return 'rescued'
+            tx.update(ref, update_data)
+            return 'missed'
+
+        return _run(db.transaction())
 
     # =========================================================================
     # Team operations

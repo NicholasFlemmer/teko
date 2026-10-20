@@ -97,6 +97,10 @@ def _install_fake_sessions(monkeypatch, sessions):
         return None
 
     monkeypatch.setattr(FirebaseService, 'update_session', fake_update_session)
+    # The sweep now writes 'missed' through an atomic helper; for these tests
+    # the helper simply records the same (session_id, data) write.
+    monkeypatch.setattr(FirebaseService, 'mark_session_missed_if_unchecked',
+                        lambda session_id, data: fake_update_session(session_id, data) or 'missed')
     return captured
 
 
