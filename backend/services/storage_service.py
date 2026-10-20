@@ -180,12 +180,14 @@ class StorageService:
     PHOTO_LINK_MINUTES = 60
 
     @classmethod
-    def with_fresh_photo_link(cls, photo):
+    def with_fresh_photo_link(cls, photo, session_id=None):
         """Return a copy of a stored photo dict with a freshly signed 1-hour
         'url' made from its stored 'file_path'. The stored (possibly expired)
         link is ignored. Photos outside PRIVATE_PHOTO_PREFIX (admin uploads)
         and anything without a path are returned unchanged. If signing fails
-        the stored link is kept rather than failing the whole request."""
+        the stored link is kept rather than failing the whole request. The
+        failure is logged with the session ID and the error only -- never the
+        storage path."""
         if not isinstance(photo, dict):
             return photo
         path = photo.get('file_path') or ''
@@ -194,7 +196,8 @@ class StorageService:
         try:
             return {**photo, 'url': cls.get_signed_url(path, cls.PHOTO_LINK_MINUTES)}
         except Exception as e:
-            logger.warning("Could not refresh photo link for %s: %s", path, e)
+            logger.warning("Could not refresh photo link for session %s: %s: %s",
+                           session_id, type(e).__name__, str(e).replace(path, '<path>'))
             return photo
 
     @classmethod
@@ -204,7 +207,7 @@ class StorageService:
             return session
         out = dict(session)
         if isinstance(out.get('photos'), list):
-            out['photos'] = [cls.with_fresh_photo_link(p) for p in out['photos']]
+            out['photos'] = [cls.with_fresh_photo_link(p, out.get('id')) for p in out['photos']]
         if isinstance(out.get('group_photo'), dict):
-            out['group_photo'] = cls.with_fresh_photo_link(out['group_photo'])
+            out['group_photo'] = cls.with_fresh_photo_link(out['group_photo'], out.get('id'))
         return out

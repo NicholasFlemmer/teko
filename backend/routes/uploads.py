@@ -1,14 +1,19 @@
 import logging
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from services.storage_service import StorageService
 from services.firebase_service import FirebaseService
 from routes.auth import token_required
+from google.api_core.exceptions import NotFound
 from datetime import datetime, timezone
 import os
 
 logger = logging.getLogger(__name__)
 
 uploads_bp = Blueprint('uploads', __name__)
+
+# Dashboard upload folders. New files go under <folder>/<org_id>/<name> so the
+# owning organisation can be read back from the path (see _file_org_id).
+ADMIN_UPLOAD_FOLDERS = {'uploads', 'photos', 'profile-pictures', 'content', 'coach-documents'}
 
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 ALLOWED_EXTENSIONS = {
@@ -50,12 +55,13 @@ def upload_file(current_user):
 
         # Get optional folder path — whitelist allowed prefixes
         folder = request.form.get('folder', 'uploads').strip()
-        ALLOWED_FOLDERS = {'uploads', 'photos', 'profile-pictures', 'content', 'coach-documents'}
-        if folder not in ALLOWED_FOLDERS:
-            return jsonify({'success': False, 'error': f'Invalid folder. Allowed: {", ".join(sorted(ALLOWED_FOLDERS))}'}), 400
+        if folder not in ADMIN_UPLOAD_FOLDERS:
+            return jsonify({'success': False, 'error': f'Invalid folder. Allowed: {", ".join(sorted(ADMIN_UPLOAD_FOLDERS))}'}), 400
 
-        # Upload to Firebase Storage
-        result = StorageService.upload_file(file, folder)
+        # Keep the owning organisation in the path so the file can later be
+        # tied back to it. A super_admin with no org uploads under 'platform'.
+        org_id = getattr(g, 'current_user_org_id', None)
+        result = StorageService.upload_file(file, f"{folder}/{org_id or 'platform'}")
 
         return jsonify({
             'success': True,
@@ -118,16 +124,53 @@ def upload_via_check_in_token(token):
         return jsonify({'success': False, 'error': 'Upload failed'}), 500
 
 
+def _file_org_id(normalized_path):
+    """The organisation that owns a storage path, or None if it can't be
+    resolved. Two shapes are recognised:
+      - team_photos/<team_id>/<file>  (WhatsApp photos): the team's org_id
+      - <admin folder>/<org_id>/<file> (dashboard uploads): the org_id segment,
+        only if it is a real organisation
+    Anything else (including old-style <folder>/<file>) resolves to None.
+    """
+    parts = normalized_path.split('/')
+    if len(parts) != 3 or not all(parts):
+        return None
+    if parts[0] == StorageService.PRIVATE_PHOTO_PREFIX.rstrip('/'):
+        team = FirebaseService.get_team(parts[1], None)
+        return (team or {}).get('org_id')
+    if parts[0] in ADMIN_UPLOAD_FOLDERS:
+        org = FirebaseService.get_organisation(parts[1])
+        return (org or {}).get('id')
+    return None
+
+
 @uploads_bp.route('/<path:file_path>', methods=['DELETE'])
 @token_required
 def delete_file(current_user, file_path):
-    """Delete a file from Firebase Storage"""
+    """Delete a file from Firebase Storage.
+
+    super_admin may delete any file. Anyone else may delete only a file whose
+    path resolves to their own organisation; another organisation's file, a
+    path that resolves to no organisation, and a missing file all get the same
+    "File not found" so nothing reveals that a file exists.
+    """
     try:
         # Prevent directory traversal — normalize and check
         normalized = os.path.normpath(file_path)
         if '..' in normalized or normalized.startswith('/') or normalized.startswith('\\'):
             return jsonify({'success': False, 'error': 'Invalid file path'}), 400
-        StorageService.delete_file(normalized)
+
+        not_found = (jsonify({'success': False, 'error': 'File not found'}), 404)
+        if getattr(g, 'current_user_role', None) != 'super_admin':
+            caller_org = getattr(g, 'current_user_org_id', None)
+            owner_org = _file_org_id(normalized)
+            if caller_org is None or owner_org is None or owner_org != caller_org:
+                return not_found
+
+        try:
+            StorageService.delete_file(normalized)
+        except NotFound:
+            return not_found
         return jsonify({'success': True, 'message': 'File deleted'}), 200
     except Exception as e:
         logger.exception("Error in delete_file")
